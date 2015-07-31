@@ -1,0 +1,11 @@
+CC       = gcc
+CPP      =
+FC       = mpif90 
+LD       = mpif90
+AR       = ar -r
+WFLAGS   = -Waliasing -Wampersand -Wc-binding-type -Wintrinsic-shadow -Wintrinsics-std -Wline-truncation -Wno-tabs -Wrealloc-lhs-all -Wtarget-lifetime -Wunderflow -Wunused-but-set-variable -Wunused-variable -Wconversion -Werror 
+DFLAGS   = -D__LIBINT -D__FFTW3 -D__LIBXC2 -D__LIBINT_MAX_AM=6 -D__LIBDERIV_MAX_AM1=5 -D__parallel -D__SCALAPACK
+FCFLAGS  = -I$(CP2KINSTALLDIR)/include -std=f2003 -fimplicit-none -ffree-form -fno-omit-frame-pointer -g -O1 -O3 -march=native -ffast-math $(PROFOPT) $(DFLAGS) $(WFLAGS)
+LDFLAGS  = -L$(CP2KINSTALLDIR)/lib $(FCFLAGS)
+CFLAGS   = $(DFLAGS) -I$(CP2KINSTALLDIR)/include -fno-omit-frame-pointer -g -O1
+LIBS     = -lxc -lderiv -lint -lscalapack -lreflapack -lrefblas -lstdc++ -lfftw3 
