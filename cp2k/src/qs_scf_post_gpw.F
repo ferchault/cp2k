@@ -2333,7 +2333,7 @@ CONTAINS
     LOGICAL :: append_cube, do_cstr_charge_cube, do_dielectric_cube, &
       do_dirichlet_bc_cube, do_kpoints, failure, has_dirichlet_bc, &
       has_implicit_ps, print_it, print_total_density, rho_r_valid, smooth, &
-      tile_cubes, write_ks, write_xc, xrd_interface
+      tile_cubes, write_ks, write_xc, xrd_interface, binary_data
     REAL(dp), ALLOCATABLE, DIMENSION(:)      :: x_glbl, x_locl, y_glbl, &
                                                 y_locl, z_glbl, z_locl
     REAL(KIND=dp)                            :: q_max, rho_hard, rho_soft, &
@@ -2627,6 +2627,7 @@ CONTAINS
              unit_nr = cp_print_key_unit_nr(logger,input,"DFT%PRINT%E_DENSITY_CUBE",&
                                             extension=".cube",middle_name=TRIM(filename),&
                                             file_position=my_pos_cube,log_filename=.FALSE.,error=error)
+
              IF (output_unit>0) THEN
                 INQUIRE (UNIT=unit_nr,NAME=filename)
                 WRITE (UNIT=output_unit,FMT="(/,T2,A,/,/,T2,A)")&
@@ -2680,6 +2681,7 @@ CONTAINS
                 CALL cp_pw_to_cube(rho_elec_rspace%pw,unit_nr,"TOTAL SPIN DENSITY",&
                      particles=particles,&
                      stride=section_get_ivals(dft_section,"PRINT%E_DENSITY_CUBE%STRIDE",error=error),&
+                     binary_data=binary_data,&
                      error=error)
              END IF
              CALL pw_pool_give_back_pw(auxbas_pw_pool,rho_elec_gspace%pw,error=error)
@@ -2704,6 +2706,7 @@ CONTAINS
                 unit_nr = cp_print_key_unit_nr(logger,input,"DFT%PRINT%E_DENSITY_CUBE",&
                                                extension=".cube",middle_name=TRIM(filename),&
                                                file_position=my_pos_cube,log_filename=.FALSE.,error=error)
+                binary_data = section_get_lval(input,"DFT%PRINT%E_DENSITY_CUBE%BINARY",error=error)
                 IF (output_unit>0) THEN
                    INQUIRE (UNIT=unit_nr,NAME=filename)
                    WRITE (UNIT=output_unit,FMT="(/,T2,A,/,/,T2,A)")&
@@ -2712,7 +2715,7 @@ CONTAINS
                 END IF
                 CALL cp_pw_to_cube(rho_elec_rspace%pw,unit_nr,"SUM OF ALPHA AND BETA DENSITY",&
                      particles=particles,stride=section_get_ivals(dft_section,"PRINT%E_DENSITY_CUBE%STRIDE",&
-                     error=error),error=error)
+                     error=error),binary_data=binary_data,error=error)
                 CALL cp_print_key_finished_output(unit_nr,logger,input,&
                                          "DFT%PRINT%E_DENSITY_CUBE",error=error)
                 CALL pw_copy(rho_r(1)%pw,rho_elec_rspace%pw, error=error)
@@ -2740,6 +2743,7 @@ CONTAINS
                 unit_nr = cp_print_key_unit_nr(logger,input,"DFT%PRINT%E_DENSITY_CUBE",&
                                                extension=".cube",middle_name=TRIM(filename),&
                                                file_position=my_pos_cube,log_filename=.FALSE.,error=error)
+                binary_data = section_get_lval(input,"DFT%PRINT%E_DENSITY_CUBE%BINARY",error=error)
                 IF (output_unit>0) THEN
                    INQUIRE (UNIT=unit_nr,NAME=filename)
                    WRITE (UNIT=output_unit,FMT="(/,T2,A,/,/,T2,A)")&
@@ -2749,7 +2753,7 @@ CONTAINS
                 CALL cp_pw_to_cube(rho_r(1)%pw,unit_nr,"ELECTRON DENSITY",&
                      particles=particles,&
                      stride=section_get_ivals(dft_section,"PRINT%E_DENSITY_CUBE%STRIDE",error=error),&
-                     error=error)
+                     binary_data=binary_data,error=error)
                 CALL cp_print_key_finished_output(unit_nr,logger,input,&
                                                   "DFT%PRINT%E_DENSITY_CUBE",&
                                                   error=error)

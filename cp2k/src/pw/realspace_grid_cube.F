@@ -42,7 +42,7 @@ CONTAINS
 !> \param zero_tails ...
 !> \param error ...
 ! *****************************************************************************
-  SUBROUTINE pw_to_cube ( pw, unit_nr, title, particles_r, particles_z, stride, zero_tails, error )
+  SUBROUTINE pw_to_cube ( pw, unit_nr, title, particles_r, particles_z, stride, binary_data, zero_tails, error )
     TYPE(pw_type), POINTER                   :: pw
     INTEGER, INTENT(IN)                      :: unit_nr
     CHARACTER(*), INTENT(IN), OPTIONAL       :: title
@@ -51,6 +51,7 @@ CONTAINS
     INTEGER, DIMENSION(:), INTENT(IN), &
       OPTIONAL                               :: particles_z
     INTEGER, DIMENSION(:), OPTIONAL, POINTER :: stride
+    LOGICAL, INTENT(IN), OPTIONAL            :: binary_data
     LOGICAL, INTENT(IN), OPTIONAL            :: zero_tails
     TYPE(cp_error_type), INTENT(inout)       :: error
 
@@ -61,6 +62,9 @@ CONTAINS
       L3, my_rank, my_stride(3), np, num_pe, rank(2), source, stat, tag, U1, &
       U2, U3
     LOGICAL                                  :: failure, my_zero_tails
+    LOGICAL                                  :: my_binary_data
+    INTEGER                                  :: binary_chunk_size
+    CHARACTER(LEN=20)                        :: binary_format
     REAL(KIND=dp), ALLOCATABLE, DIMENSION(:) :: buf
 
     CALL timeset(routineN,handle)
@@ -85,6 +89,17 @@ CPSourceFileRef,&
        CPPrecondition(my_stride(2)>0,cp_failure_level,routineP,error,failure)
        CPPrecondition(my_stride(3)>0,cp_failure_level,routineP,error,failure)
     END IF
+
+    ! prepare binary voxel output
+    my_binary_data = .FALSE.
+    IF(PRESENT(binary_data)) THEN
+        my_binary_data = binary_data
+        inquire(unit=unit_nr, recl=binary_chunk_size)
+        IF(binary_chunk_size .LE. 0) THEN
+            binary_chunk_size = 6
+        ENDIF
+        WRITE(binary_format, '(a,I0,a)') '(',binary_chunk_size,'a)'
+    ENDIF
 
     IF (unit_nr>0) THEN
       ! this format seems to work for e.g. molekel and gOpenmol
@@ -121,6 +136,9 @@ CPSourceFileRef,&
          DO iat=1,np
             WRITE(unit_nr,'(I5,4f12.6)') particles_z(iat),0._dp,particles_r(:,iat)
          END DO
+      END IF
+      IF(my_binary_data) THEN
+         WRITE(unit_nr, '(a11,I3,I3)') "BINARYVOXEL", 4, binary_chunk_size
       END IF
     ENDIF
 
@@ -187,7 +205,11 @@ CPSourceFileRef,&
              IF(buf(I3)<1.E-7_dp) buf(I3) = 0.0_dp
            END DO
          END IF
-         WRITE(unit_nr,'(6E13.5)') (buf(I3),I3=L3,U3,my_stride(3))
+         IF(my_binary_data) THEN
+           WRITE(unit_nr,binary_format) (REAL(buf(I3)),I3=L3,U3,my_stride(3))
+         ELSE
+           WRITE(unit_nr,'(6E13.5)') (buf(I3),I3=L3,U3,my_stride(3))
+         END IF
        ENDIF
 
        ! this double loop generates so many messages that it can overload

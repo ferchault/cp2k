@@ -1395,12 +1395,19 @@ CONTAINS
        CALL keyword_release(keyword,error=error)
 
        CALL keyword_create(keyword, name="XRD_INTERFACE",&
-            description="It activates the print out of exponents and coefficients for the "//&
+            description="It activates the print out of exponents and coefficients for the"//&
            " Gaussian expansion of the core densities, based on atom calculations for each kind."//&
-           " The resulting core dansities are needed to compute the form factors."//&
+           " The resulting core densities are needed to compute the form factors."//&
            " If GAPW the local densities are also given in terms of a Gaussian expansion,"//&
            " by fitting the difference between local-fhard and local-soft density for each atom."//&
            " In this case the keyword TOTAL_DENSITY is set to FALSE",&
+            default_l_val=.FALSE., lone_keyword_l_val=.TRUE.,error=error)
+       CALL section_add_keyword(print_key,keyword,error=error)
+       CALL keyword_release(keyword,error=error)
+
+       CALL keyword_create(keyword, name="BINARY",&
+            description="Writes the voxel part of the cube files in binary "//&
+            " representation for storage efficiency.",&
             default_l_val=.FALSE., lone_keyword_l_val=.TRUE.,error=error)
        CALL section_add_keyword(print_key,keyword,error=error)
        CALL keyword_release(keyword,error=error)
