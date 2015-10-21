@@ -3,9 +3,10 @@ CPP      =
 FC       = gfortran 
 LD       = gfortran
 AR       = ar -r
-WFLAGS   = -Waliasing -Wampersand -Wc-binding-type -Wintrinsic-shadow -Wintrinsics-std -Wline-truncation -Wno-tabs -Wrealloc-lhs-all -Wtarget-lifetime -Wunderflow -Wunused-but-set-variable -Wunused-variable -Wconversion -Werror
+WFLAGS   = -Waliasing -Wampersand -Wc-binding-type -Wintrinsic-shadow -Wintrinsics-std -Wline-truncation -Wno-tabs -Wtarget-lifetime -Wunderflow -Wunused-but-set-variable -Wunused-variable -Wconversion -Werror 
 DFLAGS   = -D__LIBINT -D__FFTW3 -D__LIBXC2 -D__LIBINT_MAX_AM=6 -D__LIBDERIV_MAX_AM1=5
-FCFLAGS  = -I$(CP2KINSTALLDIR)/include -std=f2003 -fimplicit-none -ffree-form -fno-omit-frame-pointer -g -O1 -O3 -march=native -ffast-math $(PROFOPT) $(DFLAGS) $(WFLAGS)
-LDFLAGS  = -L$(CP2KINSTALLDIR)/lib/ $(FCFLAGS)
-CFLAGS   = $(DFLAGS) -I$(CP2KINSTALLDIR)/include -fno-omit-frame-pointer -g -O1
-LIBS     = -lxc -lderiv -lint -lreflapack -lrefblas -lstdc++ -lfftw3
+FCFLAGS  = -I /scratch/grudorff/modules/libs/libxc-2.2.2/include $(CFLAGS) -std=f2003 -fimplicit-none -ffree-form -fno-omit-frame-pointer -g -O2 -march=native -ffast-math $(PROFOPT) $(DFLAGS) $(WFLAGS)
+LDFLAGS  =  $(FCFLAGS)
+CFLAGS   =  $(DFLAGS)  -fno-omit-frame-pointer -g -O1
+LIBS     = -lreflapack -lrefblas -lfftw3 -lxcf90 -lxc -lderiv -lint -lstdc++
+
