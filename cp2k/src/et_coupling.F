@@ -248,6 +248,10 @@ CONTAINS
     S_mat(2,1)=Sda
     S_mat(1,2)=Sda
 
+    IF (iw>0) THEN
+      WRITE(iw,'(/,(T3,A,T60,(3X,F12.6)))') 'Sda                               :',Sda
+    ENDIF
+
     W_mat(1,1)=Wbb
     W_mat(2,2)=Waa
     W_mat(2,1)=Wda

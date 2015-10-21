@@ -443,6 +443,18 @@ CONTAINS
          WRITE (UNIT=output_unit,FMT="(/,(T3,A,T56,F25.14))")&
             "Total energy:                                  ",energy%total
        END IF
+       IF (dft_control%qs_control%becke_restraint) THEN
+         WRITE (UNIT=output_unit,FMT="(/,(T3,A,T56,F25.14))") "Lagrange Multiplier:                           ", &
+            dft_control%qs_control%becke_control%strength
+         WRITE (UNIT=output_unit,FMT="(T3,A,T56,F25.14)") "Order Parameter (charge):                      ", &
+            dft_control%qs_control%becke_control%becke_order_p
+       END IF
+       IF (dft_control%qs_control%ddapc_restraint) THEN
+         WRITE (UNIT=output_unit,FMT="(/,(T3,A,T56,F25.14))") "Lagrange Multiplier:                           ", &
+            dft_control%qs_control%ddapc_restraint_control(1)%ddapc_restraint_control%strength
+         WRITE (UNIT=output_unit,FMT="(T3,A,T56,F25.14)") "Order Parameter (charge):                      ", &
+            dft_control%qs_control%ddapc_restraint_control(1)%ddapc_restraint_control%ddapc_order_p
+       END IF
       IF (qmmm) THEN
           IF(qs_env%qmmm_env_qm%image_charge) THEN
             CALL print_image_coefficients(qs_env%image_coeff,qs_env,error)
