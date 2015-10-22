@@ -28,6 +28,8 @@
 MODULE cp_array_sort_i8
    
   USE kinds,                           ONLY: int_8
+#include "cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -56,15 +58,14 @@ SUBROUTINE cp_1d_i8_sort(arr, n, indices)
       INTENT(inout)                          :: arr
     INTEGER, DIMENSION(1:n), INTENT(out)     :: indices
 
-    INTEGER                                  :: i, stat
+    INTEGER                                  :: i
     INTEGER(kind=int_8), POINTER             :: tmp_arr(:)
     INTEGER, POINTER                         :: tmp_idx(:)
 
    IF(n == 0) RETURN ! for some reason this is a frequent case in cp2k
    
    ! scratch space used during the merge step
-   ALLOCATE(tmp_arr((SIZE(arr)+1)/2), tmp_idx((SIZE(arr)+1)/2), stat=stat)
-   IF(stat /= 0) STOP "cp_1d_i8_sort: allocation failed"
+   ALLOCATE(tmp_arr((SIZE(arr)+1)/2), tmp_idx((SIZE(arr)+1)/2))
    
    indices = (/ (i, i = 1, SIZE(arr)) /)
    

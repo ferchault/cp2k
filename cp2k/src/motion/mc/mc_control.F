@@ -50,11 +50,9 @@ MODULE mc_control
                                              rng_stream_type
   USE particle_list_types,             ONLY: particle_list_type
   USE physcon,                         ONLY: angstrom
-  USE termination,                     ONLY: stop_memory,&
-                                             stop_program
-  USE timings,                         ONLY: timeset,&
-                                             timestop
+  USE termination,                     ONLY: stop_memory
 #include "../../common/cp_common_uses.f90"
+#include "../../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -100,7 +98,6 @@ CONTAINS
     REAL(KIND=dp), DIMENSION(1:3)            :: abc
     TYPE(atom_type), DIMENSION(:), POINTER   :: atom_list
     TYPE(cell_type), POINTER                 :: cell
-    TYPE(cp_error_type)                      :: error
     TYPE(cp_subsys_type), POINTER            :: subsys
     TYPE(mol_kind_new_list_type), POINTER    :: molecule_kinds_new
     TYPE(molecule_kind_type), POINTER        :: molecule_kind
@@ -117,12 +114,11 @@ CONTAINS
          file_action='WRITE',file_status='REPLACE')
 
     ! get the cell length and coordinates
-    CALL force_env_get(force_env,cell=cell,subsys=subsys,&
-         error=error)
+    CALL force_env_get(force_env,cell=cell,subsys=subsys)
     CALL get_cell(cell,abc=abc)
     CALL cp_subsys_get(subsys, &
          molecule_kinds_new=molecule_kinds_new,&
-         particles=particles, error=error)
+         particles=particles)
 
     nunits_tot=SIZE(particles%els(:))
     IF(SUM(nchains(:)) == 0) nunits_tot=0
@@ -201,7 +197,6 @@ CONTAINS
       DIMENSION(:, :)                        :: r
     REAL(KIND=dp), DIMENSION(1:3)            :: abc, box_length
     TYPE(cell_type), POINTER                 :: cell
-    TYPE(cp_error_type)                      :: error
     TYPE(cp_subsys_type), POINTER            :: subsys
     TYPE(mc_input_file_type), POINTER        :: mc_input_file
     TYPE(mc_molecule_info_type), POINTER     :: mc_molecule_info
@@ -247,8 +242,7 @@ CONTAINS
           WRITE(iw,*) 'Input file temperature =',mc_temp
           WRITE(iw,*) 'Restart file temperature =',temperature
        ENDIF
-       CALL stop_program(routineN,moduleN,__LINE__,&
-            "Temperature difference between restart and input")
+       CPABORT("Temperature difference between restart and input")
     ENDIF
     IF(nunits_tot .NE. mc_nunits_tot) THEN
        IF(ionode) THEN
@@ -266,16 +260,14 @@ CONTAINS
           WRITE(iw,*) 'Input file ensemble =',mc_ensemble
           WRITE(iw,*) 'Restart file ensemble =',ensemble
        ENDIF
-       CALL stop_program(routineN,moduleN,__LINE__,&
-            "Ensembles different between restart and input")
+       CPABORT("Ensembles different between restart and input")
     ENDIF
 
     ! get the cell length and coordinates
-    CALL force_env_get(force_env,cell=cell,subsys=subsys,&
-         error=error)
+    CALL force_env_get(force_env,cell=cell,subsys=subsys)
     CALL get_cell(cell,abc=abc)
     CALL cp_subsys_get(subsys, &
-         particles=particles, error=error)
+         particles=particles)
 
     IF(ionode) THEN
        READ(unit,*)  box_length(1:3) ! in angstroms
@@ -341,7 +333,7 @@ CONTAINS
     ! advance the random number sequence based on the restart step
     IF(ionode) THEN
        DO i=1,nstart+1
-          rand=next_random_number(rng_stream,error=error)
+          rand=next_random_number(rng_stream)
        ENDDO
     ENDIF
 
@@ -363,13 +355,11 @@ CONTAINS
 !> \param para_env ...
 !> \param input_file_name ...
 !> \param globenv_new the global environment parameters
-!> \param error the CP error structure
-!>
 !> \author MJM
 !> \note   Suitable for parallel.
 ! *****************************************************************************
   SUBROUTINE mc_create_force_env ( force_env, input_declaration, para_env, input_file_name,&
-       globenv_new, error )
+       globenv_new)
 
     TYPE(force_env_type), POINTER            :: force_env
     TYPE(section_type), POINTER              :: input_declaration
@@ -377,18 +367,15 @@ CONTAINS
     CHARACTER(LEN=*), INTENT(IN)             :: input_file_name
     TYPE(global_environment_type), &
       OPTIONAL, POINTER                      :: globenv_new
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'mc_create_force_env', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: f_env_id, ierr, output_unit
     LOGICAL                                  :: failure
-    TYPE(cp_error_type)                      :: new_error
     TYPE(f_env_type), POINTER                :: f_env
 
-    failure= .FALSE.
-
+    failure = .FALSE.
     output_unit = cp_logger_get_default_unit_nr()
     CALL create_force_env(f_env_id, &
                           input_declaration=input_declaration,&
@@ -396,16 +383,16 @@ CONTAINS
                           output_unit=output_unit,&
                           mpi_comm=para_env%group)
 
-    CALL f_env_add_defaults(f_env_id, f_env, new_error, failure)
-    IF(failure) STOP "mc_create_force_env: f_env_add_defaults failed"
+    CALL f_env_add_defaults(f_env_id, f_env,failure)
+    IF(failure) CPABORT("mc_create_force_env: f_env_add_defaults failed")
     force_env => f_env%force_env
-    CALL force_env_retain(force_env, error)
-    CALL f_env_rm_defaults(f_env, new_error)
+    CALL force_env_retain(force_env)
+    CALL f_env_rm_defaults(f_env)
     CALL destroy_force_env(f_env_id, ierr)
-    IF(ierr/=0) STOP "mc_create_force_env: destroy_force_env failed"
+    IF(ierr/=0) CPABORT("mc_create_force_env: destroy_force_env failed")
 
     IF(PRESENT(globenv_new)) &
-        CALL force_env_get(force_env, globenv=globenv_new, error=error)
+        CALL force_env_get(force_env, globenv=globenv_new)
 
   END SUBROUTINE mc_create_force_env
 
@@ -422,13 +409,11 @@ CONTAINS
 !> \param input_declaration ...
 !> \param mc_input_file ...
 !> \param ionode ...
-!> \param error the CP error structure
-!>
 !> \author MJM
 !> \note   Suitable for parallel.
 ! *****************************************************************************
   SUBROUTINE mc_create_bias_force_env (bias_env,r,atom_symbols,nunits_tot,&
-       para_env, box_length,nchains,input_declaration,mc_input_file,ionode,error)
+       para_env, box_length,nchains,input_declaration,mc_input_file,ionode)
 
     TYPE(force_env_type), POINTER            :: bias_env
     REAL(dp), DIMENSION(:, :), INTENT(INOUT) :: r
@@ -442,7 +427,6 @@ CONTAINS
     TYPE(section_type), POINTER              :: input_declaration
     TYPE(mc_input_file_type), POINTER        :: mc_input_file
     LOGICAL, INTENT(IN)                      :: ionode
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'mc_create_bias_force_env', &
       routineP = moduleN//':'//routineN
@@ -451,7 +435,7 @@ CONTAINS
          CALL mc_make_dat_file_new(r(:,:),atom_symbols,nunits_tot,&
          box_length(:),'bias_temp.dat',nchains(:),mc_input_file)
 
-    CALL mc_create_force_env(bias_env,input_declaration, para_env, 'bias_temp.dat',error=error)
+    CALL mc_create_force_env(bias_env,input_declaration, para_env, 'bias_temp.dat')
 
   END SUBROUTINE mc_create_bias_force_env
 

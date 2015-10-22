@@ -12,6 +12,7 @@ MODULE ps_wavelet_types
   
   USE kinds,                           ONLY: dp
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -47,27 +48,20 @@ CONTAINS
 ! *****************************************************************************
 !> \brief ...
 !> \param wavelet ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE ps_wavelet_release(wavelet,error)
+  SUBROUTINE ps_wavelet_release(wavelet)
 
     TYPE(ps_wavelet_type), POINTER           :: wavelet
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'ps_wavelet_release', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF (ASSOCIATED(wavelet)) THEN
-          IF (ASSOCIATED(wavelet%karray))&
-               DEALLOCATE(wavelet%karray)
-          IF(ASSOCIATED(wavelet%rho_z_sliced))&
-               DEALLOCATE(wavelet%rho_z_sliced)
-          DEALLOCATE(wavelet)
-       END IF
+    IF (ASSOCIATED(wavelet)) THEN
+       IF (ASSOCIATED(wavelet%karray))&
+            DEALLOCATE(wavelet%karray)
+       IF(ASSOCIATED(wavelet%rho_z_sliced))&
+            DEALLOCATE(wavelet%rho_z_sliced)
+       DEALLOCATE(wavelet)
     END IF
   END SUBROUTINE ps_wavelet_release
 

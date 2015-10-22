@@ -8,6 +8,7 @@
 MODULE exclusion_types
 
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
   IMPLICIT NONE
   PRIVATE
 
@@ -32,46 +33,37 @@ CONTAINS
 ! *****************************************************************************
 !> \brief Release exclusion type
 !> \param exclusions ...
-!> \param error ...
 !> \par History
 !>      12.2010 created [Teodoro Laino] - teodoro.laino@gmail.com
 !> \author teo
 ! *****************************************************************************
- SUBROUTINE exclusion_release(exclusions, error)
+ SUBROUTINE exclusion_release(exclusions)
     TYPE(exclusion_type), DIMENSION(:), &
       POINTER                                :: exclusions
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'exclusion_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: iatom, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: iatom
 
-   failure=.FALSE.
    IF (ASSOCIATED(exclusions)) THEN
       DO iatom=1,SIZE(exclusions)
          IF (ASSOCIATED(exclusions(iatom)%list_exclude_vdw,&
               exclusions(iatom)%list_exclude_ei)) THEN
-            DEALLOCATE(exclusions(iatom)%list_exclude_vdw,STAT=stat)
-            CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+            DEALLOCATE(exclusions(iatom)%list_exclude_vdw)
          ELSE
             IF (ASSOCIATED(exclusions(iatom)%list_exclude_vdw)) THEN
-               DEALLOCATE(exclusions(iatom)%list_exclude_vdw,STAT=stat)
-               CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+               DEALLOCATE(exclusions(iatom)%list_exclude_vdw)
             END IF
             IF (ASSOCIATED(exclusions(iatom)%list_exclude_ei)) THEN
-               DEALLOCATE(exclusions(iatom)%list_exclude_ei,STAT=stat)
-               CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+               DEALLOCATE(exclusions(iatom)%list_exclude_ei)
             END IF
          ENDIF
          IF (ASSOCIATED(exclusions(iatom)%list_onfo)) THEN
-           DEALLOCATE(exclusions(iatom)%list_onfo,stat=stat)
-           CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+           DEALLOCATE(exclusions(iatom)%list_onfo)
          ENDIF
       ENDDO
-      DEALLOCATE(exclusions,stat=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      DEALLOCATE(exclusions)
    ENDIF
  END SUBROUTINE exclusion_release
 

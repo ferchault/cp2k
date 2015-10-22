@@ -30,12 +30,12 @@ MODULE qmmm_se_energy
        do_method_am1, do_method_mndo, do_method_mndod, do_method_pchg, &
        do_method_pdg, do_method_pm3, do_method_pm6, do_method_pnnl, &
        do_method_rm1, do_qmmm_coulomb, do_qmmm_gauss, do_qmmm_none, &
-       do_qmmm_pcharge, do_qmmm_swave, use_orb_basis_set
+       do_qmmm_pcharge, do_qmmm_swave
   USE kinds,                           ONLY: dp
   USE message_passing,                 ONLY: mp_sum
   USE multipole_types,                 ONLY: do_multipole_none
   USE particle_types,                  ONLY: particle_type
-  USE qmmm_types,                      ONLY: qmmm_env_qm_type,&
+  USE qmmm_types_low,                  ONLY: qmmm_env_qm_type,&
                                              qmmm_pot_p_type,&
                                              qmmm_pot_type
   USE qmmm_util,                       ONLY: spherical_cutoff_factor
@@ -62,10 +62,8 @@ MODULE qmmm_se_energy
                                              setup_se_int_control_type
   USE semi_empirical_utils,            ONLY: get_se_type,&
                                              se_param_set_default
-  USE termination,                     ONLY: stop_program
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -84,10 +82,9 @@ CONTAINS
 !> \param particles_mm ...
 !> \param mm_cell ...
 !> \param para_env ...
-!> \param error ...
 !> \author Teodoro Laino 04.2007 [created]
 ! *****************************************************************************
-  SUBROUTINE build_se_qmmm_matrix(qs_env,qmmm_env,particles_mm,mm_cell,para_env,error)
+  SUBROUTINE build_se_qmmm_matrix(qs_env,qmmm_env,particles_mm,mm_cell,para_env)
 
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(qmmm_env_qm_type), POINTER          :: qmmm_env
@@ -95,16 +92,15 @@ CONTAINS
       POINTER                                :: particles_mm
     TYPE(cell_type), POINTER                 :: mm_cell
     TYPE(cp_para_env_type), POINTER          :: para_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'build_se_qmmm_matrix', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, i, iatom, ikind, &
                                                 itype, iw, natom, natorb_a, &
-                                                nkind, stat
+                                                nkind
     INTEGER, DIMENSION(:), POINTER           :: list
-    LOGICAL                                  :: anag, defined, failure, found
+    LOGICAL                                  :: anag, defined, found
     REAL(KIND=dp)                            :: enuclear
     REAL(KIND=dp), DIMENSION(:, :), POINTER  :: h_block_a
     TYPE(atomic_kind_type), DIMENSION(:), &
@@ -126,37 +122,33 @@ CONTAINS
     TYPE(se_taper_type), POINTER             :: se_taper
     TYPE(semi_empirical_type), POINTER       :: se_kind_a, se_kind_mm
 
-    failure = .FALSE.
     CALL timeset(routineN,handle)
     NULLIFY(logger)
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
 
     NULLIFY (matrix_s, atomic_kind_set, qs_kind_set, energy)
     NULLIFY (se_kind_a, se_kind_mm, se_taper, particles_qm, ks_env, sab_orb)
-    CALL build_qs_neighbor_lists(qs_env,para_env,force_env_section=qs_env%input,error=error)
+    CALL build_qs_neighbor_lists(qs_env,para_env,force_env_section=qs_env%input)
     CALL get_qs_env(qs_env,&
                     ks_env=ks_env,&
                     matrix_s=matrix_s,&
                     energy=energy,&
-                    sab_orb=sab_orb,&
-                    error=error)
+                    sab_orb=sab_orb)
 
     CALL build_overlap_matrix(ks_env,matrix_s=matrix_s,&
                               matrix_name="OVERLAP",&
-                              basis_set_id_a=use_orb_basis_set,&
-                              basis_set_id_b=use_orb_basis_set, &
-                              sab_nl=sab_orb,&
-                              error=error)
+                              basis_type_a="ORB",&
+                              basis_type_b="ORB", &
+                              sab_nl=sab_orb)
 
-    CALL set_ks_env(ks_env,matrix_s=matrix_s,error=error)
+    CALL set_ks_env(ks_env,matrix_s=matrix_s)
     CALL get_qs_env(qs_env=qs_env,&
                     se_taper=se_taper,&
                     atomic_kind_set=atomic_kind_set,&
                     qs_kind_set=qs_kind_set,&
                     ks_qmmm_env=ks_qmmm_env_loc,&
                     dft_control=dft_control,&
-                    particle_set=particles_qm,&
-                    error=error)
+                    particle_set=particles_qm)
 
     SELECT CASE (dft_control%qs_control%method_id)
     CASE (do_method_am1,do_method_rm1,do_method_mndo,do_method_pdg,&
@@ -164,8 +156,7 @@ CONTAINS
        ! Go on with the calculation..
     CASE DEFAULT
        ! Otherwise stop..
-       CALL stop_program(routineN,moduleN,__LINE__,&
-            "Method not available",para_env)
+       CPABORT("Method not available")
     END SELECT
     anag = dft_control%qs_control%se_control%analytical_gradients
     ! Setup type for SE integral control
@@ -174,21 +165,20 @@ CONTAINS
          max_multipole=do_multipole_none, pc_coulomb_int=.FALSE.)
 
     ! Allocate the core Hamiltonian matrix
-    CALL cp_dbcsr_allocate_matrix_set(ks_qmmm_env_loc%matrix_h,1,error=error)
-    ALLOCATE(ks_qmmm_env_loc%matrix_h(1)%matrix, STAT=stat)
-    CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+    CALL cp_dbcsr_allocate_matrix_set(ks_qmmm_env_loc%matrix_h,1)
+    ALLOCATE(ks_qmmm_env_loc%matrix_h(1)%matrix)
 
-    CALL cp_dbcsr_init(ks_qmmm_env_loc%matrix_h(1)%matrix,error)
+    CALL cp_dbcsr_init(ks_qmmm_env_loc%matrix_h(1)%matrix)
 
     CALL cp_dbcsr_copy(ks_qmmm_env_loc%matrix_h(1)%matrix,matrix_s(1)%matrix,&
-                    name="QMMM HAMILTONIAN MATRIX",error=error)
-    CALL cp_dbcsr_set(ks_qmmm_env_loc%matrix_h(1)%matrix,0.0_dp,error)
+                    name="QMMM HAMILTONIAN MATRIX")
+    CALL cp_dbcsr_set(ks_qmmm_env_loc%matrix_h(1)%matrix,0.0_dp)
 
     SELECT CASE(qmmm_env%qmmm_coupl_type)
     CASE(do_qmmm_coulomb,do_qmmm_gauss,do_qmmm_swave,do_qmmm_pcharge)
        ! Create a fake semi-empirical type to handle the classical atom
-       CALL semi_empirical_create(se_kind_mm,error)
-       CALL se_param_set_default(se_kind_mm,0,do_method_pchg,error)
+       CALL semi_empirical_create(se_kind_mm)
+       CALL se_param_set_default(se_kind_mm,0,do_method_pchg)
        itype    = get_se_type(se_kind_mm%typ)
        nkind    = SIZE(atomic_kind_set)
        enuclear = 0.0_dp
@@ -224,8 +214,7 @@ CONTAINS
                                               se_int_control,&
                                               anag,&
                                               qmmm_env%spherical_cutoff,&
-                                              particles_qm,&
-                                              error)
+                                              particles_qm)
                 ! Possibly added charges
                 IF (qmmm_env%move_mm_charges.OR.qmmm_env%add_mm_charges) THEN
                    CALL build_se_qmmm_matrix_low(h_block_a,&
@@ -243,27 +232,26 @@ CONTAINS
                                                  se_int_control,&
                                                  anag,&
                                                  qmmm_env%spherical_cutoff,&
-                                                 particles_qm,&
-                                                 error)
+                                                 particles_qm)
                 END IF
              END IF
           END DO Atoms
        END DO Kinds
        CALL mp_sum(enuclear,para_env%group)
        energy%qmmm_nu = enuclear
-       CALL semi_empirical_release(se_kind_mm,error)
+       CALL semi_empirical_release(se_kind_mm)
     CASE(do_qmmm_none)
        ! Zero Matrix
-       CALL cp_dbcsr_set(ks_qmmm_env_loc%matrix_h(1)%matrix,0.0_dp,error=error)
+       CALL cp_dbcsr_set(ks_qmmm_env_loc%matrix_h(1)%matrix,0.0_dp)
     END SELECT
     IF (BTEST(cp_print_key_should_output(logger%iter_info,&
-         qs_env%input,"QMMM%PRINT%QMMM_MATRIX",error=error),cp_p_file)) THEN
+         qs_env%input,"QMMM%PRINT%QMMM_MATRIX"),cp_p_file)) THEN
        iw = cp_print_key_unit_nr(logger,qs_env%input,"QMMM%PRINT%QMMM_MATRIX",&
-            extension=".Log",error=error)
+            extension=".Log")
        CALL cp_dbcsr_write_sparse_matrix(ks_qmmm_env_loc%matrix_h(1)%matrix,4,6,qs_env,para_env,&
-            scale=1.0_dp,output_unit=iw,error=error)
+            scale=1.0_dp,output_unit=iw)
        CALL cp_print_key_finished_output(iw,logger,qs_env%input,&
-            "QMMM%PRINT%QMMM_MATRIX", error=error)
+            "QMMM%PRINT%QMMM_MATRIX")
     END IF
 
     CALL timestop(handle)
@@ -288,13 +276,12 @@ CONTAINS
 !> \param anag ...
 !> \param qmmm_spherical_cutoff ...
 !> \param particles_qm ...
-!> \param error ...
 !> \author Teodoro Laino 04.2007 [created]
 ! *****************************************************************************
   SUBROUTINE build_se_qmmm_matrix_low(h_block_a, se_kind_a, se_kind_mm, potentials,&
        particles_mm, mm_charges, mm_atom_index,&
        mm_cell, IndQM, enuclear, itype, se_taper, se_int_control, anag, &
-       qmmm_spherical_cutoff, particles_qm, error)
+       qmmm_spherical_cutoff, particles_qm)
 
     REAL(KIND=dp), DIMENSION(:, :), POINTER  :: h_block_a
     TYPE(semi_empirical_type), POINTER       :: se_kind_a, se_kind_mm
@@ -314,7 +301,6 @@ CONTAINS
     REAL(KIND=dp), INTENT(IN)                :: qmmm_spherical_cutoff(2)
     TYPE(particle_type), DIMENSION(:), &
       POINTER                                :: particles_qm
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'build_se_qmmm_matrix_low', &
       routineP = moduleN//':'//routineN
@@ -344,14 +330,14 @@ CONTAINS
           se_kind_mm%zeff = mm_charges(Imm)
           ! Computes the screening factor for the spherical cutoff (if defined)
           IF (qmmm_spherical_cutoff(1)>0.0_dp) THEN
-             CALL spherical_cutoff_factor(qmmm_spherical_cutoff, rij, sph_chrg_factor, error)
+             CALL spherical_cutoff_factor(qmmm_spherical_cutoff, rij, sph_chrg_factor)
              se_kind_mm%zeff = se_kind_mm%zeff * sph_chrg_factor
           END IF
           IF (ABS(se_kind_mm%zeff)<=EPSILON(0.0_dp)) CYCLE
           CALL rotnuc (se_kind_a, se_kind_mm, rij, itype=itype, e1b=e1b, anag=anag,&
-               se_int_control=se_int_control, se_taper=se_taper, error=error)
+               se_int_control=se_int_control, se_taper=se_taper)
           CALL corecore(se_kind_a, se_kind_mm, rij, itype=itype, enuc=enuc, anag=anag,&
-               se_int_control=se_int_control, se_taper=se_taper, error=error)
+               se_int_control=se_int_control, se_taper=se_taper)
           enuclear = enuclear + enuc
           ! Contribution to the iatom block
           ! Computation of the QMMM core matrix

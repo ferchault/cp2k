@@ -42,8 +42,6 @@ MODULE tmc_setup
                                              delete_rng_stream
   USE physcon,                         ONLY: au2a => angstrom,&
                                              au2bar => bar
-  USE timings,                         ONLY: timeset,&
-                                             timestop
   USE tmc_analysis,                    ONLY: analysis_init,&
                                              analysis_restart_print,&
                                              analysis_restart_read,&
@@ -77,6 +75,7 @@ MODULE tmc_setup
                                              get_atom_kinds_and_cell,&
                                              get_initial_conf
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -94,38 +93,34 @@ CONTAINS
 !> \param root_section ...
 !> \param para_env ...
 !> \param globenv the global environment for the simulation
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 11.2012
 ! *****************************************************************************
-  SUBROUTINE do_tmc (input_declaration, root_section, para_env, globenv, error )
+  SUBROUTINE do_tmc (input_declaration, root_section, para_env, globenv)
     TYPE(section_type), POINTER              :: input_declaration
     TYPE(section_vals_type), POINTER         :: root_section
     TYPE(cp_para_env_type), POINTER          :: para_env
     TYPE(global_environment_type), POINTER   :: globenv
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'do_tmc', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: bcast_output_unit, handle, i, &
                                                 ierr, output_unit
-    LOGICAL                                  :: failure, success
+    LOGICAL                                  :: success
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :)                        :: init_rng_seed
-    TYPE(cp_error_type)                      :: error_sub
     TYPE(cp_logger_type), POINTER            :: logger, logger_sub
     TYPE(section_vals_type), POINTER         :: tmc_ana_section
     TYPE(tmc_ana_list_type), DIMENSION(:), &
       POINTER                                :: tmc_ana_env_list
     TYPE(tmc_env_type), POINTER              :: tmc_env
 
-    failure = .FALSE.
-    ! start the timing
+! start the timing
+
     CALL timeset(routineN,handle)
 
     NULLIFY(logger, logger_sub, tmc_env, tmc_ana_env_list)
-    logger=>cp_error_get_logger(error)
+    logger=>cp_get_default_logger()
     output_unit= cp_logger_get_default_io_unit(logger)
 
     ! write header, on the 'rank 0' of the global communicator
@@ -138,31 +133,34 @@ CONTAINS
     IF (output_unit .NE. default_output_unit .AND. output_unit .GT.0) THEN
       WRITE (UNIT=output_unit,FMT="(/,T2,A)") REPEAT("-",79)
       WRITE (UNIT=output_unit,FMT="(/,T2,A)") "The TMC output files are:"
-      WRITE (UNIT=output_unit,FMT="(/,T2,A)") "tmc_master.out           the TMC master"
-      WRITE (UNIT=output_unit,FMT="(/,T2,A)") "tmc_E_worker_*.out       the worker outputs (energy calculations etc.)"
-      WRITE (UNIT=output_unit,FMT="(/,T2,A)") "tmc_ana.out              the analysis output"
+      WRITE (UNIT=output_unit,FMT="(/,T2,A)") &
+            TRIM(tmc_master_out_file_name)//"           the TMC master"
+      WRITE (UNIT=output_unit,FMT="(/,T2,A)") &
+            TRIM(tmc_energy_worker_out_file_name)//"         the worker outputs (energy calculations etc.)"
+      WRITE (UNIT=output_unit,FMT="(/,T2,A)") &
+            TRIM(tmc_ana_out_file_name)//"              the analysis output"
       WRITE (UNIT=output_unit,FMT="(/,T2,A)") REPEAT("-",79)
     END IF
     bcast_output_unit=output_unit
     CALL mp_bcast(bcast_output_unit,para_env%source,para_env%group)
 
     ! create tmc_env
-    CALL tmc_env_create(tmc_env, error)
-    CALL tmc_preread_input(root_section,tmc_env,error=error)
+    CALL tmc_env_create(tmc_env)
+    CALL tmc_preread_input(root_section,tmc_env)
     CALL tmc_redistributing_cores(tmc_env%tmc_comp_set, para_env, &
                                   ana_on_the_fly=tmc_env%tmc_comp_set%ana_on_the_fly, &
-                                  success=success, error=error)
+                                  success=success)
 
     IF(success) THEN
       ! initialize master and worker environment
       IF(tmc_env%tmc_comp_set%group_nr.EQ.0) THEN
-        CALL tmc_master_env_create(tmc_env, error) ! create master env
+        CALL tmc_master_env_create(tmc_env) ! create master env
       ELSE IF(tmc_env%tmc_comp_set%group_nr.NE.0) THEN
-        CALL tmc_worker_env_create(tmc_env, error) ! create worker env
+        CALL tmc_worker_env_create(tmc_env) ! create worker env
       END IF
   
-      CALL tmc_read_input(root_section,tmc_env,error=error)
-      !CALL init_move_types(tmc_params=tmc_env%params, error=error)
+      CALL tmc_read_input(root_section,tmc_env)
+      !CALL init_move_types(tmc_params=tmc_env%params)
   
       ! init random number generator: use determistic random numbers
       IF(tmc_env%tmc_comp_set%group_nr.EQ.0.AND.&
@@ -179,12 +177,12 @@ CONTAINS
         CALL create_rng_stream(rng_stream=tmc_env%rng_stream, &
                                name="TMC_deterministic_rng_stream",& 
                                seed=init_rng_seed(:,:), &
-                               distribution_type=UNIFORM, error=error)
+                               distribution_type=UNIFORM)
         DEALLOCATE(init_rng_seed)
       ELSE
         CALL create_rng_stream(rng_stream=tmc_env%rng_stream,&
                                name="TMC_rng_stream",&
-                               distribution_type=UNIFORM,error=error)
+                               distribution_type=UNIFORM)
       END IF
 
 
@@ -195,7 +193,7 @@ CONTAINS
         CALL cp_logger_create(logger_sub,para_env=tmc_env%tmc_comp_set%para_env_m_only,&
                 default_global_unit_nr=default_output_unit, close_global_unit_on_dealloc=.FALSE.)
         CALL cp_logger_set(logger_sub,local_filename="tmc_main")
-        CALL cp_error_init(error_sub, logger=logger_sub)
+        CALL cp_add_default_logger(logger_sub)
      
         ! if we're doing output to the screen, keep it there, else this master
         ! opens a file (not that two different ranks are writing to the
@@ -209,16 +207,16 @@ CONTAINS
           CALL tmc_header(tmc_env%m_env%io_unit)
         ENDIF
         ! print the intresting parameters and starting values
-        CALL tmc_print_params(tmc_env, error_sub)
+        CALL tmc_print_params(tmc_env)
         CALL print_move_types(init=.TRUE., file_io=tmc_env%m_env%io_unit, &
-                              tmc_params=tmc_env%params, error=error_sub)
-        CALL do_tmc_master(tmc_env=tmc_env, globenv=globenv, error=error_sub) ! start the master routine
+                              tmc_params=tmc_env%params)
+        CALL do_tmc_master(tmc_env=tmc_env, globenv=globenv) ! start the master routine
 
         IF (bcast_output_unit .NE. tmc_env%m_env%io_unit) THEN
           CALL close_file(unit_number=tmc_env%m_env%io_unit)
         ENDIF
   
-        CALL cp_error_dealloc_ref(error_sub,error=error)
+        CALL cp_rm_default_logger()
         CALL cp_logger_release(logger_sub)
   
       ! the worker groups
@@ -228,7 +226,7 @@ CONTAINS
         CALL cp_logger_create(logger_sub,para_env=tmc_env%tmc_comp_set%para_env_sub_group,&
                 default_global_unit_nr=default_output_unit, close_global_unit_on_dealloc=.FALSE.)
         CALL cp_logger_set(logger_sub,local_filename="tmc_localLog")
-        CALL cp_error_init(error_sub, logger=logger_sub)
+        CALL cp_add_default_logger(logger_sub)
         tmc_env%w_env%io_unit = default_output_unit
   
         ! energy worker
@@ -238,11 +236,10 @@ CONTAINS
                   input_path=tmc_env%params%energy_inp_file, &
                   mpi_comm=tmc_env%tmc_comp_set%para_env_sub_group%group, &
                   output_path=TRIM(expand_file_name_int(file_name=tmc_energy_worker_out_file_name, &
-                                   ivalue=tmc_env%tmc_comp_set%group_nr, error=error)), & 
+                                   ivalue=tmc_env%tmc_comp_set%group_nr)), & 
                   ierr=ierr)
-          CALL cp_assert(ierr.EQ.0, cp_failure_level,cp_assertion_failed, routineP,&
-                         "creating force env result in error "//cp_to_string(ierr),&
-                         error)
+          IF(ierr.NE.0)&
+             CPABORT("creating force env result in error "//cp_to_string(ierr))
         END IF
         ! worker for configurational change
         IF(tmc_env%params%NMC_inp_file.NE."" .AND. &
@@ -253,20 +250,19 @@ CONTAINS
                   input_path=tmc_env%params%NMC_inp_file, &
                   mpi_comm=tmc_env%tmc_comp_set%para_env_sub_group%group, &
                   output_path=TRIM(expand_file_name_int(file_name=tmc_NMC_worker_out_file_name, &
-                                   ivalue=tmc_env%tmc_comp_set%group_nr, error=error)), &
+                                   ivalue=tmc_env%tmc_comp_set%group_nr)), &
                   ierr=ierr)
-          CALL cp_assert(ierr.EQ.0, cp_failure_level,cp_assertion_failed, routineP,&
-                         "creating approx force env result in error "//cp_to_string(ierr),&
-                         error)
+          IF(ierr.NE.0)&
+             CPABORT("creating approx force env result in error "//cp_to_string(ierr))
         END IF
-        CALL do_tmc_worker(tmc_env=tmc_env, error=error_sub) ! start the worker routine
+        CALL do_tmc_worker(tmc_env=tmc_env) ! start the worker routine
   
         IF(tmc_env%w_env%env_id_ener.GT.0) &
           CALL destroy_force_env(tmc_env%w_env%env_id_ener, ierr)
         IF(tmc_env%w_env%env_id_approx.GT.0) &
           CALL destroy_force_env(tmc_env%w_env%env_id_approx, ierr)
   
-        CALL cp_error_dealloc_ref(error_sub,error=error)
+        CALL cp_rm_default_logger()
         CALL cp_logger_release(logger_sub)
 
       ! the analysis group
@@ -278,7 +274,7 @@ CONTAINS
                 default_global_unit_nr=default_output_unit, close_global_unit_on_dealloc=.FALSE.)
         tmc_env%w_env%io_unit = default_output_unit
         CALL cp_logger_set(logger_sub,local_filename="tmc_ana_localLog")
-        CALL cp_error_init(error_sub, logger=logger_sub)
+        CALL cp_add_default_logger(logger_sub)
         ! if we're doing output to the screen, keep it there, else this master
         ! opens a file (not that two different ranks are writing to the
         ! default_output_unit, we leave it up to mpirun or so to merge stuff
@@ -292,37 +288,38 @@ CONTAINS
         ENDIF
 
         ALLOCATE(tmc_ana_env_list(tmc_env%params%nr_temp))
-        tmc_ana_section => section_vals_get_subs_vals(root_section,"MOTION%TMC%TMC_ANALYSIS",error=error)
+        tmc_ana_section => section_vals_get_subs_vals(root_section,"MOTION%TMC%TMC_ANALYSIS")
         DO i=1, tmc_env%params%nr_temp
-          CALL tmc_read_ana_input(tmc_ana_section, tmc_ana_env_list(i)%temp, error)
+          CALL tmc_read_ana_input(tmc_ana_section, tmc_ana_env_list(i)%temp)
           tmc_ana_env_list(i)%temp%io_unit = output_unit
         END DO
-        CALL do_tmc_worker(tmc_env=tmc_env, ana_list=tmc_ana_env_list, error=error_sub) ! start the worker routine for analysis
+        CALL do_tmc_worker(tmc_env=tmc_env, ana_list=tmc_ana_env_list) ! start the worker routine for analysis
         DO i=1, tmc_env%params%nr_temp
           IF(ASSOCIATED(tmc_ana_env_list(i)%temp%last_elem)) &
-            CALL deallocate_sub_tree_node(tree_elem=tmc_ana_env_list(i)%temp%last_elem, error=error)
-          CALL tmc_ana_env_release(tmc_ana_env_list(i)%temp, error)
+            CALL deallocate_sub_tree_node(tree_elem=tmc_ana_env_list(i)%temp%last_elem)
+          CALL tmc_ana_env_release(tmc_ana_env_list(i)%temp)
         END DO
         DEALLOCATE(tmc_ana_env_list)
         IF (bcast_output_unit .NE. output_unit) THEN
           CALL close_file(unit_number=tmc_env%m_env%io_unit)
         ENDIF
-        CALL cp_error_dealloc_ref(error_sub,error=error)
+        CALL cp_rm_default_logger()
         CALL cp_logger_release(logger_sub)
+        
       END IF ! unused worker groups have nothing to do
   
       ! delete the random numbers
-      CPPrecondition(ASSOCIATED(tmc_env%rng_stream),cp_failure_level,routineP,error,failure)
-      CALL delete_rng_stream(tmc_env%rng_stream,error=error)
+      CPASSERT(ASSOCIATED(tmc_env%rng_stream))
+      CALL delete_rng_stream(tmc_env%rng_stream)
 
       ! deallocate the move types
-      CALL finalize_mv_types(tmc_env%params, error)
+      CALL finalize_mv_types(tmc_env%params)
  
       ! finalize master and worker environment
       IF(tmc_env%tmc_comp_set%group_nr.EQ.0) THEN
-        CALL tmc_master_env_release(tmc_env, error) ! release master env
+        CALL tmc_master_env_release(tmc_env) ! release master env
       ELSE IF(tmc_env%tmc_comp_set%group_nr.NE.0) THEN
-        CALL tmc_worker_env_release(tmc_env, error) ! release worker env
+        CALL tmc_worker_env_release(tmc_env) ! release worker env
       END IF ! unused worker groups have nothing to do
 
     ELSE
@@ -332,7 +329,7 @@ CONTAINS
       END IF
     END IF
     ! finalize / deallocate everthing
-    CALL tmc_env_release(tmc_env, error)
+    CALL tmc_env_release(tmc_env)
 
     ! end the timing
     CALL timestop(handle)
@@ -344,16 +341,13 @@ CONTAINS
 !> \param input_declaration ...
 !> \param root_section ...
 !> \param para_env ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \param 
 !> \author Mandes 03.2013
 ! *****************************************************************************
-  SUBROUTINE do_analyze_files(input_declaration, root_section, para_env, error)
+  SUBROUTINE do_analyze_files(input_declaration, root_section, para_env)
     TYPE(section_type), POINTER              :: input_declaration
     TYPE(section_vals_type), POINTER         :: root_section
     TYPE(cp_para_env_type), POINTER          :: para_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'do_analyze_files', &
       routineP = moduleN//':'//routineN
@@ -361,54 +355,44 @@ CONTAINS
     INTEGER                                  :: comm, dir_ind, handle, &
                                                 my_mpi_world, nr_dim, &
                                                 output_unit, temp
-    LOGICAL                                  :: failure
-    TYPE(cp_error_type)                      :: error_sub
-    TYPE(cp_logger_type), POINTER            :: logger, logger_sub
+    TYPE(cp_logger_type), POINTER            :: logger
     TYPE(tmc_ana_list_type), DIMENSION(:), &
       POINTER                                :: ana_list
     TYPE(tmc_env_type), POINTER              :: tmc_env
     TYPE(tree_type), POINTER                 :: elem
 
-    NULLIFY(ana_list, tmc_env, elem, logger, logger_sub)
-    failure = .FALSE.
+    NULLIFY(ana_list, tmc_env, elem, logger)
 
     ! start the timing
     CALL timeset(routineN,handle)
 
     ! create a TMC environment (also to have a params environment)
-    CALL tmc_env_create(tmc_env, error)
+    CALL tmc_env_create(tmc_env)
     ! duplicate communicator 
     CALL mp_comm_dup(para_env%group, my_mpi_world)
     ! -- spiltting communicators
     CALL mp_comm_split_direct(my_mpi_world,comm,para_env%mepos, 0)
     CALL cp_para_env_create(para_env=tmc_env%tmc_comp_set%para_env_m_ana,&
-                                group=comm,error=error)
-    CALL cp_assert(para_env%num_pe.EQ.1, &
-               cp_warning_level,cp_assertion_failed, routineP,&
-               "just one out of "//cp_to_string(para_env%num_pe)//"cores is used ",&
-               error)
+                                group=comm)
+    IF(para_env%num_pe.NE.1)&
+       CPWARN("just one out of "//cp_to_string(para_env%num_pe)//"cores is used ")
     ! distribute work to availuble cores
     IF(para_env%mepos.EQ.0) THEN
       !TODO get the correct usage of creating and handling the logger...
-      logger=>cp_error_get_logger(error)
+      logger=>cp_get_default_logger()
       output_unit= cp_logger_get_default_io_unit(logger)
-      CPPostconditionNoFail(output_unit.GT.0,cp_failure_level,routineP,error)
-
-      CALL cp_logger_create(logger_sub,para_env=tmc_env%tmc_comp_set%para_env_m_ana,&
-             default_global_unit_nr=default_output_unit, close_global_unit_on_dealloc=.FALSE.)
-      CALL cp_logger_set(logger_sub,local_filename="tmc_ana")
-      CALL cp_error_init(error_sub, logger=logger_sub)
+      CPASSERT(output_unit.GT.0)
       ! write the header
       CALL tmc_ana_header(output_unit)
 
       ! read the input and create the ana environments for each temp
       CALL tmc_read_ana_files_input(input_declaration=input_declaration,&
                                     input=root_section,ana_list=ana_list,&
-                                    elem=elem, tmc_env=tmc_env,error=error)
+                                    elem=elem, tmc_env=tmc_env)
       nr_dim = SIZE(elem%pos)
       ! we need a new tree element with all neccessay arrays, (e.g. dipoles could not be allocated already)
-      CALL deallocate_sub_tree_node(tree_elem=elem, error=error)
-      CPPostconditionNoFail(SIZE(ana_list).GT.0,cp_failure_level,routineP,error)
+      CALL deallocate_sub_tree_node(tree_elem=elem)
+      CPASSERT(SIZE(ana_list).GT.0)
 
       ! print initial test output (for single core tests, where no data is produced)
       IF(tmc_env%params%print_test_output) THEN
@@ -419,7 +403,7 @@ CONTAINS
       DO temp=1, SIZE(ana_list)
         ! initialize the structures
         ana_list(temp)%temp%io_unit = output_unit
-        CALL analysis_init(ana_env=ana_list(temp)%temp, nr_dim=nr_dim, error=error)
+        CALL analysis_init(ana_env=ana_list(temp)%temp, nr_dim=nr_dim)
         ! to allocate the dipole array in tree elements
         IF(ana_list(temp)%temp%costum_dip_file_name.NE.&
            tmc_default_unspecified_name)&
@@ -427,15 +411,11 @@ CONTAINS
 
         IF(.NOT.ASSOCIATED(elem)) &
           CALL allocate_new_sub_tree_node(tmc_params=tmc_env%params, &
-                 next_el=elem, nr_dim=nr_dim, &
-                 error=error)
+                 next_el=elem, nr_dim=nr_dim)
         CALL analysis_restart_read(ana_env=ana_list(temp)%temp, &
-                                   elem=elem, error=error)
-        CALL cp_assert(ASSOCIATED(elem).OR.&
-               ASSOCIATED(ana_list(temp)%temp%last_elem), &
-               cp_failure_level,cp_assertion_failed, routineP,&
-               "uncorrect initialization of the initial configuration ",&
-               error)
+                                   elem=elem)
+        IF(.NOT.ASSOCIATED(elem).AND..NOT.ASSOCIATED(ana_list(temp)%temp%last_elem))&
+           CPABORT("uncorrect initialization of the initial configuration")
         ! do for all directories
         DO dir_ind=1, SIZE(ana_list(temp)%temp%dirs)
           WRITE(output_unit,FMT='(T2,A,"| ",A,T41,A40)')"TMC_ANA",&
@@ -445,42 +425,37 @@ CONTAINS
                  end_id=ana_list(temp)%temp%to_elem, &
                  dir_ind=dir_ind, &
                  ana_env=ana_list(temp)%temp,&
-                 tmc_params=tmc_env%params, error=error)
+                 tmc_params=tmc_env%params)
           ! remove the last saved element to start with a new file
           !  there is no weight for this element
           IF(dir_ind.LT.SIZE(ana_list(temp)%temp%dirs) .AND. &
              ASSOCIATED(ana_list(temp)%temp%last_elem)) &
-            CALL deallocate_sub_tree_node(tree_elem=ana_list(temp)%temp%last_elem, error=error)
+            CALL deallocate_sub_tree_node(tree_elem=ana_list(temp)%temp%last_elem)
           IF(ASSOCIATED(ana_list(temp)%temp%last_elem)) &
             ana_list(temp)%temp%conf_offset = ana_list(temp)%temp%conf_offset&
               + ana_list(temp)%temp%last_elem%nr
         END DO
-        CALL finalize_tmc_analysis(ana_env=ana_list(temp)%temp, error=error)
+        CALL finalize_tmc_analysis(ana_env=ana_list(temp)%temp)
         ! write analysis restart file
         !  if there is somthing to write
         ! shifts the last element to actual element 
         IF(ASSOCIATED(ana_list(temp)%temp%last_elem)) & 
-          CALL analysis_restart_print(ana_env=ana_list(temp)%temp, &
-                                      error=error)
+          CALL analysis_restart_print(ana_env=ana_list(temp)%temp)
         IF(ASSOCIATED(ana_list(temp)%temp%last_elem)) &
-          CALL deallocate_sub_tree_node(tree_elem=ana_list(temp)%temp%last_elem, error=error)
+          CALL deallocate_sub_tree_node(tree_elem=ana_list(temp)%temp%last_elem)
         IF(ASSOCIATED(elem)) &
-          CALL deallocate_sub_tree_node(tree_elem=elem, error=error)
+          CALL deallocate_sub_tree_node(tree_elem=elem)
 
         IF(ASSOCIATED(ana_list(temp)%temp%last_elem)) &
-          CALL deallocate_sub_tree_node(tree_elem=ana_list(temp)%temp%last_elem, error=error)
+          CALL deallocate_sub_tree_node(tree_elem=ana_list(temp)%temp%last_elem)
 
-        CALL tmc_ana_env_release(ana_list(temp)%temp, error)
+        CALL tmc_ana_env_release(ana_list(temp)%temp)
       END DO
 
       DEALLOCATE(ana_list)
-  
-      ! finalize / deallocate everthing
-      CALL cp_error_dealloc_ref(error_sub,error=error)
-      CALL cp_logger_release(logger_sub)
     END IF
     CALL mp_comm_free(my_mpi_world)
-    CALL tmc_env_release(tmc_env, error)
+    CALL tmc_env_release(tmc_env)
 
     ! end the timing
     CALL timestop(handle)
@@ -493,18 +468,15 @@ CONTAINS
 !> \param ana_list ...
 !> \param elem ...
 !> \param tmc_env TMC analysis environment
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 03.2013
 ! *****************************************************************************
-  SUBROUTINE tmc_read_ana_files_input(input_declaration, input, ana_list, elem, tmc_env, error)
+  SUBROUTINE tmc_read_ana_files_input(input_declaration, input, ana_list, elem, tmc_env)
     TYPE(section_type), POINTER              :: input_declaration
     TYPE(section_vals_type), POINTER         :: input
     TYPE(tmc_ana_list_type), DIMENSION(:), &
       POINTER                                :: ana_list
     TYPE(tree_type), POINTER                 :: elem
     TYPE(tmc_env_type), POINTER              :: tmc_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'tmc_read_ana_files_input', &
       routineP = moduleN//':'//routineN
@@ -512,36 +484,33 @@ CONTAINS
     CHARACTER(len=default_string_length), &
       DIMENSION(:), POINTER                  :: directories
     INTEGER                                  :: env_id, ierr, nr_temp, t_act
-    LOGICAL                                  :: failure, flag
+    LOGICAL                                  :: flag
     REAL(KIND=dp)                            :: tmax, tmin
     REAL(KIND=dp), DIMENSION(:), POINTER     :: inp_Temp, Temps
     TYPE(section_vals_type), POINTER         :: tmc_section
 
     NULLIFY(tmc_section, inp_Temp, Temps)
-    failure = .FALSE.
-    CPPrecondition(ASSOCIATED(input),cp_failure_level,routineP,error,failure)
-    CPPrecondition(.NOT.ASSOCIATED(ana_list),cp_failure_level,routineP,error,failure)
-    CPPrecondition(.NOT.ASSOCIATED(elem),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(tmc_env),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(input))
+    CPASSERT(.NOT.ASSOCIATED(ana_list))
+    CPASSERT(.NOT.ASSOCIATED(elem))
+    CPASSERT(ASSOCIATED(tmc_env))
 
     ! first global TMC stuff
-    tmc_section => section_vals_get_subs_vals(input,"MOTION%TMC",error=error)
-    CALL section_vals_val_get(tmc_section,"PRINT_TEST_OUTPUT",l_val=tmc_env%params%print_test_output,error=error)
+    tmc_section => section_vals_get_subs_vals(input,"MOTION%TMC")
+    CALL section_vals_val_get(tmc_section,"PRINT_TEST_OUTPUT",l_val=tmc_env%params%print_test_output)
     ! TMC analysis stuff
-    tmc_section => section_vals_get_subs_vals(input,"MOTION%TMC%TMC_ANALYSIS_FILES",error=error)
-    CALL section_vals_get(tmc_section,explicit=flag,error=error)
-    CPPostconditionNoFail(flag,cp_failure_level,routineP,error)
+    tmc_section => section_vals_get_subs_vals(input,"MOTION%TMC%TMC_ANALYSIS_FILES")
+    CALL section_vals_get(tmc_section,explicit=flag)
+    CPASSERT(flag)
 
     CALL section_vals_val_get(tmc_section,"FORCE_ENV_FILE",&
-             c_val=tmc_env%params%energy_inp_file,error=error)
+             c_val=tmc_env%params%energy_inp_file)
 
-    CALL section_vals_val_get(tmc_section,"NR_TEMPERATURE",i_val=nr_temp,error=error)
+    CALL section_vals_val_get(tmc_section,"NR_TEMPERATURE",i_val=nr_temp)
 
-    CALL section_vals_val_get(tmc_section,"TEMPERATURE",r_vals=inp_Temp,error=error)
-    CALL cp_assert(.NOT.((nr_temp .GT. 1).AND.(SIZE(inp_Temp).NE.2)),&
-                     cp_failure_level,cp_assertion_failed,routineP,&
-                     "specify each temperature, skip keyword NR_TEMPERATURE",&
-                     error, failure=flag, only_ionode=.TRUE.)
+    CALL section_vals_val_get(tmc_section,"TEMPERATURE",r_vals=inp_Temp)
+    IF((nr_temp .GT. 1).AND.(SIZE(inp_Temp).NE.2))&
+       CPABORT("specify each temperature, skip keyword NR_TEMPERATURE")
     IF(nr_temp .EQ. 1) THEN
       nr_temp = SIZE(inp_Temp)
       ALLOCATE(Temps(nr_temp))
@@ -554,15 +523,13 @@ CONTAINS
       DO t_act = 2, SIZE(Temps)
         Temps(t_act) = Temps(t_act-1) + (tmax-tmin)/(SIZE(Temps)-1.0_dp)
       END DO
-      CALL cp_assert(ALL(Temps.GE.0.0_dp),&
-                   cp_failure_level,cp_assertion_failed,routineP,&
-                   "The temperatures are negative. Should be specified using "//&
-                   "TEMPERATURE {T_min} {T_max} and NR_TEMPERATURE {#temperatures}",&
-                   error, failure=flag, only_ionode=.TRUE.)
+      IF(ANY(Temps.LT.0.0_dp))&
+         CALL cp_abort(__LOCATION__,"The temperatures are negative. Should be specified using "//&
+              "TEMPERATURE {T_min} {T_max} and NR_TEMPERATURE {#temperatures}")
     END IF
 
     ! get multiple directories
-    CALL section_vals_val_get(tmc_section,"DIRECTORIES",c_vals=directories,error=error)
+    CALL section_vals_val_get(tmc_section,"DIRECTORIES",c_vals=directories)
 
     ! get init configuration (for sizes)
     CALL create_force_env(new_env_id=env_id, &
@@ -571,15 +538,15 @@ CONTAINS
            mpi_comm=tmc_env%tmc_comp_set%para_env_m_ana%group, &
            output_path="tmc_ana.out", ierr=ierr)
     CALL get_initial_conf(tmc_params=tmc_env%params, init_conf=elem, &
-                          env_id=env_id, error=error)
+                          env_id=env_id)
     CALL get_atom_kinds_and_cell(env_id=env_id, atoms=tmc_env%params%atoms, &
-                                 cell=tmc_env%params%cell, error=error)
+                                 cell=tmc_env%params%cell)
     CALL destroy_force_env(env_id, ierr)
     
     ALLOCATE(ana_list(SIZE(Temps)))
     DO t_act=1, SIZE(Temps)
       ana_list(t_act)%temp => NULL()
-      CALL tmc_read_ana_input(tmc_section, ana_list(t_act)%temp, error)
+      CALL tmc_read_ana_input(tmc_section, ana_list(t_act)%temp)
       ana_list(t_act)%temp%temperature = Temps(t_act)
       ALLOCATE(ana_list(t_act)%temp%dirs(SIZE(directories)))
       ana_list(t_act)%temp%dirs(:)     =  directories(:)
@@ -588,13 +555,13 @@ CONTAINS
       ana_list(t_act)%temp%print_test_output = tmc_env%params%print_test_output
 
       CALL section_vals_val_get(tmc_section,"POSITION_FILE",&
-             c_val=ana_list(t_act)%temp%costum_pos_file_name,error=error)
+             c_val=ana_list(t_act)%temp%costum_pos_file_name)
       CALL section_vals_val_get(tmc_section,"DIPOLE_FILE",&
-             c_val=ana_list(t_act)%temp%costum_dip_file_name,error=error)
+             c_val=ana_list(t_act)%temp%costum_dip_file_name)
       CALL section_vals_val_get(tmc_section,"CELL_FILE",&
-             c_val=ana_list(t_act)%temp%costum_cell_file_name,error=error)
-      CALL section_vals_val_get(tmc_section,"START_ELEM",i_val=ana_list(t_act)%temp%from_elem,error=error)
-      CALL section_vals_val_get(tmc_section,"END_ELEM",i_val=ana_list(t_act)%temp%to_elem,error=error)
+             c_val=ana_list(t_act)%temp%costum_cell_file_name)
+      CALL section_vals_val_get(tmc_section,"START_ELEM",i_val=ana_list(t_act)%temp%from_elem)
+      CALL section_vals_val_get(tmc_section,"END_ELEM",i_val=ana_list(t_act)%temp%to_elem)
     END DO
     DEALLOCATE(Temps)
   END SUBROUTINE tmc_read_ana_files_input
@@ -603,92 +570,79 @@ CONTAINS
 !> \brief read the variables for distributing cores
 !> \param input ...
 !> \param tmc_env structure for storing all the tmc parameters
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 11.2012
 ! *****************************************************************************
-  SUBROUTINE tmc_preread_input(input,tmc_env, error)
+  SUBROUTINE tmc_preread_input(input,tmc_env)
     TYPE(section_vals_type), POINTER         :: input
     TYPE(tmc_env_type), POINTER              :: tmc_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'tmc_preread_input', &
       routineP = moduleN//':'//routineN
 
     CHARACTER(LEN=default_path_length)       :: c_tmp
     INTEGER                                  :: itmp
-    LOGICAL                                  :: explicit_key, failure, flag
+    LOGICAL                                  :: explicit_key, flag
     REAL(KIND=dp)                            :: tmax, tmin
     REAL(KIND=dp), DIMENSION(:), POINTER     :: inp_Temp
     TYPE(section_vals_type), POINTER         :: tmc_section
 
-    failure = .FALSE.
     NULLIFY(tmc_section, inp_Temp)
 
-    CPPrecondition(ASSOCIATED(input),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(input))
 
     tmc_env%tmc_comp_set%ana_on_the_fly = 0
-    tmc_section => section_vals_get_subs_vals(input,"MOTION%TMC%TMC_ANALYSIS",error=error)
-    CALL section_vals_get(tmc_section,explicit=flag,error=error)
+    tmc_section => section_vals_get_subs_vals(input,"MOTION%TMC%TMC_ANALYSIS")
+    CALL section_vals_get(tmc_section,explicit=flag)
     IF(flag) THEN
       tmc_env%tmc_comp_set%ana_on_the_fly = 1
     END IF
 
-    tmc_section => section_vals_get_subs_vals(input,"MOTION%TMC",error=error)
-    CALL section_vals_get(tmc_section,explicit=flag,error=error)
-    CPPostconditionNoFail(flag,cp_failure_level,routineP,error)
+    tmc_section => section_vals_get_subs_vals(input,"MOTION%TMC")
+    CALL section_vals_get(tmc_section,explicit=flag)
+    CPASSERT(flag)
 
-    CALL section_vals_val_get(tmc_section,"PRINT_TEST_OUTPUT",l_val=tmc_env%params%print_test_output,error=error)
+    CALL section_vals_val_get(tmc_section,"PRINT_TEST_OUTPUT",l_val=tmc_env%params%print_test_output)
 
-    CPPrecondition(ASSOCIATED(tmc_env%tmc_comp_set),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(tmc_env%tmc_comp_set))
     ! read the parameters for the computational setup
-    CALL section_vals_val_get(tmc_section,"GROUP_ENERGY_SIZE",i_val=tmc_env%tmc_comp_set%group_ener_size,error=error)
-    CALL section_vals_val_get(tmc_section,"GROUP_ENERGY_NR",i_val=tmc_env%tmc_comp_set%group_ener_nr,error=error)
-    CALL section_vals_val_get(tmc_section,"GROUP_CC_SIZE",i_val=tmc_env%tmc_comp_set%group_cc_size,error=error)
-    CALL section_vals_val_get(tmc_section,"GROUP_ANLYSIS_NR",i_val=itmp, error=error)
+    CALL section_vals_val_get(tmc_section,"GROUP_ENERGY_SIZE",i_val=tmc_env%tmc_comp_set%group_ener_size)
+    CALL section_vals_val_get(tmc_section,"GROUP_ENERGY_NR",i_val=tmc_env%tmc_comp_set%group_ener_nr)
+    CALL section_vals_val_get(tmc_section,"GROUP_CC_SIZE",i_val=tmc_env%tmc_comp_set%group_cc_size)
+    CALL section_vals_val_get(tmc_section,"GROUP_ANLYSIS_NR",i_val=itmp)
     IF(tmc_env%tmc_comp_set%ana_on_the_fly.GT.0) &
       tmc_env%tmc_comp_set%ana_on_the_fly = itmp
-    CALL cp_assert(tmc_env%tmc_comp_set%ana_on_the_fly.LE.1,&
-                     cp_failure_level,cp_assertion_failed,routineP,&
-                     "analysing on the fly is up to now not supported for multiple cores. "//&
-                     " Restart file witing for this case and temperature "//&
-                     "distribution has to be solved.!.",&
-                     error, failure=flag, only_ionode=.TRUE.)
-    CALL section_vals_val_get(tmc_section,"RESULT_LIST_IN_MEMORY",l_val=tmc_env%params%USE_REDUCED_TREE,error=error)
+    IF(tmc_env%tmc_comp_set%ana_on_the_fly.GT.1)&
+       CALL cp_abort(__LOCATION__,&
+            "analysing on the fly is up to now not supported for multiple cores. "//&
+            " Restart file witing for this case and temperature "//&
+            "distribution has to be solved.!.")
+    CALL section_vals_val_get(tmc_section,"RESULT_LIST_IN_MEMORY",l_val=tmc_env%params%USE_REDUCED_TREE)
     ! swap the variable, because of oposit meaning
     tmc_env%params%USE_REDUCED_TREE = .NOT.tmc_env%params%USE_REDUCED_TREE
-    CALL section_vals_val_get(tmc_section,"NR_TEMPERATURE",i_val=tmc_env%params%nr_temp,error=error)
+    CALL section_vals_val_get(tmc_section,"NR_TEMPERATURE",i_val=tmc_env%params%nr_temp)
 
     ! stuff everyone needs to know
-    CALL section_vals_val_get(tmc_section,"NMC_MOVES%NMC_FILE_NAME",c_val=tmc_env%params%NMC_inp_file,error=error)
+    CALL section_vals_val_get(tmc_section,"NMC_MOVES%NMC_FILE_NAME",c_val=tmc_env%params%NMC_inp_file)
     IF(tmc_env%params%NMC_inp_file.EQ.tmc_default_unspecified_name)THEN
     ! file name keyword without file name
-      CALL cp_assert(.FALSE.,&
-                     cp_failure_level,cp_assertion_failed,routineP,&
-                     "no or a valid NMC input file has to be specified ",&
-                     error, failure=flag, only_ionode=.TRUE.)
+      CPABORT("no or a valid NMC input file has to be specified ")
     ELSE IF(tmc_env%params%NMC_inp_file.EQ."") THEN
     ! no keyword
-      CALL cp_assert(tmc_env%tmc_comp_set%group_cc_size.LE.0,&
-                     cp_warning_level,cp_assertion_failed,routineP,&
-                     "The configurational groups are deactivated, "//&
-                     "because no approximated energy input is specified.",&
-                     error, failure=flag, only_ionode=.TRUE.)
+      IF(tmc_env%tmc_comp_set%group_cc_size.GT.0)&
+         CALL cp_warn(__LOCATION__,&
+              "The configurational groups are deactivated, "//&
+              "because no approximated energy input is specified.")
       tmc_env%tmc_comp_set%group_cc_size = 0
     ELSE
     ! check file existance
       INQUIRE (FILE=TRIM(tmc_env%params%NMC_inp_file),EXIST=flag,IOSTAT=itmp)
-      CALL cp_assert(flag .AND. itmp.EQ.0,&
-                     cp_failure_level,cp_assertion_failed,routineP,&
-                     "a valid NMC input file has to be specified ",&
-                     error, failure=flag, only_ionode=.TRUE.)
+      IF(.NOT.flag .OR. itmp.NE.0)&
+         CPABORT("a valid NMC input file has to be specified")
     END IF
 
-    CALL section_vals_val_get(tmc_section,"TEMPERATURE",r_vals=inp_Temp,error=error)
-    CALL cp_assert(.NOT.((tmc_env%params%nr_temp .GT. 1).AND.(SIZE(inp_Temp).NE.2)),&
-                     cp_failure_level,cp_assertion_failed,routineP,&
-                     "specify each temperature, skip keyword NR_TEMPERATURE",&
-                     error, failure=flag, only_ionode=.TRUE.)
+    CALL section_vals_val_get(tmc_section,"TEMPERATURE",r_vals=inp_Temp)
+    IF(tmc_env%params%nr_temp.GT.1 .AND. SIZE(inp_Temp).NE.2) &
+       CPABORT("specify each temperature, skip keyword NR_TEMPERATURE")
     IF(tmc_env%params%nr_temp .EQ. 1) THEN
       tmc_env%params%nr_temp = SIZE(inp_Temp)
       ALLOCATE(tmc_env%params%Temp(tmc_env%params%nr_temp))
@@ -701,27 +655,23 @@ CONTAINS
       DO itmp = 2, SIZE(tmc_env%params%Temp)
         tmc_env%params%Temp(itmp) = tmc_env%params%Temp(itmp-1) + (tmax-tmin)/(SIZE(tmc_env%params%Temp)-1.0_dp)
       END DO
-      CALL cp_assert(ALL(tmc_env%params%Temp.GE.0.0_dp),&
-                   cp_failure_level,cp_assertion_failed,routineP,&
-                   "The temperatures are negative. Should be specified using "//&
-                   "TEMPERATURE {T_min} {T_max} and NR_TEMPERATURE {#temperatures}",&
-                   error, failure=flag, only_ionode=.TRUE.)
+      IF(ANY(tmc_env%params%Temp.LT.0.0_dp))&
+         CALL cp_abort(__LOCATION__, "The temperatures are negative. Should be specified using "//&
+              "TEMPERATURE {T_min} {T_max} and NR_TEMPERATURE {#temperatures}")
     END IF
 
-    CALL section_vals_val_get(tmc_section,"TASK_TYPE" ,explicit=explicit_key,error=error)
+    CALL section_vals_val_get(tmc_section,"TASK_TYPE" ,explicit=explicit_key)
     IF(explicit_key)THEN
-      CALL section_vals_val_get(tmc_section,"TASK_TYPE",c_val=c_tmp,error=error)
+      CALL section_vals_val_get(tmc_section,"TASK_TYPE",c_val=c_tmp)
       SELECT CASE (TRIM(c_tmp))
       CASE (TRIM(tmc_default_unspecified_name))
         tmc_env%params%task_type = task_type_MC
       CASE ("IDEAL_GAS")
         tmc_env%params%task_type = task_type_ideal_gas
       CASE DEFAULT
-        CALL cp_assert(.FALSE.,&
-               cp_warning_level,cp_assertion_failed,routineP,&
-               'unknown TMC task type "'//TRIM(c_tmp)//'" specified. '//&
-               " Set to default.",&
-               error, failure=flag, only_ionode=.TRUE.)
+        CALL cp_warn(__LOCATION__,&
+             'unknown TMC task type "'//TRIM(c_tmp)//'" specified. '//&
+             " Set to default.")
         tmc_env%params%task_type = task_type_MC
       END SELECT
     END IF
@@ -733,109 +683,96 @@ CONTAINS
 !> \brief read the tmc subsection from the input file
 !> \param input points to the tmc subsection in the input file
 !> \param tmc_env structure for storing all the tmc parameters
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 11.2012
 ! *****************************************************************************
-  SUBROUTINE tmc_read_input(input,tmc_env, error)
+  SUBROUTINE tmc_read_input(input,tmc_env)
     TYPE(section_vals_type), POINTER         :: input
     TYPE(tmc_env_type), POINTER              :: tmc_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'tmc_read_input', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: itmp
-    LOGICAL                                  :: explicit, failure, flag
+    LOGICAL                                  :: explicit, flag
     REAL(KIND=dp)                            :: r_tmp
     REAL(KIND=dp), DIMENSION(:), POINTER     :: r_arr_tmp
     TYPE(section_vals_type), POINTER         :: tmc_section
 
     NULLIFY(tmc_section)
 
-    failure = .FALSE.
 
-    CPPrecondition(ASSOCIATED(input),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(input))
 
-    tmc_section => section_vals_get_subs_vals(input,"MOTION%TMC",error=error)
-    CALL section_vals_get(tmc_section,explicit=flag,error=error)
-    CPPostconditionNoFail(flag,cp_failure_level,routineP,error)
+    tmc_section => section_vals_get_subs_vals(input,"MOTION%TMC")
+    CALL section_vals_get(tmc_section,explicit=flag)
+    CPASSERT(flag)
 
     ! only for the master
     IF(tmc_env%tmc_comp_set%group_nr == 0) THEN 
-      CPPrecondition(ASSOCIATED(tmc_env%m_env),cp_failure_level,routineP,error,failure)
+      CPASSERT(ASSOCIATED(tmc_env%m_env))
       ! the walltime input can be done as HH:MM:SS or just in seconds.
       CALL cp2k_get_walltime(section=input, keyword_name="GLOBAL%WALLTIME", &
-                             walltime=tmc_env%m_env%walltime, error=error)
+                             walltime=tmc_env%m_env%walltime)
 
-      CALL section_vals_val_get(tmc_section,"NUM_MC_ELEM",i_val=tmc_env%m_env%num_MC_elem,error=error)
-      CALL section_vals_val_get(tmc_section,"RND_DETERMINISTIC",i_val=tmc_env%m_env%rnd_init,error=error)
+      CALL section_vals_val_get(tmc_section,"NUM_MC_ELEM",i_val=tmc_env%m_env%num_MC_elem)
+      CALL section_vals_val_get(tmc_section,"RND_DETERMINISTIC",i_val=tmc_env%m_env%rnd_init)
       ! restarting
-      CALL section_vals_val_get(tmc_section,"RESTART_IN",c_val=tmc_env%m_env%restart_in_file_name,error=error)
+      CALL section_vals_val_get(tmc_section,"RESTART_IN",c_val=tmc_env%m_env%restart_in_file_name)
       IF(tmc_env%m_env%restart_in_file_name.EQ.tmc_default_unspecified_name) THEN
         tmc_env%m_env%restart_in_file_name = tmc_default_restart_in_file_name
         INQUIRE(FILE=tmc_env%m_env%restart_in_file_name, EXIST=flag)
         IF(.NOT.flag) tmc_env%m_env%restart_in_file_name = ""
       END IF
-      CALL section_vals_val_get(tmc_section,"RESTART_OUT",i_val=tmc_env%m_env%restart_out_step,error=error)
+      CALL section_vals_val_get(tmc_section,"RESTART_OUT",i_val=tmc_env%m_env%restart_out_step)
       ! restart just at the end (lone keyword)
       IF(tmc_env%m_env%restart_out_step.EQ.-9) THEN
         tmc_env%m_env%restart_out_file_name = tmc_default_restart_out_file_name
         tmc_env%m_env%restart_out_step = HUGE(tmc_env%m_env%restart_out_step)
       END IF
-      CALL cp_assert(tmc_env%m_env%restart_out_step.GE.0,&
-                   cp_failure_level,cp_assertion_failed,routineP,&
-                   "Please specify a valid value for the frequency "//&
-                   "to write restart files (RESTART_OUT #). "//&
-                   "# > 0 to define the amount of Markov chain elements in between, "//&
-                   "or 0 to deactivate the restart file writing. "//&
-                   "Lonely keyword writes restart file only at the end of the run.",&
-                   error, failure=flag, only_ionode=.TRUE.)
+      IF(tmc_env%m_env%restart_out_step.LT.0)&
+         CALL cp_abort(__LOCATION__,&
+              "Please specify a valid value for the frequency "//&
+              "to write restart files (RESTART_OUT #). "//&
+              "# > 0 to define the amount of Markov chain elements in between, "//&
+              "or 0 to deactivate the restart file writing. "//&
+              "Lonely keyword writes restart file only at the end of the run.")
  
-      CALL section_vals_val_get(tmc_section,"INFO_OUT_STEP_SIZE",i_val=tmc_env%m_env%info_out_step_size,error=error)
-      CALL section_vals_val_get(tmc_section,"DOT_TREE",c_val=tmc_env%params%dot_file_name,error=error)
-      CALL section_vals_val_get(tmc_section,"ALL_CONF_FILE_NAME",c_val=tmc_env%params%all_conf_file_name,error=error)
+      CALL section_vals_val_get(tmc_section,"INFO_OUT_STEP_SIZE",i_val=tmc_env%m_env%info_out_step_size)
+      CALL section_vals_val_get(tmc_section,"DOT_TREE",c_val=tmc_env%params%dot_file_name)
+      CALL section_vals_val_get(tmc_section,"ALL_CONF_FILE_NAME",c_val=tmc_env%params%all_conf_file_name)
       IF(tmc_env%params%dot_file_name.NE."") tmc_env%params%DRAW_TREE = .TRUE.
 
     ! everything for the worker group
     ELSE IF(tmc_env%tmc_comp_set%group_nr .NE. 0) THEN 
-      CPPrecondition(ASSOCIATED(tmc_env%w_env),cp_failure_level,routineP,error,failure)
+      CPASSERT(ASSOCIATED(tmc_env%w_env))
     END IF
 
     ! stuff everyone needs to know
 
     ! the NMC_FILE_NAME is already read in tmc_preread_input
-    CALL section_vals_val_get(tmc_section,"ENERGY_FILE_NAME",c_val=tmc_env%params%energy_inp_file,error=error)
+    CALL section_vals_val_get(tmc_section,"ENERGY_FILE_NAME",c_val=tmc_env%params%energy_inp_file)
     ! file name keyword without file name
-    CALL cp_assert(tmc_env%params%energy_inp_file.NE."",&
-                   cp_failure_level,cp_assertion_failed,routineP,&
-                   "a valid exact energy input file has to be specified ",&
-                   error, failure=flag, only_ionode=.TRUE.)
+    IF(tmc_env%params%energy_inp_file.EQ."")&
+       CPABORT("a valid exact energy input file has to be specified ")
     ! check file existance
     INQUIRE (FILE=TRIM(tmc_env%params%energy_inp_file),EXIST=flag,IOSTAT=itmp)
-    CALL cp_assert(flag.AND.itmp.EQ.0,&
-                   cp_failure_level,cp_assertion_failed,routineP,&
-                   "a valid exact energy input file has to be specified, "//&
-                   TRIM(tmc_env%params%energy_inp_file)//" does not exist.",&
-                   error, failure=flag, only_ionode=.TRUE.)
+    IF(.NOT.flag.OR.itmp.NE.0)&
+       CALL cp_abort(__LOCATION__, "a valid exact energy input file has to be specified, "//&
+            TRIM(tmc_env%params%energy_inp_file)//" does not exist.")
 
-    CALL section_vals_val_get(tmc_section,"NUM_MV_ELEM_IN_CELL",i_val=tmc_env%params%nr_elem_mv,error=error)    
+    CALL section_vals_val_get(tmc_section,"NUM_MV_ELEM_IN_CELL",i_val=tmc_env%params%nr_elem_mv)    
 
-    CALL section_vals_val_get(tmc_section,"VOLUME_ISOTROPIC",l_val=tmc_env%params%v_isotropic,error=error)
-    CALL section_vals_val_get(tmc_section,"PRESSURE",r_val=tmc_env%params%pressure,error=error)
+    CALL section_vals_val_get(tmc_section,"VOLUME_ISOTROPIC",l_val=tmc_env%params%v_isotropic)
+    CALL section_vals_val_get(tmc_section,"PRESSURE",r_val=tmc_env%params%pressure)
     tmc_env%params%pressure = tmc_env%params%pressure/au2bar
-    CALL section_vals_val_get(tmc_section,"MOVE_CENTER_OF_MASS",l_val=tmc_env%params%mv_cen_of_mass,error=error)
+    CALL section_vals_val_get(tmc_section,"MOVE_CENTER_OF_MASS",l_val=tmc_env%params%mv_cen_of_mass)
 
-    CALL section_vals_val_get(tmc_section,"SUB_BOX",r_vals=r_arr_tmp,error=error)
+    CALL section_vals_val_get(tmc_section,"SUB_BOX",r_vals=r_arr_tmp)
     IF(SIZE(r_arr_tmp).GT.1) THEN
-      CALL cp_assert(SIZE(r_arr_tmp).EQ.tmc_env%params%dim_per_elem,&
-                     cp_failure_level,cp_assertion_failed,routineP,&
-                     "The entered sub box sizes does not fit in number of dimensions.",&
-                     error, failure=flag, only_ionode=.TRUE.)
-      CALL cp_assert(ALL(r_arr_tmp.GT.0.0_dp),&
-                     cp_failure_level,cp_assertion_failed,routineP,&
-                     "The entered sub box lenghts should be greater than 0.",&
-                     error, failure=flag, only_ionode=.TRUE.)
+      IF(SIZE(r_arr_tmp).NE.tmc_env%params%dim_per_elem)&
+         CPABORT("The entered sub box sizes does not fit in number of dimensions.")
+      IF(ANY(r_arr_tmp.LE.0.0_dp))&
+         CPABORT("The entered sub box lenghts should be greater than 0.")
       DO itmp=1, SIZE(tmc_env%params%sub_box_size)
         tmc_env%params%sub_box_size(itmp) = r_arr_tmp(itmp)/au2a
       END DO
@@ -846,24 +783,24 @@ CONTAINS
 
     ! read all the distinct moves
     CALL read_init_move_types(tmc_params=tmc_env%params, &
-                              tmc_section=tmc_section, error=error)
+                              tmc_section=tmc_section)
 
-    CALL section_vals_val_get(tmc_section,"ESIMATE_ACC_PROB",l_val=tmc_env%params%esimate_acc_prob,error=error)
-    CALL section_vals_val_get(tmc_section,"SPECULATIVE_CANCELING",l_val=tmc_env%params%SPECULATIVE_CANCELING,error=error)
-    CALL section_vals_val_get(tmc_section,"USE_SCF_ENERGY_INFO",l_val=tmc_env%params%use_scf_energy_info,error=error)
+    CALL section_vals_val_get(tmc_section,"ESIMATE_ACC_PROB",l_val=tmc_env%params%esimate_acc_prob)
+    CALL section_vals_val_get(tmc_section,"SPECULATIVE_CANCELING",l_val=tmc_env%params%SPECULATIVE_CANCELING)
+    CALL section_vals_val_get(tmc_section,"USE_SCF_ENERGY_INFO",l_val=tmc_env%params%use_scf_energy_info)
     ! printing
-    CALL section_vals_val_get(tmc_section,"PRINT_ONLY_ACC",l_val=tmc_env%params%print_only_diff_conf,error=error)
-    CALL section_vals_val_get(tmc_section,"PRINT_COORDS",l_val=tmc_env%params%print_trajectory,error=error)
-    CALL section_vals_val_get(tmc_section,"PRINT_DIPOLE" ,explicit=explicit,error=error)
+    CALL section_vals_val_get(tmc_section,"PRINT_ONLY_ACC",l_val=tmc_env%params%print_only_diff_conf)
+    CALL section_vals_val_get(tmc_section,"PRINT_COORDS",l_val=tmc_env%params%print_trajectory)
+    CALL section_vals_val_get(tmc_section,"PRINT_DIPOLE" ,explicit=explicit)
     IF(explicit) &
-      CALL section_vals_val_get(tmc_section,"PRINT_DIPOLE",l_val=tmc_env%params%print_dipole,error=error)
-    CALL section_vals_val_get(tmc_section,"PRINT_FORCES" ,explicit=explicit,error=error)
+      CALL section_vals_val_get(tmc_section,"PRINT_DIPOLE",l_val=tmc_env%params%print_dipole)
+    CALL section_vals_val_get(tmc_section,"PRINT_FORCES" ,explicit=explicit)
     IF(explicit) &
-      CALL section_vals_val_get(tmc_section,"PRINT_FORCES",l_val=tmc_env%params%print_forces,error=error)
-    CALL section_vals_val_get(tmc_section,"PRINT_CELL" ,explicit=explicit,error=error)
+      CALL section_vals_val_get(tmc_section,"PRINT_FORCES",l_val=tmc_env%params%print_forces)
+    CALL section_vals_val_get(tmc_section,"PRINT_CELL" ,explicit=explicit)
     IF(explicit) &
-      CALL section_vals_val_get(tmc_section,"PRINT_CELL",l_val=tmc_env%params%print_cell,error=error)
-    CALL section_vals_val_get(tmc_section,"PRINT_ENERGIES",l_val=tmc_env%params%print_energies,error=error)
+      CALL section_vals_val_get(tmc_section,"PRINT_CELL",l_val=tmc_env%params%print_cell)
+    CALL section_vals_val_get(tmc_section,"PRINT_ENERGIES",l_val=tmc_env%params%print_energies)
 
   END SUBROUTINE tmc_read_input
 
@@ -873,17 +810,14 @@ CONTAINS
 !> \param para_env the old parallel environment
 !> \param ana_on_the_fly ...
 !> \param success ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 11.2012
 ! *****************************************************************************
   SUBROUTINE tmc_redistributing_cores(tmc_comp_set,para_env, ana_on_the_fly, &
-                                      success, error)
+                                      success)
     TYPE(tmc_comp_set_type), POINTER         :: tmc_comp_set
     TYPE(cp_para_env_type), POINTER          :: para_env
     INTEGER                                  :: ana_on_the_fly
     LOGICAL                                  :: success
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'tmc_redistributing_cores', &
       routineP = moduleN//':'//routineN
@@ -892,10 +826,10 @@ CONTAINS
       master_ana_rank, master_first_e_worker_g, master_first_e_worker_r, &
       master_worker_group, master_worker_rank, my_mpi_undefined, &
       my_mpi_world, total_used
-    LOGICAL                                  :: failure, flag, master
+    LOGICAL                                  :: flag, master
 
-    CPPrecondition(ASSOCIATED(tmc_comp_set),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(para_env),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(tmc_comp_set))
+    CPASSERT(ASSOCIATED(para_env))
 
     ! colors and positions for new communicators
     ! variables for printing
@@ -911,29 +845,21 @@ CONTAINS
     master_ana_rank  = -1
 
     master = .FALSE.
-    failure = .FALSE.
     flag = .FALSE.
     success = .TRUE.
 
     IF(para_env%num_pe.LE.1) THEN
-      CALL cp_assert(.FALSE.,&
-                     cp_warning_level,cp_assertion_failed,routineP,&
-                     "TMC need at least 2 cores (one for master, one for worker)",&
-                     error, failure=flag, only_ionode=.TRUE.) 
+      CPWARN("TMC need at least 2 cores (one for master, one for worker)")
       success = .FALSE.
     ELSE
       ! check if there are enougth cores available
-      CALL cp_assert(tmc_comp_set%group_ener_size*tmc_comp_set%group_ener_nr.LE.(para_env%num_pe-1),&
-                     cp_warning_level,cp_assertion_failed,routineP,&
-                     "The selected energy group size is too huge. ",&
-                     error, failure=flag, only_ionode=.TRUE.)
+      IF(tmc_comp_set%group_ener_size*tmc_comp_set%group_ener_nr.GT.(para_env%num_pe-1))&
+         CPWARN("The selected energy group size is too huge. ")
       IF(flag)THEN
         tmc_comp_set%group_ener_nr = INT((para_env%num_pe-1)/&
           REAL(tmc_comp_set%group_ener_size,KIND=dp))
-        CALL cp_assert(tmc_comp_set%group_ener_nr.GE.1,&
-                     cp_warning_level,cp_assertion_failed,routineP,&
-                     "The selected energy group size is too huge. ",&
-                     error, failure=flag, only_ionode=.TRUE.)
+        IF(tmc_comp_set%group_ener_nr.LT.1)&
+           CPWARN("The selected energy group size is too huge. ")
         IF(flag) success = .FALSE.
       END IF
   
@@ -944,21 +870,17 @@ CONTAINS
             - tmc_comp_set%group_ener_size*tmc_comp_set%group_ener_nr)/&
                                        REAL(tmc_comp_set%group_cc_size,KIND=dp))
   
-        CALL cp_assert(tmc_comp_set%group_cc_nr.GE.1,&
-                       cp_warning_level,cp_assertion_failed,routineP,&
-                       "There are not enougth cores left for creating groups for configurational change.",&
-                       error, failure=flag, only_ionode=.TRUE.)
+        IF(tmc_comp_set%group_cc_nr.LT.1)&
+           CALL cp_warn(__LOCATION__,&
+                "There are not enougth cores left for creating groups for configurational change.")
         IF(flag) success = .FALSE.
       END IF
   
       total_used = tmc_comp_set%group_ener_size*tmc_comp_set%group_ener_nr+&
                      tmc_comp_set%group_cc_size*tmc_comp_set%group_cc_nr + &
                      tmc_comp_set%ana_on_the_fly
-      CALL cp_assert(para_env%num_pe-1.LE.total_used,&
-                     cp_warning_level,cp_assertion_failed,routineP,&
-                     cp_to_string(para_env%num_pe-1-total_used)//&
-                     " mpi ranks are unused, but can be used for analysis.",&
-                     error, failure=flag, only_ionode=.TRUE.)
+      IF(para_env%num_pe-1.GT.total_used)&
+         CPWARN(" mpi ranks are unused, but can be used for analysis.")
   
       ! duplicate communicator 
       CALL mp_comm_dup(para_env%group, my_mpi_world)
@@ -1008,7 +930,7 @@ CONTAINS
           ! up to now we use just one core for doing the analysis
           IF(para_env%mepos .EQ. para_env%num_pe-2) THEN
             tmc_comp_set%group_nr = para_env%mepos - (para_env%num_pe-1) ! negative
-            CPPostcondition(tmc_comp_set%group_nr.LT.0,cp_failure_level,routineP,error,failure)
+            CPASSERT(tmc_comp_set%group_nr.LT.0)
             IF(para_env%mepos.GE.para_env%num_pe-1-ana_on_the_fly) THEN
               master_ana_group = para_env%num_pe +4
               master_ana_rank  = -tmc_comp_set%group_nr
@@ -1025,7 +947,7 @@ CONTAINS
         ! not the unused cores
         IF(cc_group_rank.GE.0) THEN
           CALL cp_para_env_create(para_env=tmc_comp_set%para_env_sub_group,&
-                                  group=comm_tmp,error=error)
+                                  group=comm_tmp)
         ELSE
           CALL mp_comm_free(comm_tmp)
         ENDIF
@@ -1036,7 +958,7 @@ CONTAINS
         ! not the unused cores
         IF(master_worker_rank.GE.0) THEN
           CALL cp_para_env_create(para_env=tmc_comp_set%para_env_m_w,&
-                                  group=comm_tmp,error=error)
+                                  group=comm_tmp)
         ELSE
           CALL mp_comm_free(comm_tmp)
         ENDIF
@@ -1047,7 +969,7 @@ CONTAINS
         ! not the unused cores
         IF(master_first_e_worker_r.GE.0) THEN
           CALL cp_para_env_create(para_env=tmc_comp_set%para_env_m_first_w,&
-                                  group=comm_tmp,error=error)
+                                  group=comm_tmp)
         ELSE
           CALL mp_comm_free(comm_tmp)
         ENDIF
@@ -1057,7 +979,7 @@ CONTAINS
         NULLIFY(tmc_comp_set%para_env_m_ana)
         IF(master_ana_rank.GE.0) THEN
           CALL cp_para_env_create(para_env=tmc_comp_set%para_env_m_ana,&
-                                  group=comm_tmp,error=error)
+                                  group=comm_tmp)
         ELSE
           CALL mp_comm_free(comm_tmp)
         ENDIF
@@ -1073,7 +995,7 @@ CONTAINS
         NULLIFY(tmc_comp_set%para_env_m_only)
         IF(master_ana_rank.GE.0) THEN
           CALL cp_para_env_create(para_env=tmc_comp_set%para_env_m_only,&
-                                  group=comm_tmp,error=error)
+                                  group=comm_tmp)
         ELSE
           CALL mp_comm_free(comm_tmp)
         ENDIF
@@ -1085,13 +1007,10 @@ CONTAINS
 ! *****************************************************************************
 !> \brief prints the most important parameters used for TMC
 !> \param tmc_env tructure with parameters for TMC
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 11.2012
 ! *****************************************************************************
-  SUBROUTINE tmc_print_params(tmc_env, error)
+  SUBROUTINE tmc_print_params(tmc_env)
     TYPE(tmc_env_type), POINTER              :: tmc_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: fmt_my = '(T2,A,"| ",A,T41,A40)', &
       plabel = "TMC", routineN = 'tmc_print_params', &
@@ -1099,16 +1018,14 @@ CONTAINS
 
     CHARACTER(LEN=80)                        :: c_tmp, fmt_tmp
     INTEGER                                  :: file_nr
-    LOGICAL                                  :: failure
 
-    failure = .FALSE.
-    CPPostcondition(ASSOCIATED(tmc_env),cp_failure_level,routineP,error,failure)
-    CPPostcondition(ASSOCIATED(tmc_env%tmc_comp_set),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(tmc_env))
+    CPASSERT(ASSOCIATED(tmc_env%tmc_comp_set))
     ! only the master prints out
     IF(tmc_env%tmc_comp_set%group_nr == 0) THEN
       file_nr = tmc_env%m_env%io_unit 
-      CPPostcondition(ASSOCIATED(tmc_env%tmc_comp_set%para_env_m_w),cp_failure_level,routineP,error,failure)
-      CPPostcondition(ASSOCIATED(tmc_env%m_env),cp_failure_level,routineP,error,failure)
+      CPASSERT(ASSOCIATED(tmc_env%tmc_comp_set%para_env_m_w))
+      CPASSERT(ASSOCIATED(tmc_env%m_env))
 
       CALL m_flush(file_nr)
       WRITE ( file_nr, * )

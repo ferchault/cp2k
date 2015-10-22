@@ -23,6 +23,7 @@ MODULE qs_wf_history_types
   USE qs_rho_types,                    ONLY: qs_rho_release,&
                                              qs_rho_type
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -118,52 +119,44 @@ CONTAINS
 ! *****************************************************************************
 !> \brief releases a snapshot of a wavefunction (see doc/ReferenceCounting.html)
 !> \param snapshot the snapshot to release
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      02.2003 created [fawzi]
 !>      02.2005 wf_mol added [MI]
 !> \author fawzi
 ! *****************************************************************************
-SUBROUTINE wfs_release(snapshot,error)
+SUBROUTINE wfs_release(snapshot)
     TYPE(qs_wf_snapshot_type), POINTER       :: snapshot
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'wfs_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, stat
-    LOGICAL                                  :: failure
-
-  failure=.FALSE.
+    INTEGER                                  :: i
 
   IF (ASSOCIATED(snapshot)) THEN
-     CPPreconditionNoFail(snapshot%ref_count>0,cp_failure_level,routineP,error)
+     CPASSERT(snapshot%ref_count>0)
      snapshot%ref_count=snapshot%ref_count-1
      IF (snapshot%ref_count==0) THEN
         IF (ASSOCIATED(snapshot%wf)) THEN
            DO i=1,SIZE(snapshot%wf)
-              CALL cp_fm_release(snapshot%wf(i)%matrix,error=error)
+              CALL cp_fm_release(snapshot%wf(i)%matrix)
            END DO
-           DEALLOCATE(snapshot%wf,stat=stat)
-           CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+           DEALLOCATE(snapshot%wf)
         END IF
         ! snapshot%rho_r & snapshot%rho_g is deallocated in wfs_update
         ! of qs_wf_history_methods, in case you wonder about it.
         IF (ASSOCIATED(snapshot%rho_ao)) THEN
-           CALL cp_dbcsr_deallocate_matrix_set(snapshot%rho_ao,error=error)
+           CALL cp_dbcsr_deallocate_matrix_set(snapshot%rho_ao)
         END IF
         IF (ASSOCIATED(snapshot%rho_ao_kp)) THEN
-           CALL cp_dbcsr_deallocate_matrix_set(snapshot%rho_ao_kp,error=error)
+           CALL cp_dbcsr_deallocate_matrix_set(snapshot%rho_ao_kp)
         END IF
         IF (ASSOCIATED(snapshot%overlap)) THEN
-           CALL cp_dbcsr_deallocate_matrix(snapshot%overlap,error=error)
+           CALL cp_dbcsr_deallocate_matrix(snapshot%overlap)
         END IF
         IF (ASSOCIATED(snapshot%rho_frozen)) THEN
-           CALL qs_rho_release(snapshot%rho_frozen,error=error)
+           CALL qs_rho_release(snapshot%rho_frozen)
         END IF
-        DEALLOCATE(snapshot,stat=stat)
-        CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+        DEALLOCATE(snapshot)
      END IF
   END IF
   NULLIFY(snapshot)
@@ -172,27 +165,18 @@ END SUBROUTINE wfs_release
 ! *****************************************************************************
 !> \brief retains a wf history (see doc/ReferenceCounting.html)
 !> \param wf_history the wf_history to retain
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      02.2003 created [fawzi]
 !> \author fawzi
 ! *****************************************************************************
-SUBROUTINE wfi_retain(wf_history,error)
+SUBROUTINE wfi_retain(wf_history)
     TYPE(qs_wf_history_type), POINTER        :: wf_history
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'wfi_retain', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-  failure=.FALSE.
-
-  CPPrecondition(ASSOCIATED(wf_history),cp_failure_level,routineP,error,failure)
-  IF (.NOT. failure) THEN
-     wf_history%ref_count=wf_history%ref_count+1
-  END IF
+  CPASSERT(ASSOCIATED(wf_history))
+  wf_history%ref_count=wf_history%ref_count+1
 
 END SUBROUTINE wfi_retain
 
@@ -200,38 +184,29 @@ END SUBROUTINE wfi_retain
 !> \brief releases a wf_history of a wavefunction
 !>      (see doc/ReferenceCounting.html)
 !> \param wf_history the wf_history to release
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      02.2003 created [fawzi]
 !> \author fawzi
 ! *****************************************************************************
-SUBROUTINE wfi_release(wf_history,error)
+SUBROUTINE wfi_release(wf_history)
     TYPE(qs_wf_history_type), POINTER        :: wf_history
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'wfi_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, stat
-    LOGICAL                                  :: failure
-
-  failure=.FALSE.
+    INTEGER                                  :: i
 
   IF (ASSOCIATED(wf_history)) THEN
-     CPPreconditionNoFail(wf_history%ref_count>0,cp_failure_level,routineP,error)
+     CPASSERT(wf_history%ref_count>0)
      wf_history%ref_count=wf_history%ref_count-1
      IF (wf_history%ref_count==0) THEN
         IF (ASSOCIATED(wf_history%past_states)) THEN
            DO i=1,SIZE(wf_history%past_states)
-              CALL wfs_release(wf_history%past_states(i)%snapshot,&
-                   error=error)
+              CALL wfs_release(wf_history%past_states(i)%snapshot)
            END DO
-           DEALLOCATE(wf_history%past_states,stat=stat)
-           CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+           DEALLOCATE(wf_history%past_states)
         END IF
-        DEALLOCATE(wf_history,stat=stat)
-        CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+        DEALLOCATE(wf_history)
      END IF
   END IF
   NULLIFY(wf_history)
@@ -241,39 +216,29 @@ END SUBROUTINE wfi_release
 !> \brief returns a snapshot, the first being the latest snapshot
 !> \param wf_history the plage where to get the snapshot
 !> \param index the index of the snapshot you want
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \retval res ...
 !> \par History
 !>      12.2002 created [fawzi]
 !> \author fawzi
 ! *****************************************************************************
-FUNCTION wfi_get_snapshot(wf_history, index, error) RESULT(res)
+FUNCTION wfi_get_snapshot(wf_history, index) RESULT(res)
     TYPE(qs_wf_history_type), POINTER        :: wf_history
     INTEGER, INTENT(in)                      :: index
-    TYPE(cp_error_type), INTENT(inout)       :: error
     TYPE(qs_wf_snapshot_type), POINTER       :: res
 
     CHARACTER(len=*), PARAMETER :: routineN = 'wfi_get_snapshot', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-  failure=.FALSE.
   NULLIFY(res)
 
-  CPPrecondition(ASSOCIATED(wf_history),cp_failure_level,routineP,error,failure)
-  IF (.NOT. failure) THEN
-     CPPrecondition(ASSOCIATED(wf_history%past_states),cp_failure_level,routineP,error,failure)
-     IF (index>wf_history%memory_depth.OR.index>wf_history%snapshot_count) THEN
-        CPPrecondition(.FALSE.,cp_warning_level,routineP,error,failure)
-     END IF
+  CPASSERT(ASSOCIATED(wf_history))
+  CPASSERT(ASSOCIATED(wf_history%past_states))
+  IF (index>wf_history%memory_depth.OR.index>wf_history%snapshot_count) THEN
+     CPABORT("")
   END IF
-  IF (.not.failure) THEN
-     res => wf_history%past_states(&
-          MODULO(wf_history%snapshot_count+1-index,&
-          wf_history%memory_depth)+1)%snapshot
-  END IF
+  res => wf_history%past_states(&
+       MODULO(wf_history%snapshot_count+1-index,&
+       wf_history%memory_depth)+1)%snapshot
 END FUNCTION wfi_get_snapshot
 
 END MODULE qs_wf_history_types

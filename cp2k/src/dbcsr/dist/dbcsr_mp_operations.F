@@ -16,10 +16,12 @@ MODULE dbcsr_mp_operations
 
   USE dbcsr_config,                    ONLY: has_MPI
   USE dbcsr_data_methods,              ONLY: dbcsr_data_get_type
-  USE dbcsr_error_handling,            ONLY: &
-       dbcsr_assert, dbcsr_caller_error, dbcsr_error_set, dbcsr_error_stop, &
-       dbcsr_error_type, dbcsr_fatal_level, dbcsr_internal_error, &
-       dbcsr_warning_level, dbcsr_wrong_args_error
+  USE dbcsr_error_handling,            ONLY: dbcsr_assert,&
+                                             dbcsr_caller_error,&
+                                             dbcsr_fatal_level,&
+                                             dbcsr_internal_error,&
+                                             dbcsr_warning_level,&
+                                             dbcsr_wrong_args_error
   USE dbcsr_mp_methods,                ONLY: &
        dbcsr_mp_get_process, dbcsr_mp_grid_setup, dbcsr_mp_group, &
        dbcsr_mp_has_subgroups, dbcsr_mp_my_col_group, dbcsr_mp_my_row_group, &
@@ -35,11 +37,11 @@ MODULE dbcsr_mp_operations
   USE kinds,                           ONLY: real_4,&
                                              real_8
   USE message_passing,                 ONLY: &
-       mp_address_kind, mp_allgather, mp_alltoall, mp_irecv, mp_isend, &
-       mp_rget, mp_type_descriptor_type, mp_type_make, mp_waitall, &
-       mp_win_create
+       mp_allgather, mp_alltoall, mp_irecv, mp_isend, mp_rget, &
+       mp_type_descriptor_type, mp_type_make, mp_waitall, mp_win_create
+#include "../../base/base_uses.f90"
 
-  !$ USE OMP_LIB
+  !$ USE OMP_LIB, ONLY: omp_get_max_threads, omp_get_thread_num, omp_get_num_threads
 
   IMPLICIT NONE
 
@@ -79,11 +81,9 @@ CONTAINS
 !> \param most_ptp ...
 !> \param remainder_ptp ...
 !> \param no_hybrid ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE hybrid_alltoall_any (sb, scount, sdispl,&
-       rb, rcount, rdispl, mp_env, most_ptp, remainder_ptp, no_hybrid,&
-       error)
+       rb, rcount, rdispl, mp_env, most_ptp, remainder_ptp, no_hybrid)
     TYPE(dbcsr_data_obj), INTENT(IN)         :: sb
     INTEGER, DIMENSION(:), INTENT(IN)        :: scount, sdispl
     TYPE(dbcsr_data_obj), INTENT(INOUT)      :: rb
@@ -91,7 +91,6 @@ CONTAINS
     TYPE(dbcsr_mp_obj), INTENT(IN)           :: mp_env
     LOGICAL, INTENT(in), OPTIONAL            :: most_ptp, remainder_ptp, &
                                                 no_hybrid
-    TYPE(dbcsr_error_type)                   :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'hybrid_alltoall_any', &
       routineP = moduleN//':'//routineN
@@ -100,7 +99,7 @@ CONTAINS
 
 !   ---------------------------------------------------------------------------
 
-    CALL dbcsr_error_set(routineN, error_handle, error)
+    CALL timeset(routineN, error_handle)
 
     SELECT CASE (dbcsr_data_get_type (sb))
     CASE (dbcsr_type_real_4)
@@ -121,10 +120,10 @@ CONTAINS
        most_ptp, remainder_ptp, no_hybrid)
     CASE default
        CALL dbcsr_assert (.FALSE., dbcsr_fatal_level, dbcsr_internal_error,&
-            routineN, "Invalid data type",__LINE__,error)
+            routineN, "Invalid data type",__LINE__)
     END SELECT
 
-    CALL dbcsr_error_stop(error_handle, error)
+    CALL timestop(error_handle)
   END SUBROUTINE hybrid_alltoall_any
 
 
@@ -392,15 +391,13 @@ CONTAINS
 !> \param comm ...
 !> \param request ...
 !> \param tag ...
-!> \param error ...
 !> \note see mp_isend_iv 
 ! *****************************************************************************
-  SUBROUTINE dbcsr_isend_any(msgin,dest,comm,request,tag, error)
+  SUBROUTINE dbcsr_isend_any(msgin,dest,comm,request,tag)
     TYPE(dbcsr_data_obj), INTENT(IN)         :: msgin
     INTEGER, INTENT(IN)                      :: dest, comm
     INTEGER, INTENT(OUT)                     :: request
     INTEGER, INTENT(IN), OPTIONAL            :: tag
-    TYPE(dbcsr_error_type), INTENT(INOUT)    :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'dbcsr_isend_any', &
       routineP = moduleN//':'//routineN
@@ -416,7 +413,7 @@ CONTAINS
        CALL mp_isend (msgin%d%c_dp, dest, comm, request, tag)
     CASE default
        CALL dbcsr_assert (.FALSE., dbcsr_fatal_level, dbcsr_caller_error,&
-            routineN, "Incorrect data type", __LINE__, error=error)
+            routineN, "Incorrect data type", __LINE__)
     END SELECT
   END SUBROUTINE dbcsr_isend_any
 
@@ -427,15 +424,13 @@ CONTAINS
 !> \param comm ...
 !> \param request ...
 !> \param tag ...
-!> \param error ...
 !> \note see mp_irecv_iv
 ! *****************************************************************************
-  SUBROUTINE dbcsr_irecv_any(msgin,source,comm,request,tag, error)
+  SUBROUTINE dbcsr_irecv_any(msgin,source,comm,request,tag)
     TYPE(dbcsr_data_obj), INTENT(IN)         :: msgin
     INTEGER, INTENT(IN)                      :: source, comm
     INTEGER, INTENT(OUT)                     :: request
     INTEGER, INTENT(IN), OPTIONAL            :: tag
-    TYPE(dbcsr_error_type), INTENT(INOUT)    :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'dbcsr_irecv_any', &
       routineP = moduleN//':'//routineN
@@ -451,7 +446,7 @@ CONTAINS
        CALL mp_irecv (msgin%d%c_dp, source, comm, request, tag)
     CASE default
        CALL dbcsr_assert (.FALSE., dbcsr_fatal_level, dbcsr_caller_error,&
-            routineN, "Incorrect data type", __LINE__, error=error)
+            routineN, "Incorrect data type", __LINE__)
     END SELECT
   END SUBROUTINE dbcsr_irecv_any
 
@@ -460,20 +455,16 @@ CONTAINS
 !> \param base ...
 !> \param comm ...
 !> \param win ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE dbcsr_win_create_any(base,comm,win,error)
+  SUBROUTINE dbcsr_win_create_any(base,comm,win)
     TYPE(dbcsr_data_obj), INTENT(IN)         :: base
     INTEGER, INTENT(IN)                      :: comm
     INTEGER, INTENT(OUT)                     :: win
-    TYPE(dbcsr_error_type), INTENT(INOUT)    :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'dbcsr_win_create_any', &
       routineP = moduleN//':'//routineN
 
     SELECT CASE (dbcsr_data_get_type (base))
-    CASE (dbcsr_type_int_4)
-       CALL mp_win_create (base%d%i4, comm, win)
     CASE (dbcsr_type_real_4)
        CALL mp_win_create (base%d%r_sp, comm, win)
     CASE (dbcsr_type_real_8)
@@ -484,7 +475,7 @@ CONTAINS
        CALL mp_win_create (base%d%c_dp, comm, win)
     CASE default
        CALL dbcsr_assert (.FALSE., dbcsr_fatal_level, dbcsr_caller_error,&
-            routineN, "Incorrect data type", __LINE__, error=error)
+            routineN, "Incorrect data type", __LINE__)
     END SELECT
   END SUBROUTINE dbcsr_win_create_any
 
@@ -495,23 +486,18 @@ CONTAINS
 !> \param win ...
 !> \param disp ...
 !> \param request ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE dbcsr_rget_any(base,source,win,disp,request,error)
+  SUBROUTINE dbcsr_rget_any(base,source,win,disp,request)
     TYPE(dbcsr_data_obj), INTENT(IN)         :: base
     INTEGER, INTENT(IN)                      :: source
     INTEGER, INTENT(INOUT)                   :: win
-    INTEGER(kind=mp_address_kind), &
-      INTENT(IN), OPTIONAL                   :: disp
+    INTEGER, INTENT(IN), OPTIONAL            :: disp
     INTEGER, INTENT(OUT)                     :: request
-    TYPE(dbcsr_error_type), INTENT(INOUT)    :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'dbcsr_rget_any', &
       routineP = moduleN//':'//routineN
 
     SELECT CASE (dbcsr_data_get_type (base))
-    CASE (dbcsr_type_int_4)
-       CALL mp_rget (base%d%i4, source, win, disp, request)
     CASE (dbcsr_type_real_4)
        CALL mp_rget (base%d%r_sp, source, win, disp, request)
     CASE (dbcsr_type_real_8)
@@ -522,7 +508,7 @@ CONTAINS
        CALL mp_rget (base%d%c_dp, source, win, disp, request)
     CASE default
        CALL dbcsr_assert (.FALSE., dbcsr_fatal_level, dbcsr_caller_error,&
-            routineN, "Incorrect data type", __LINE__, error=error)
+            routineN, "Incorrect data type", __LINE__)
     END SELECT
   END SUBROUTINE dbcsr_rget_any
 
@@ -544,12 +530,9 @@ CONTAINS
     CHARACTER(len=*), PARAMETER :: routineN = 'dbcsr_allgatherv', &
       routineP = moduleN//':'//routineN
 
-    TYPE(dbcsr_error_type)                   :: error
-
     CALL dbcsr_assert (dbcsr_data_get_type (send_data), "EQ",&
          dbcsr_data_get_type (recv_data), dbcsr_fatal_level,&
-         dbcsr_wrong_args_error, routineN, "Data type mismatch", __LINE__,&
-         error=error)
+         dbcsr_wrong_args_error, routineN, "Data type mismatch", __LINE__)
     SELECT CASE (dbcsr_data_get_type(send_data))
     CASE (dbcsr_type_real_4)
        CALL mp_allgather(send_data%d%r_sp, recv_data%d%r_sp,&
@@ -565,7 +548,7 @@ CONTAINS
        recv_count, recv_displ, gid)
     CASE default
        CALL dbcsr_assert (.FALSE., dbcsr_fatal_level, dbcsr_wrong_args_error,&
-            routineN, "Invalid data type", __LINE__, error=error)
+            routineN, "Invalid data type", __LINE__)
     END SELECT
   END SUBROUTINE dbcsr_allgatherv
 

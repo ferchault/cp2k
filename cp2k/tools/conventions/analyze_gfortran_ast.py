@@ -8,7 +8,7 @@ import sys
 from os import path
 
 
-BANNED_STM  = ('GOTO', 'FORALL', 'OPEN', 'CLOSE', )
+BANNED_STM  = ('GOTO', 'FORALL', 'OPEN', 'CLOSE', 'STOP',)
 BANNED_CALL = ('CP_FM_GEMM', )
 USE_EXCEPTIONS = ("OMP_LIB", "OMP_LIB_KINDS", "LAPACK",)
 
@@ -47,13 +47,26 @@ def process_log_file(fn, public_symbols, used_symbols):
     lines = ast.split("\n")
     module_name = None
 
-    curr_symbol = curr_procedure = None
+    curr_symbol = curr_procedure = stat_var = stat_stm = None
 
     for line in lines:
         line = line.strip()
         tokens = line.split()
 
-        if(line.startswith("procedure name =")):
+        if(stat_var):
+            if(stat_var in line): # Ok, something was done with stat_var
+                stat_var = stat_stm = None # reset
+            elif(line=="ENDIF"):
+                pass # skip, check may happen in outer scope
+            elif(stat_stm=="READ" and line.split()[0] in ("TRANSFER", "DT_END",)):
+                pass # skip lines, they are part of the READ statement
+            elif(stat_stm=="ALLOCATE" and line.split()[0] == "ASSIGN"):
+                pass # skip lines, it's part of the ALLOCATE statment
+            else:
+                print(loc+': Found %s with unchecked STAT in "%s"'%(stat_stm,curr_procedure))
+                stat_var = stat_stm = None # reset
+
+        elif(line.startswith("procedure name =")):
             curr_procedure = line.split("=")[1].strip()
             if(not module_name):
                 module_name = curr_procedure
@@ -61,7 +74,6 @@ def process_log_file(fn, public_symbols, used_symbols):
         elif(line.startswith("symtree: ") or len(line)==0):
             curr_symbol = None
             if(len(line)==0): continue
-
             curr_symbol = re_symbol.match(line).group(1)
 
         elif(line.startswith("attributes:")):
@@ -86,12 +98,28 @@ def process_log_file(fn, public_symbols, used_symbols):
                 print(loc+': OMP PARALLEL without DEFAULT(NONE) found in "'+curr_procedure+'"')
 
         elif(line.startswith("CALL")):
-            if(tokens[1] in BANNED_CALL):
+            if(tokens[1].upper() in BANNED_CALL):
                 print(loc+": Found CALL "+tokens[1]+' in procedure "'+curr_procedure+'"')
+            elif(tokens[1].lower().startswith("_gfortran_arandom_")):
+                print(loc+': Found CALL RANDOM_NUMBER in procedure "'+curr_procedure+'"')
+            elif(tokens[1].lower().startswith("_gfortran_random_seed_")):
+                print(loc+': Found CALL RANDOM_SEED in procedure "'+curr_procedure+'"')
 
         elif(tokens and tokens[0] in BANNED_STM):
             print(loc+": Found "+tokens[0]+' statement in procedure "'+curr_procedure+'"')
 
+        elif(line.startswith("WRITE")):
+            unit = tokens[1].split("=")[1]
+            if(unit.isdigit()):
+                print(loc+': Found WRITE statement with hardcoded unit in "'+curr_procedure+'"')
+
+        elif(line.startswith("DEALLOCATE") and "STAT=" in line):
+            print(loc+': Found DEALLOCATE with STAT argument in "'+curr_procedure+'"')
+
+        elif("STAT=" in line): # catches also IOSTAT
+            stat_var = line.split("STAT=",1)[1].split()[0]
+            stat_stm = line.split()[0]
+            
 
 #===============================================================================
 main()

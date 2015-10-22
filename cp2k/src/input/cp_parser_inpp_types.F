@@ -16,6 +16,7 @@ MODULE cp_parser_inpp_types
   
   USE kinds,                           ONLY: default_path_length
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -48,26 +49,19 @@ CONTAINS
 !> \brief creates the internal preprocessing type
 !> \param inpp ...
 !> \param initial_variables ...
-!> \param error ...
 !> \date  22.02.2008
 !> \author Teodoro Laino [tlaino] - University of Zurich
 ! *****************************************************************************
-  SUBROUTINE create_inpp_type(inpp, initial_variables, error)
+  SUBROUTINE create_inpp_type(inpp, initial_variables)
     TYPE(inpp_type), POINTER                 :: inpp
     CHARACTER(len=default_path_length), &
       DIMENSION(:, :), POINTER               :: initial_variables
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'create_inpp_type', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    CPPostcondition(.NOT.ASSOCIATED(inpp),cp_failure_level,routineP,error,failure)
-    ALLOCATE(inpp, stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    CPASSERT(.NOT.ASSOCIATED(inpp))
+    ALLOCATE(inpp)
 
     inpp%io_stack_level = 0
     NULLIFY(inpp%io_stack_channel,&
@@ -80,11 +74,9 @@ CONTAINS
 
     IF (ASSOCIATED(initial_variables)) THEN
        inpp%num_variables =SIZE(initial_variables,2)
-       ALLOCATE(inpp%variable_name(inpp%num_variables),stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       ALLOCATE(inpp%variable_name(inpp%num_variables))
        inpp%variable_name=initial_variables(1,:)
-       ALLOCATE(inpp%variable_value(inpp%num_variables),stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       ALLOCATE(inpp%variable_value(inpp%num_variables))
        inpp%variable_value=initial_variables(2,:)
     ENDIF
 
@@ -93,47 +85,35 @@ CONTAINS
 ! ****************************************************************************
 !> \brief releases the internal preprocessing type
 !> \param inpp ...
-!> \param error ...
 !> \date  22.02.2008
 !> \author Teodoro Laino [tlaino] - University of Zurich
 ! *****************************************************************************
-  SUBROUTINE release_inpp_type(inpp, error)
+  SUBROUTINE release_inpp_type(inpp)
     TYPE(inpp_type), POINTER                 :: inpp
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'release_inpp_type', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    CPPostcondition(ASSOCIATED(inpp),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(inpp))
 
     IF (ASSOCIATED(inpp%io_stack_channel)) THEN
-       DEALLOCATE(inpp%io_stack_channel,stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE(inpp%io_stack_channel)
     END IF
     IF (ASSOCIATED(inpp%io_stack_lineno)) THEN
-       DEALLOCATE(inpp%io_stack_lineno,stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE(inpp%io_stack_lineno)
     END IF
     IF (ASSOCIATED(inpp%io_stack_filename)) THEN
-       DEALLOCATE(inpp%io_stack_filename,stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE(inpp%io_stack_filename)
     END IF
 
     IF (ASSOCIATED(inpp%variable_name)) THEN
-       DEALLOCATE(inpp%variable_name,stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE(inpp%variable_name)
     END IF
     IF (ASSOCIATED(inpp%variable_value)) THEN
-       DEALLOCATE(inpp%variable_value,stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE(inpp%variable_value)
     END IF
 
-    DEALLOCATE(inpp, stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(inpp)
   END SUBROUTINE release_inpp_type
 
 END MODULE cp_parser_inpp_types

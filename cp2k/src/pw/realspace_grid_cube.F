@@ -17,9 +17,8 @@ MODULE realspace_grid_cube
                                              mp_sync
   USE pw_grid_types,                   ONLY: PW_MODE_LOCAL
   USE pw_types,                        ONLY: pw_type
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -40,9 +39,8 @@ CONTAINS
 !> \param particles_z ...
 !> \param stride ...
 !> \param zero_tails ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE pw_to_cube ( pw, unit_nr, title, particles_r, particles_z, stride, zero_tails, error )
+  SUBROUTINE pw_to_cube ( pw, unit_nr, title, particles_r, particles_z, stride, zero_tails)
     TYPE(pw_type), POINTER                   :: pw
     INTEGER, INTENT(IN)                      :: unit_nr
     CHARACTER(*), INTENT(IN), OPTIONAL       :: title
@@ -52,28 +50,24 @@ CONTAINS
       OPTIONAL                               :: particles_z
     INTEGER, DIMENSION(:), OPTIONAL, POINTER :: stride
     LOGICAL, INTENT(IN), OPTIONAL            :: zero_tails
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'pw_to_cube', &
       routineP = moduleN//':'//routineN
 
     INTEGER :: checksum, dest, gid, handle, i, I1, I2, I3, iat, ip, L1, L2, &
-      L3, my_rank, my_stride(3), np, num_pe, rank(2), source, stat, tag, U1, &
-      U2, U3
-    LOGICAL                                  :: failure, my_zero_tails
+      L3, my_rank, my_stride(3), np, num_pe, rank(2), source, tag, U1, U2, U3
+    LOGICAL                                  :: my_zero_tails
     REAL(KIND=dp), ALLOCATABLE, DIMENSION(:) :: buf
 
     CALL timeset(routineN,handle)
 
-    failure=.FALSE.
     my_zero_tails = .FALSE.
     IF(PRESENT(zero_tails)) my_zero_tails = zero_tails
     my_stride=1
     IF (PRESENT(stride)) THEN
-       CALL cp_assert(SIZE(stride)==1.OR.SIZE(stride)==3,cp_fatal_level,cp_assertion_failed,routineP,&
-            "STRIDE keyword can accept only 1 (the same for X,Y,Z) or 3 values. Correct your input file."//&
-CPSourceFileRef,&
-            only_ionode=.TRUE.)
+       IF(SIZE(stride)/=1.AND.SIZE(stride)/=3)&
+          CALL cp_abort(__LOCATION__, "STRIDE keyword can accept only 1 "//&
+               "(the same for X,Y,Z) or 3 values. Correct your input file.")
        IF (SIZE(stride)==1) THEN
           DO i = 1,3
              my_stride(i) = stride(1)
@@ -81,9 +75,9 @@ CPSourceFileRef,&
        ELSE
           my_stride = stride(1:3)
        END IF
-       CPPrecondition(my_stride(1)>0,cp_failure_level,routineP,error,failure)
-       CPPrecondition(my_stride(2)>0,cp_failure_level,routineP,error,failure)
-       CPPrecondition(my_stride(3)>0,cp_failure_level,routineP,error,failure)
+       CPASSERT(my_stride(1)>0)
+       CPASSERT(my_stride(2)>0)
+       CPASSERT(my_stride(3)>0)
     END IF
 
     IF (unit_nr>0) THEN
@@ -96,10 +90,10 @@ CPSourceFileRef,&
          WRITE(unit_nr,*) "No Title"
       ENDIF
 
-      CPPrecondition(PRESENT(particles_z) .EQV. PRESENT(particles_r),cp_failure_level,routineP,error,failure)
+      CPASSERT(PRESENT(particles_z) .EQV. PRESENT(particles_r))
       np=0
       IF(PRESENT(particles_z)) THEN
-         CPPrecondition(SIZE(particles_z) == SIZE(particles_r, dim=2),cp_failure_level,routineP,error,failure)
+         CPASSERT(SIZE(particles_z) == SIZE(particles_r, dim=2))
          ! cube files can only be written for 99999 particles due to a format limitation (I5)
          ! so we limit the number of particles written.
          np=MIN(99999,SIZE(particles_z))
@@ -132,8 +126,7 @@ CPSourceFileRef,&
     U2=pw%pw_grid%bounds(2,2)
     U3=pw%pw_grid%bounds(2,3)
 
-    ALLOCATE(buf(L3:U3),stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(buf(L3:U3))
 
     my_rank     = pw%pw_grid%para%my_pos
     gid         = pw%pw_grid%para%group
@@ -146,10 +139,10 @@ CPSourceFileRef,&
     IF (unit_nr>0) checksum=1
 
     CALL mp_sum(checksum,gid)
-    CPPostcondition(checksum==1,cp_failure_level,routineP,error,failure)
+    CPASSERT(checksum==1)
 
     CALL mp_maxloc(rank,gid)
-    CPPostcondition(rank(1)>0,cp_failure_level,routineP,error,failure)
+    CPASSERT(rank(1)>0)
 
     dest = rank(2)
     DO I1=L1,U1,my_stride(1)
@@ -214,31 +207,29 @@ CPSourceFileRef,&
 !> \param grid     pw to read from cube file
 !> \param filename name of cube file
 !> \param scaling  scale values before storing
-!> \param error ...
 !> \date   01.2014
 !> \author M.Watkins
 ! *****************************************************************************
-  SUBROUTINE cube_to_pw(grid, filename, scaling, error)
+  SUBROUTINE cube_to_pw(grid, filename, scaling)
 
     TYPE(pw_type), POINTER                   :: grid
     CHARACTER(len=*), INTENT(in)             :: filename
     REAL(kind=dp), INTENT(in)                :: scaling
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cube_to_pw', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: extunit, gid, handle, i, ip, &
                                                 j, k, master, my_rank, nat, &
-                                                ndum, num_pe, tag
+                                                ndum, num_pe, output_unit, tag
     INTEGER, DIMENSION(3)                    :: lbounds, lbounds_local, &
                                                 npoints, npoints_local, &
                                                 ubounds, ubounds_local
-    LOGICAL                                  :: failure
     REAL(kind=dp), ALLOCATABLE, DIMENSION(:) :: buffer
     REAL(kind=dp), DIMENSION(3)              :: dr, rdum
 
-    failure=.FALSE.
+    output_unit = cp_logger_get_default_io_unit()
+
     CALL timeset(routineN,handle)
 
     !get rs grids and parallel envnment
@@ -262,8 +253,10 @@ CPSourceFileRef,&
    !pw grids at most pencils - all processors have a full set of z data for x,y 
    ALLOCATE(buffer(lbounds(3):ubounds(3)))
 
-   IF ( my_rank == 0 ) THEN
-      WRITE(*,FMT="(/,(T3,A,T61,A30))")"Reading the cube file:     ",filename
+   IF ( my_rank == 0) THEN
+      IF (output_unit > 0) THEN
+         WRITE(output_unit,FMT="(/,(T3,A,T61,A30))")"Reading the cube file:     ",filename
+      END IF
 
       CALL open_file(file_name=filename,&
            file_status="OLD",&
@@ -278,10 +271,11 @@ CPSourceFileRef,&
       READ(extunit,*) nat,rdum
       DO i=1,3
          READ(extunit,*) ndum,rdum
-         IF (ndum/=npoints(i).OR.(ABS(rdum(i)-dr(i)) > 1e-4 )) THEN   
-            WRITE(*,*) "Restart from density | ERROR! | CUBE FILE NOT COINCIDENT WITH INTERNAL GRID ", i
-            WRITE(*,*) "Restart from density | ",ndum," DIFFERS FROM ", npoints(i) 
-            WRITE(*,*) "Restart from density | ",rdum," DIFFERS FROM ", dr(i)
+         IF ((ndum/=npoints(i).OR.(ABS(rdum(i)-dr(i)) > 1e-4 )) .AND. &
+             output_unit > 0) THEN   
+            WRITE(output_unit,*) "Restart from density | ERROR! | CUBE FILE NOT COINCIDENT WITH INTERNAL GRID ", i
+            WRITE(output_unit,*) "Restart from density | ",ndum," DIFFERS FROM ", npoints(i) 
+            WRITE(output_unit,*) "Restart from density | ",rdum," DIFFERS FROM ", dr(i)
          ENDIF
       ENDDO
       !ignore atomic postion data - read from coord or topology instead

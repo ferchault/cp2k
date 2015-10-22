@@ -16,8 +16,6 @@
 !>               dbcsr_mm_methods.
 !>  - 2013-01    extensive refactoring (Ole Schuett)
 ! *****************************************************************************
-
-
 MODULE dbcsr_mm_sched
   USE dbcsr_block_operations,          ONLY: dbcsr_data_clear
   USE dbcsr_config,                    ONLY: accdrv_avoid_after_busy,&
@@ -28,9 +26,7 @@ MODULE dbcsr_mm_sched
                                              mm_driver_acc
   USE dbcsr_data_methods,              ONLY: dbcsr_data_ensure_size,&
                                              dbcsr_data_get_size
-  USE dbcsr_error_handling,            ONLY: dbcsr_error_set,&
-                                             dbcsr_error_stop,&
-                                             dbcsr_error_type
+  USE dbcsr_error_handling,            ONLY: dbcsr_abort
   USE dbcsr_mm_accdrv,                 ONLY: dbcsr_mm_accdrv_barrier,&
                                              dbcsr_mm_accdrv_finalize,&
                                              dbcsr_mm_accdrv_init,&
@@ -39,10 +35,7 @@ MODULE dbcsr_mm_sched
                                              dbcsr_mm_accdrv_phaseout,&
                                              dbcsr_mm_accdrv_process,&
                                              dbcsr_mm_accdrv_type
-  USE dbcsr_mm_hostdrv,                ONLY: dbcsr_mm_hostdrv_barrier,&
-                                             dbcsr_mm_hostdrv_finalize,&
-                                             dbcsr_mm_hostdrv_init,&
-                                             dbcsr_mm_hostdrv_phaseout,&
+  USE dbcsr_mm_hostdrv,                ONLY: dbcsr_mm_hostdrv_init,&
                                              dbcsr_mm_hostdrv_process,&
                                              dbcsr_mm_hostdrv_type
   USE dbcsr_mm_types,                  ONLY: p_a_first,&
@@ -63,8 +56,9 @@ MODULE dbcsr_mm_sched
                                              mp_environ,&
                                              mp_max,&
                                              mp_sum
+#include "../../base/base_uses.f90"
 
- !$ USE OMP_LIB
+ !$ USE OMP_LIB, ONLY: omp_get_max_threads, omp_get_thread_num, omp_get_num_threads
 
   IMPLICIT NONE
 
@@ -97,6 +91,8 @@ MODULE dbcsr_mm_sched
     INTEGER(kind=int_8)                              :: acc_num_stacks = 0
     INTEGER(kind=int_8)                              :: acc_flop = 0
     INTEGER(kind=int_8)                              :: cpu_flop = 0
+    INTEGER(kind=int_8)                              :: max_acc_flop = 0
+    INTEGER(kind=int_8)                              :: max_cpu_flop = 0
     INTEGER(kind=int_8), DIMENSION(:,:), ALLOCATABLE :: num_mnk_stacks
     ! ensure that array-elements are on different cache lines
     INTEGER(kind=int_4), DIMENSION(64)               :: padding
@@ -126,11 +122,9 @@ MODULE dbcsr_mm_sched
 
 ! *****************************************************************************
 !> \brief Initialize the library
-!> \param error ...
 !> \author Ole Schuett
 ! *****************************************************************************
-  SUBROUTINE dbcsr_mm_sched_lib_init(error)
-    TYPE(dbcsr_error_type), INTENT(INOUT)    :: error
+  SUBROUTINE dbcsr_mm_sched_lib_init()
 
     INTEGER                                  :: ithread, nthreads
 
@@ -144,7 +138,7 @@ MODULE dbcsr_mm_sched
     !$OMP BARRIER
 
     CALL stats_init(stats_per_thread(ithread))
-    CALL dbcsr_mm_accdrv_lib_init(error)
+    CALL dbcsr_mm_accdrv_lib_init()
 
   END SUBROUTINE dbcsr_mm_sched_lib_init
 
@@ -153,24 +147,22 @@ MODULE dbcsr_mm_sched
 !> \brief Finalize the library and prints DBCSR statistics
 !> \param group ...
 !> \param output_unit ...
-!> \param error ...
 !> \author Ole Schuett
 ! *****************************************************************************
-  SUBROUTINE dbcsr_mm_sched_lib_finalize(group, output_unit, error)
+  SUBROUTINE dbcsr_mm_sched_lib_finalize(group, output_unit)
     INTEGER, INTENT(IN)                      :: group, output_unit
-    TYPE(dbcsr_error_type), INTENT(INOUT)    :: error
 
     TYPE(stats_type)                         :: report
 
-   CALL dbcsr_mm_accdrv_lib_finalize(error)
+   CALL dbcsr_mm_accdrv_lib_finalize()
 
    ! Collect and output statistics ---------------------------------------------
 
    !$OMP MASTER
       CALL stats_init(report)
-      CALL stats_collect_from_threads(report, error)
-      CALL stats_collect_from_ranks(report, group, error)
-      CALL stats_print_report(report, output_unit, error)
+      CALL stats_collect_from_threads(report)
+      CALL stats_collect_from_ranks(report, group)
+      CALL stats_print_report(report, output_unit)
       DEALLOCATE(stats_per_thread)
    !$OMP END MASTER
 
@@ -207,20 +199,18 @@ MODULE dbcsr_mm_sched
 !> \brief Initializes a multiplication cycle for new set of C-blocks.
 !> \param this ...
 !> \param product_wm ...
-!> \param error ...
 !> \author Ole Schuett
 ! *****************************************************************************
-  SUBROUTINE dbcsr_mm_sched_init(this, product_wm, error)
+  SUBROUTINE dbcsr_mm_sched_init(this, product_wm)
     TYPE(dbcsr_mm_sched_type), INTENT(INOUT) :: this
     TYPE(dbcsr_work_type), POINTER           :: product_wm
-    TYPE(dbcsr_error_type), INTENT(INOUT)    :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'dbcsr_mm_sched_init', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: error_handler
+    INTEGER                                  :: handle
 
-    CALL dbcsr_error_set(routineN, error_handler, error)
+    CALL timeset(routineN, handle)
 
     this%product_wm => product_wm
 
@@ -229,81 +219,72 @@ MODULE dbcsr_mm_sched
     ! We just have to remeber its datasize, in case it already contains data.
     this%product_wm_orig_datasize = this%product_wm%datasize
 
-    CALL dbcsr_mm_hostdrv_init(this%hostdrv,product_wm, error)
+    CALL dbcsr_mm_hostdrv_init(this%hostdrv,product_wm)
 
     IF (mm_driver == mm_driver_acc) &
-       CALL dbcsr_mm_accdrv_init(this%accdrv, product_wm, error)
+       CALL dbcsr_mm_accdrv_init(this%accdrv, product_wm)
 
-    CALL dbcsr_error_stop(error_handler, error)
+    CALL timestop(handle)
 
   END SUBROUTINE dbcsr_mm_sched_init
 
 ! *****************************************************************************
 !> \brief Signal approaching end of multiplication
 !> \param this ...
-!> \param error ...
 !> \author Ole Schuett
 ! *****************************************************************************
-  SUBROUTINE dbcsr_mm_sched_phaseout(this, error)
+  SUBROUTINE dbcsr_mm_sched_phaseout(this)
     TYPE(dbcsr_mm_sched_type), INTENT(INOUT) :: this
-    TYPE(dbcsr_error_type), INTENT(INOUT)    :: error
 
-    CALL dbcsr_mm_hostdrv_phaseout(this%hostdrv, error)
+!CALL dbcsr_mm_hostdrv_phaseout(this%hostdrv) ! not needed
+
     IF (mm_driver == mm_driver_acc) &
-       CALL dbcsr_mm_accdrv_phaseout(this%accdrv, error)
+       CALL dbcsr_mm_accdrv_phaseout(this%accdrv)
   END SUBROUTINE dbcsr_mm_sched_phaseout
 
 
 ! *****************************************************************************
 !> \brief Finalizes a multiplication cycle for a set of C-blocks.
 !> \param this ...
-!> \param error ...
 !> \author Ole Schuett
 ! *****************************************************************************
-  SUBROUTINE dbcsr_mm_sched_finalize(this, error)
+  SUBROUTINE dbcsr_mm_sched_finalize(this)
     TYPE(dbcsr_mm_sched_type), INTENT(INOUT) :: this
-    TYPE(dbcsr_error_type), INTENT(INOUT)    :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'dbcsr_mm_sched_finalize', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: error_handler
+    INTEGER                                  :: handle
 
-    CALL dbcsr_error_set(routineN, error_handler, error)
+    CALL timeset(routineN, handle)
 
     ! Just in case dbcsr_mm_sched_process was never called (really needed?)
     CALL ensure_product_wm_cleared(this)
 
-    CALL dbcsr_mm_hostdrv_finalize(this%hostdrv, error)
+    !CALL dbcsr_mm_hostdrv_finalize(this%hostdrv) ! not needed
     IF (mm_driver == mm_driver_acc) &
-       CALL dbcsr_mm_accdrv_finalize(this%accdrv, error)
+       CALL dbcsr_mm_accdrv_finalize(this%accdrv)
 
-    CALL dbcsr_error_stop(error_handler, error)
+    CALL timestop(handle)
 
   END SUBROUTINE dbcsr_mm_sched_finalize
 
 ! *****************************************************************************
 !> \brief Signal begin of a burst of calls to dbcsr_mm_sched_process.
 !> \param this ...
-!> \param error ...
 !> \author Ole Schuett
 ! *****************************************************************************
-  SUBROUTINE dbcsr_mm_sched_begin_burst(this, error)
+  SUBROUTINE dbcsr_mm_sched_begin_burst(this)
     TYPE(dbcsr_mm_sched_type), INTENT(INOUT) :: this
-    TYPE(dbcsr_error_type), INTENT(INOUT)    :: error
 
     this%avoid_accdrv = .FALSE.
   END SUBROUTINE dbcsr_mm_sched_begin_burst
 
 ! *****************************************************************************
 !> \brief Signal end of a burst of calls to dbcsr_mm_sched_process.
-!> \param this ...
-!> \param error ...
 !> \author Ole Schuett
 ! *****************************************************************************
-  SUBROUTINE dbcsr_mm_sched_end_burst(this, error)
-    TYPE(dbcsr_mm_sched_type), INTENT(INOUT) :: this
-    TYPE(dbcsr_error_type), INTENT(INOUT)    :: error
+  SUBROUTINE dbcsr_mm_sched_end_burst()
 
 !nothing to do here
 
@@ -311,17 +292,14 @@ MODULE dbcsr_mm_sched
 
 ! *****************************************************************************
 !> \brief Signal that previous stacks should be processed first
-!> \param this ...
-!> \param error ...
 !> \author Ole Schuett
 ! *****************************************************************************
-  SUBROUTINE dbcsr_mm_sched_barrier(this, error)
-    TYPE(dbcsr_mm_sched_type), INTENT(INOUT) :: this
-    TYPE(dbcsr_error_type), INTENT(INOUT)    :: error
+  SUBROUTINE dbcsr_mm_sched_barrier()
 
-    CALL dbcsr_mm_hostdrv_barrier(this%hostdrv, error)
+!CALL dbcsr_mm_hostdrv_barrier(this%hostdrv) ! not needed
+
     IF (mm_driver==mm_driver_acc) &
-       CALL dbcsr_mm_accdrv_barrier(error)
+       CALL dbcsr_mm_accdrv_barrier()
 
   END SUBROUTINE dbcsr_mm_sched_barrier
 
@@ -333,17 +311,18 @@ MODULE dbcsr_mm_sched
 !> \param stack_data ...
 !> \param stack_fillcount ...
 !> \param stack_descr ...
-!> \param error ...
 !> \author Ole Schuett
 ! *****************************************************************************
   SUBROUTINE dbcsr_mm_sched_process(this, left, right, stack_data,&
-                    stack_fillcount, stack_descr, error)
+                    stack_fillcount, stack_descr)
     TYPE(dbcsr_mm_sched_type), INTENT(INOUT) :: this
     TYPE(dbcsr_type), INTENT(IN)             :: left, right
     INTEGER, DIMENSION(:, :), POINTER        :: stack_data
     INTEGER, POINTER                         :: stack_fillcount
     TYPE(stack_descriptor_type), INTENT(IN)  :: stack_descr
-    TYPE(dbcsr_error_type), INTENT(INOUT)    :: error
+
+    CHARACTER(LEN=*), PARAMETER :: routineN = 'dbcsr_mm_sched_process', &
+      routineP = moduleN//':'//routineN
 
     INTEGER                                  :: ithread, sp, stacked_datasize
     INTEGER(kind=int_8)                      :: flop_per_entry, total_flop
@@ -360,20 +339,20 @@ MODULE dbcsr_mm_sched
 
     stacked_datasize   = this%product_wm%datasize
     CALL dbcsr_data_ensure_size(this%product_wm%data_area, stacked_datasize, &
-                    factor=default_resize_factor, zero_pad=.TRUE., error=error)
+                    factor=default_resize_factor, zero_pad=.TRUE.)
 
      !!From here on there is no boundary checking due to assumed-SIZE-arguments.
      !!This is usefull to check stack parameters, BUT it works only for kind=dp
      IF(.FALSE.) THEN
         DO sp = 1, stack_fillcount
            IF(stack_data(p_a_first,sp) > SIZE(left%data_area%d%r_dp)) &
-              STOP "left data out of range"
+              CALL dbcsr_abort(routineP,__LINE__,"left data out of range")
            IF(stack_data(p_b_first,sp) > SIZE(right%data_area%d%r_dp)) &
-              STOP "right data out of range"
+              CALL dbcsr_abort(routineP,__LINE__,"right data out of range")
            IF(stack_data(p_c_first,sp) > SIZE(this%product_wm%data_area%d%r_dp)) THEN
               WRITE (*,*) "blub: ",stack_data(p_c_first,sp) , SIZE(this%product_wm%data_area%d%r_dp), &
                 dbcsr_data_get_size(this%product_wm%data_area), stacked_datasize
-              STOP "product data out of range"
+              CALL dbcsr_abort(routineP,__LINE__,"product data out of range")
            END IF
         END DO
      ENDIF
@@ -404,8 +383,7 @@ MODULE dbcsr_mm_sched
                     params=stack_data,&
                     stack_size=stack_fillcount, &
                     stack_descr=stack_descr,&
-                    success=success,&
-                    error=error)
+                    success=success)
 
          IF(success) THEN
             ! update statistics
@@ -429,8 +407,7 @@ MODULE dbcsr_mm_sched
                 params=stack_data,&
                 stack_size=stack_fillcount, &
                 stack_descr=stack_descr,&
-                success=success,&
-                error=error)
+                success=success)
 
      IF(success) THEN
         ! update statistics
@@ -442,8 +419,7 @@ MODULE dbcsr_mm_sched
         RETURN
      ENDIF
 
-     STOP "dbcsr_mm_sched_process_stack failed"
-
+     CALL dbcsr_abort(routineP,__LINE__,"dbcsr_mm_sched_process_stack failed")
 
   END SUBROUTINE dbcsr_mm_sched_process
 
@@ -517,12 +493,10 @@ MODULE dbcsr_mm_sched
 ! *****************************************************************************
 !> \brief Collects statistics from all OpenMP-threads into report
 !> \param report ...
-!> \param error ...
 !> \author Ole Schuett
 ! *****************************************************************************
-  SUBROUTINE stats_collect_from_threads(report, error)
+  SUBROUTINE stats_collect_from_threads(report)
     TYPE(stats_type), INTENT(INOUT)          :: report
-    TYPE(dbcsr_error_type), INTENT(INOUT)    :: error
 
     INTEGER                                  :: i, j, nthreads
     TYPE(stats_type), POINTER                :: istats
@@ -558,13 +532,11 @@ MODULE dbcsr_mm_sched
 !> \brief Collects statistics from all MPI-ranks
 !> \param report ...
 !> \param group ...
-!> \param error ...
 !> \author Ole Schuett
 ! *****************************************************************************
-  SUBROUTINE stats_collect_from_ranks(report, group, error)
+  SUBROUTINE stats_collect_from_ranks(report, group)
     TYPE(stats_type), INTENT(INOUT)          :: report
     INTEGER, INTENT(IN)                      :: group
-    TYPE(dbcsr_error_type), INTENT(INOUT)    :: error
 
     INTEGER                                  :: i, myrank, nranks, &
                                                 sending_rank
@@ -574,6 +546,11 @@ MODULE dbcsr_mm_sched
     !$OMP MASTER
 
     CALL mp_environ(nranks, myrank, group)
+
+    report%max_acc_flop = report%acc_flop
+    CALL mp_max(report%max_acc_flop, group)
+    report%max_cpu_flop = report%cpu_flop
+    CALL mp_max(report%max_cpu_flop, group)
 
     CALL mp_sum(report%acc_flop, group)
     CALL mp_sum(report%cpu_flop, group)
@@ -614,13 +591,11 @@ MODULE dbcsr_mm_sched
 !> \brief Prints collected statistics
 !> \param report ...
 !> \param output_unit ...
-!> \param error ...
 !> \author Ole Schuett
 ! *****************************************************************************
-  SUBROUTINE stats_print_report(report, output_unit, error)
+  SUBROUTINE stats_print_report(report, output_unit)
     TYPE(stats_type), INTENT(INOUT)          :: report
     INTEGER, INTENT(IN)                      :: output_unit
-    TYPE(dbcsr_error_type), INTENT(INOUT)    :: error
 
     INTEGER                                  :: i, j
     INTEGER(KIND=int_8), ALLOCATABLE, &
@@ -648,6 +623,9 @@ MODULE dbcsr_mm_sched
     percent = 100*REAL(report%acc_flop)/REAL(MAX(INT(1,KIND=int_8),report%cpu_flop+report%acc_flop))
     WRITE (output_unit,'(A,T30,I20,1X,I20,T76,F5.1)') " flops total",&
        report%cpu_flop, report%acc_flop, percent
+
+    WRITE (output_unit,'(A,T30,I20,1X,I20)') " flops max/rank",&
+       report%max_cpu_flop, report%max_acc_flop
 
     percent = 100*REAL(report%num_mnk_stacks(1,5))/REAL(MAX(INT(1,KIND=int_8),SUM(report%num_mnk_stacks(1,4:5))))
     WRITE (output_unit,'(A,T30,I20,1X,I20,T76,F5.1)') " matmuls inhomo. stacks",&

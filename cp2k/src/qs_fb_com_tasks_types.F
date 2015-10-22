@@ -20,11 +20,9 @@ MODULE qs_fb_com_tasks_types
                                              fb_matrix_data_get,&
                                              fb_matrix_data_has_data,&
                                              fb_matrix_data_obj
-  USE termination,                     ONLY: stop_program
-  USE timings,                         ONLY: timeset,&
-                                             timestop
   USE util,                            ONLY: sort
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -161,24 +159,17 @@ CONTAINS
 !> \brief Retains an fb_com_tasks object
 !> \param com_tasks the fb_com_tasks object, its content must not be
 !>                   NULL or UNDEFINED
-!> \param error CP2K data container for error logging
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
-  SUBROUTINE fb_com_tasks_retain(com_tasks, error)
+  SUBROUTINE fb_com_tasks_retain(com_tasks)
     TYPE(fb_com_tasks_obj), INTENT(IN)       :: com_tasks
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_com_tasks_retain', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    CPPrecondition(ASSOCIATED(com_tasks%obj), cp_failure_level, routineP, error, failure)
-    IF (.NOT. failure) THEN
-       CPPreconditionNoFail(com_tasks%obj%ref_count>0, cp_failure_level, routineP, error)
-       com_tasks%obj%ref_count = com_tasks%obj%ref_count + 1
-    END IF
+    CPASSERT(ASSOCIATED(com_tasks%obj))
+    CPASSERT(com_tasks%obj%ref_count>0)
+    com_tasks%obj%ref_count = com_tasks%obj%ref_count + 1
   END SUBROUTINE fb_com_tasks_retain
 
 
@@ -186,24 +177,17 @@ CONTAINS
 !> \brief Retains an fb_com_atom_pairs object
 !> \param atom_pairs the fb_com_atom_pairs object, its content must not be
 !>                   NULL or UNDEFINED
-!> \param error CP2K data container for error logging
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
-  SUBROUTINE fb_com_atom_pairs_retain(atom_pairs, error)
+  SUBROUTINE fb_com_atom_pairs_retain(atom_pairs)
     TYPE(fb_com_atom_pairs_obj), INTENT(IN)  :: atom_pairs
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_com_atom_pairs_retain', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    CPPrecondition(ASSOCIATED(atom_pairs%obj), cp_failure_level, routineP, error, failure)
-    IF (.NOT. failure) THEN
-       CPPreconditionNoFail(atom_pairs%obj%ref_count>0, cp_failure_level, routineP, error)
-       atom_pairs%obj%ref_count = atom_pairs%obj%ref_count + 1
-    END IF
+    CPASSERT(ASSOCIATED(atom_pairs%obj))
+    CPASSERT(atom_pairs%obj%ref_count>0)
+    atom_pairs%obj%ref_count = atom_pairs%obj%ref_count + 1
   END SUBROUTINE fb_com_atom_pairs_retain
 
 
@@ -212,32 +196,24 @@ CONTAINS
 !> \param com_tasks the fb_com_tasks object, its content must not be
 !>                   UNDEFINED, and the subroutine does nothing if the
 !>                   content points to NULL
-!> \param error CP2K data container for error logging
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
-  SUBROUTINE fb_com_tasks_release(com_tasks, error)
+  SUBROUTINE fb_com_tasks_release(com_tasks)
     TYPE(fb_com_tasks_obj), INTENT(INOUT)    :: com_tasks
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_com_tasks_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
     IF (ASSOCIATED(com_tasks%obj)) THEN
-       CPPreconditionNoFail(com_tasks%obj%ref_count>0, cp_failure_level, routineP, error)
+       CPASSERT(com_tasks%obj%ref_count>0)
        com_tasks%obj%ref_count = com_tasks%obj%ref_count - 1
        IF (com_tasks%obj%ref_count == 0) THEN
           com_tasks%obj%ref_count = 1
           IF (ASSOCIATED(com_tasks%obj%tasks)) THEN
-             DEALLOCATE(com_tasks%obj%tasks, STAT=stat)
-             CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+             DEALLOCATE(com_tasks%obj%tasks)
           END IF
           com_tasks%obj%ref_count = 0
-          DEALLOCATE(com_tasks%obj, STAT=stat)
-          CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+          DEALLOCATE(com_tasks%obj)
        END IF
     ELSE
        NULLIFY(com_tasks%obj)
@@ -250,33 +226,25 @@ CONTAINS
 !> \param atom_pairs the fb_com_atom_pairs object, its content must not
 !>                    be UNDEFINED, and the subroutine does nothing if
 !>                    the content points to NULL
-!> \param error CP2K data container for error logging
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
-  SUBROUTINE fb_com_atom_pairs_release(atom_pairs, error)
+  SUBROUTINE fb_com_atom_pairs_release(atom_pairs)
     TYPE(fb_com_atom_pairs_obj), &
       INTENT(INOUT)                          :: atom_pairs
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_com_atom_pairs_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
     IF (ASSOCIATED(atom_pairs%obj)) THEN
-       CPPreconditionNoFail(atom_pairs%obj%ref_count>0, cp_failure_level, routineP, error)
+       CPASSERT(atom_pairs%obj%ref_count>0)
        atom_pairs%obj%ref_count = atom_pairs%obj%ref_count - 1
        IF (atom_pairs%obj%ref_count == 0) THEN
           atom_pairs%obj%ref_count = 1
           IF (ASSOCIATED(atom_pairs%obj%pairs)) THEN
-             DEALLOCATE(atom_pairs%obj%pairs, STAT=stat)
-             CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+             DEALLOCATE(atom_pairs%obj%pairs)
           END IF
           atom_pairs%obj%ref_count = 0
-          DEALLOCATE(atom_pairs%obj, stat=stat)
-          CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+          DEALLOCATE(atom_pairs%obj)
        END IF
     ELSE
        NULLIFY(atom_pairs%obj)
@@ -395,32 +363,23 @@ CONTAINS
 !> \brief Creates and initialises an empty fb_com_tasks object
 !> \param com_tasks the fb_com_tasks object, its content must be NULL
 !>                   and cannot be UNDEFINED
-!> \param error CP2K data container for error logging
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
-  SUBROUTINE fb_com_tasks_create(com_tasks, error)
+  SUBROUTINE fb_com_tasks_create(com_tasks)
     TYPE(fb_com_tasks_obj), INTENT(INOUT)    :: com_tasks
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_com_tasks_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    CPPrecondition(.NOT.ASSOCIATED(com_tasks%obj), cp_failure_level, routineP, error, failure)
-    IF (.NOT. failure) THEN
-       ALLOCATE(com_tasks%obj, STAT=stat)
-       CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-       com_tasks%obj%task_dim = TASK_N_RECORDS
-       com_tasks%obj%ntasks = 0
-       com_tasks%obj%nencode = 0
-       NULLIFY(com_tasks%obj%tasks)
-       com_tasks%obj%ref_count = 1
-       com_tasks%obj%id_nr = last_fb_com_tasks_id + 1
-       last_fb_com_tasks_id = com_tasks%obj%id_nr
-    END IF
+    CPASSERT(.NOT.ASSOCIATED(com_tasks%obj))
+    ALLOCATE(com_tasks%obj)
+    com_tasks%obj%task_dim = TASK_N_RECORDS
+    com_tasks%obj%ntasks = 0
+    com_tasks%obj%nencode = 0
+    NULLIFY(com_tasks%obj%tasks)
+    com_tasks%obj%ref_count = 1
+    com_tasks%obj%id_nr = last_fb_com_tasks_id + 1
+    last_fb_com_tasks_id = com_tasks%obj%id_nr
   END SUBROUTINE fb_com_tasks_create
 
 
@@ -428,32 +387,23 @@ CONTAINS
 !> \brief Creates and initialises an empty fb_com_atom_pairs object
 !> \param atom_pairs the fb_com_atom_pairs object, its content must be
 !>                    NULL and cannot be UNDEFINED
-!> \param error CP2K data container for error logging
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
-  SUBROUTINE fb_com_atom_pairs_create(atom_pairs, error)
+  SUBROUTINE fb_com_atom_pairs_create(atom_pairs)
     TYPE(fb_com_atom_pairs_obj), &
       INTENT(INOUT)                          :: atom_pairs
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_com_atom_pairs_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    CPPrecondition(.NOT.ASSOCIATED(atom_pairs%obj), cp_failure_level, routineP, error, failure)
-    IF (.NOT. failure) THEN
-       ALLOCATE(atom_pairs%obj, STAT=stat)
-       CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-       atom_pairs%obj%npairs = 0
-       atom_pairs%obj%natoms_encode = 0
-       NULLIFY(atom_pairs%obj%pairs)
-       atom_pairs%obj%ref_count = 1
-       atom_pairs%obj%id_nr = last_fb_com_atom_pairs_id + 1
-       last_fb_com_atom_pairs_id = atom_pairs%obj%id_nr
-    END IF
+    CPASSERT(.NOT.ASSOCIATED(atom_pairs%obj))
+    ALLOCATE(atom_pairs%obj)
+    atom_pairs%obj%npairs = 0
+    atom_pairs%obj%natoms_encode = 0
+    NULLIFY(atom_pairs%obj%pairs)
+    atom_pairs%obj%ref_count = 1
+    atom_pairs%obj%id_nr = last_fb_com_atom_pairs_id + 1
+    last_fb_com_atom_pairs_id = atom_pairs%obj%id_nr
   END SUBROUTINE fb_com_atom_pairs_create
 
 
@@ -461,31 +411,21 @@ CONTAINS
 !> \brief Initialises an fb_com_tasks object, and makes it empty
 !> \param com_tasks the fb_com_tasks object, its content must not be
 !>                   NULL or UNDEFINED
-!> \param error CP2K data container for error logging
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
-  SUBROUTINE fb_com_tasks_init(com_tasks, error)
+  SUBROUTINE fb_com_tasks_init(com_tasks)
     TYPE(fb_com_tasks_obj), INTENT(INOUT)    :: com_tasks
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_com_tasks_init', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    CPPrecondition(ASSOCIATED(com_tasks%obj), cp_failure_level, routineP, error, failure)
-    IF (.NOT. failure) THEN
-       IF (ASSOCIATED(com_tasks%obj%tasks)) THEN
-          DEALLOCATE(com_tasks%obj%tasks, STAT=stat)
-          CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-          NULLIFY(com_tasks%obj%tasks)
-       END IF
-       com_tasks%obj%task_dim = TASK_N_RECORDS
-       com_tasks%obj%ntasks = 0
-       com_tasks%obj%nencode = 0
+    CPASSERT(ASSOCIATED(com_tasks%obj))
+    IF (ASSOCIATED(com_tasks%obj%tasks)) THEN
+       DEALLOCATE(com_tasks%obj%tasks)
     END IF
+    com_tasks%obj%task_dim = TASK_N_RECORDS
+    com_tasks%obj%ntasks = 0
+    com_tasks%obj%nencode = 0
   END SUBROUTINE fb_com_tasks_init
 
 
@@ -493,31 +433,21 @@ CONTAINS
 !> \brief Initialises an fb_com_atom_pairs object, and makes it empty
 !> \param atom_pairs the fb_com_atom_pairs object, its content must not
 !>                    be NULL or UNDEFINED
-!> \param error CP2K data container for error logging
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
-  SUBROUTINE fb_com_atom_pairs_init(atom_pairs, error)
+  SUBROUTINE fb_com_atom_pairs_init(atom_pairs)
     TYPE(fb_com_atom_pairs_obj), &
       INTENT(INOUT)                          :: atom_pairs
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_com_atom_pairs_init', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    CPPrecondition(ASSOCIATED(atom_pairs%obj), cp_failure_level, routineP, error, failure)
-    IF (.NOT. failure) THEN
-       IF (ASSOCIATED(atom_pairs%obj%pairs)) THEN
-          DEALLOCATE(atom_pairs%obj%pairs, STAT=stat)
-          CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-          NULLIFY(atom_pairs%obj%pairs)
-       END IF
-       atom_pairs%obj%npairs = 0
-       atom_pairs%obj%natoms_encode = 0
+    CPASSERT(ASSOCIATED(atom_pairs%obj))
+    IF (ASSOCIATED(atom_pairs%obj%pairs)) THEN
+       DEALLOCATE(atom_pairs%obj%pairs)
     END IF
+    atom_pairs%obj%npairs = 0
+    atom_pairs%obj%natoms_encode = 0
   END SUBROUTINE fb_com_atom_pairs_init
 
 
@@ -531,34 +461,26 @@ CONTAINS
 !> \param ntasks [OPTIONAL]: if present, outputs com_tasks%obj%ntasks
 !> \param nencode [OPTIONAL]: if present, outputs com_tasks%obj%nencode
 !> \param tasks [OPTIONAL]: if present, outputs pointer com_tasks%obj%tasks
-!> \param error CP2K data container for error logging
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
   SUBROUTINE fb_com_tasks_get(com_tasks, &
                               task_dim, &
                               ntasks, &
                               nencode, &
-                              tasks, &
-                              error)
+                              tasks)
     TYPE(fb_com_tasks_obj), INTENT(IN)       :: com_tasks
     INTEGER, INTENT(OUT), OPTIONAL           :: task_dim, ntasks, nencode
     INTEGER(KIND=int_8), DIMENSION(:, :), &
       OPTIONAL, POINTER                      :: tasks
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_com_tasks_get', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    CPPrecondition(ASSOCIATED(com_tasks%obj), cp_failure_level, routineP, error, failure)
-    IF (.NOT. failure) THEN
-       IF (PRESENT(task_dim)) task_dim = com_tasks%obj%task_dim
-       IF (PRESENT(ntasks)) ntasks = com_tasks%obj%ntasks
-       IF (PRESENT(nencode)) nencode = com_tasks%obj%nencode
-       IF (PRESENT(tasks)) tasks => com_tasks%obj%tasks
-    END IF
+    CPASSERT(ASSOCIATED(com_tasks%obj))
+    IF (PRESENT(task_dim)) task_dim = com_tasks%obj%task_dim
+    IF (PRESENT(ntasks)) ntasks = com_tasks%obj%ntasks
+    IF (PRESENT(nencode)) nencode = com_tasks%obj%nencode
+    IF (PRESENT(tasks)) tasks => com_tasks%obj%tasks
   END SUBROUTINE fb_com_tasks_get
 
 
@@ -571,32 +493,24 @@ CONTAINS
 !> \param npairs [OPTIONAL]: if present, outputs atom_pairs%obj%npairs
 !> \param natoms_encode [OPTIONAL]: if present, outputs atom_pairs%obj%natoms_encode
 !> \param pairs [OPTIONAL]: if present, outputs pointer atom_pairs%obj%pairs
-!> \param error CP2K data container for error logging
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
   SUBROUTINE fb_com_atom_pairs_get(atom_pairs, &
                                    npairs, &
                                    natoms_encode, &
-                                   pairs, &
-                                   error)
+                                   pairs)
     TYPE(fb_com_atom_pairs_obj), INTENT(IN)  :: atom_pairs
     INTEGER, INTENT(OUT), OPTIONAL           :: npairs, natoms_encode
     INTEGER(KIND=int_8), DIMENSION(:), &
       OPTIONAL, POINTER                      :: pairs
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_com_atom_pairs_get', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    CPPrecondition(ASSOCIATED(atom_pairs%obj), cp_failure_level, routineP, error, failure)
-    IF (.NOT. failure) THEN
-       IF (PRESENT(npairs)) npairs = atom_pairs%obj%npairs
-       IF (PRESENT(natoms_encode)) natoms_encode = atom_pairs%obj%natoms_encode
-       IF (PRESENT(pairs)) pairs => atom_pairs%obj%pairs
-    END IF
+    CPASSERT(ASSOCIATED(atom_pairs%obj))
+    IF (PRESENT(npairs)) npairs = atom_pairs%obj%npairs
+    IF (PRESENT(natoms_encode)) natoms_encode = atom_pairs%obj%natoms_encode
+    IF (PRESENT(pairs)) pairs => atom_pairs%obj%pairs
   END SUBROUTINE fb_com_atom_pairs_get
 
 
@@ -610,40 +524,30 @@ CONTAINS
 !> \param ntasks [OPTIONAL]: if present, sets com_tasks%obj%ntasks
 !> \param nencode [OPTIONAL]: if present, sets com_tasks%obj%nencode
 !> \param tasks [OPTIONAL]: if present, associates pointer com_tasks%obj%tasks
-!> \param error CP2K data container for error logging
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
   SUBROUTINE fb_com_tasks_set(com_tasks, &
                               task_dim, &
                               ntasks, &
                               nencode, &
-                              tasks, &
-                              error)
+                              tasks)
     TYPE(fb_com_tasks_obj), INTENT(INOUT)    :: com_tasks
     INTEGER, INTENT(IN), OPTIONAL            :: task_dim, ntasks, nencode
     INTEGER(KIND=int_8), DIMENSION(:, :), &
       OPTIONAL, POINTER                      :: tasks
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_com_tasks_set', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    CPPrecondition(ASSOCIATED(com_tasks%obj), cp_failure_level, routineP, error, failure)
-    IF (.NOT. failure) THEN
-       IF (PRESENT(task_dim)) com_tasks%obj%task_dim = task_dim
-       IF (PRESENT(ntasks)) com_tasks%obj%ntasks = ntasks
-       IF (PRESENT(nencode)) com_tasks%obj%nencode = nencode
-       IF (PRESENT(tasks)) THEN
-          IF (ASSOCIATED(com_tasks%obj%tasks)) THEN
-             DEALLOCATE(com_tasks%obj%tasks, STAT=stat)
-             CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-          END IF
-          com_tasks%obj%tasks => tasks
+    CPASSERT(ASSOCIATED(com_tasks%obj))
+    IF (PRESENT(task_dim)) com_tasks%obj%task_dim = task_dim
+    IF (PRESENT(ntasks)) com_tasks%obj%ntasks = ntasks
+    IF (PRESENT(nencode)) com_tasks%obj%nencode = nencode
+    IF (PRESENT(tasks)) THEN
+       IF (ASSOCIATED(com_tasks%obj%tasks)) THEN
+          DEALLOCATE(com_tasks%obj%tasks)
        END IF
+       com_tasks%obj%tasks => tasks
     END IF
   END SUBROUTINE fb_com_tasks_set
 
@@ -657,39 +561,29 @@ CONTAINS
 !> \param npairs [OPTIONAL]: if present, sets atom_pairs%obj%npairs
 !> \param natoms_encode [OPTIONAL]: if present, sets atom_pairs%obj%natoms_encode
 !> \param pairs [OPTIONAL]: if present, associates pointer atom_pairs%obj%pairs
-!> \param error CP2K data container for error logging
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
   SUBROUTINE fb_com_atom_pairs_set(atom_pairs, &
                                    npairs, &
                                    natoms_encode, &
-                                   pairs, &
-                                   error)
+                                   pairs)
     TYPE(fb_com_atom_pairs_obj), &
       INTENT(INOUT)                          :: atom_pairs
     INTEGER, INTENT(IN), OPTIONAL            :: npairs, natoms_encode
     INTEGER(KIND=int_8), DIMENSION(:), &
       OPTIONAL, POINTER                      :: pairs
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_com_atom_pairs_set', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    CPPrecondition(ASSOCIATED(atom_pairs%obj), cp_failure_level, routineP, error, failure)
-    IF (.NOT. failure) THEN
-       IF (PRESENT(npairs)) atom_pairs%obj%npairs = npairs
-       IF (PRESENT(natoms_encode)) atom_pairs%obj%natoms_encode = natoms_encode
-       IF (PRESENT(pairs)) THEN
-          IF (ASSOCIATED(atom_pairs%obj%pairs)) THEN
-             DEALLOCATE(atom_pairs%obj%pairs, STAT=stat)
-             CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-          END IF
-          atom_pairs%obj%pairs => pairs
+    CPASSERT(ASSOCIATED(atom_pairs%obj))
+    IF (PRESENT(npairs)) atom_pairs%obj%npairs = npairs
+    IF (PRESENT(natoms_encode)) atom_pairs%obj%natoms_encode = natoms_encode
+    IF (PRESENT(pairs)) THEN
+       IF (ASSOCIATED(atom_pairs%obj%pairs)) THEN
+          DEALLOCATE(atom_pairs%obj%pairs)
        END IF
+       atom_pairs%obj%pairs => pairs
     END IF
   END SUBROUTINE fb_com_atom_pairs_set
 
@@ -708,19 +602,16 @@ CONTAINS
 !>                          having the src process id equal to my_id
 !> \param para_env CP2K parallel environment object that stores MPI related
 !>                  information of the current run
-!> \param error CP2K data container for error logging
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
   SUBROUTINE fb_com_tasks_transpose_dest_src(tasks_dest_is_me, &
                                              direction, &
                                              tasks_src_is_me, &
-                                             para_env, &
-                                             error)
+                                             para_env)
     TYPE(fb_com_tasks_obj), INTENT(INOUT)    :: tasks_dest_is_me
     CHARACTER, INTENT(IN)                    :: direction
     TYPE(fb_com_tasks_obj), INTENT(INOUT)    :: tasks_src_is_me
     TYPE(cp_para_env_type), POINTER          :: para_env
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: &
       routineN = 'fb_com_tasks_transpose_dest_src', &
@@ -729,17 +620,15 @@ CONTAINS
     INTEGER                                  :: handle, ii, ind, ipe, itask, &
                                                 jj, nencode, ntasks_in, &
                                                 ntasks_out, rank, rank_pos, &
-                                                stat, task_dim
+                                                task_dim
     INTEGER(KIND=int_8), DIMENSION(:, :), &
       POINTER                                :: tasks_in, tasks_out
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: recv_buf, recv_disps, &
                                                 recv_sizes, send_buf, &
                                                 send_disps, send_sizes
-    LOGICAL                                  :: failure
 
     CALL timeset(routineN, handle)
 
-    failure = .FALSE.
 
     NULLIFY(tasks_in, tasks_out)
 
@@ -748,33 +637,25 @@ CONTAINS
                              task_dim=task_dim, &
                              ntasks=ntasks_in, &
                              tasks=tasks_in, &
-                             nencode=nencode, &
-                             error=error)
+                             nencode=nencode)
        rank_pos = TASK_DEST
     ELSE
        CALL fb_com_tasks_get(com_tasks=tasks_dest_is_me, &
                              task_dim=task_dim, &
                              ntasks=ntasks_in, &
                              tasks=tasks_in, &
-                             nencode=nencode, &
-                             error=error)
+                             nencode=nencode)
        rank_pos = TASK_SRC
     END IF
 
     ! allocate local arrays
-    ALLOCATE(send_sizes(para_env%num_pe), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    ALLOCATE(send_disps(para_env%num_pe), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    ALLOCATE(send_buf(para_env%num_pe), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    ALLOCATE(send_sizes(para_env%num_pe))
+    ALLOCATE(send_disps(para_env%num_pe))
+    ALLOCATE(send_buf(para_env%num_pe))
 
-    ALLOCATE(recv_sizes(para_env%num_pe), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    ALLOCATE(recv_disps(para_env%num_pe), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    ALLOCATE(recv_buf(para_env%num_pe), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    ALLOCATE(recv_sizes(para_env%num_pe))
+    ALLOCATE(recv_disps(para_env%num_pe))
+    ALLOCATE(recv_buf(para_env%num_pe))
 
     ! first count how many local recv/send tasks need to be sent to
     ! other processes, and share this information with the other
@@ -811,14 +692,10 @@ CONTAINS
 
     ! reallocate send and recv buffers to the correct sizes for
     ! transferring the actual tasks
-    DEALLOCATE(send_buf, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    DEALLOCATE(recv_buf, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    ALLOCATE(send_buf(SUM(send_sizes)), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    ALLOCATE(recv_buf(SUM(recv_sizes)), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    DEALLOCATE(send_buf)
+    DEALLOCATE(recv_buf)
+    ALLOCATE(send_buf(SUM(send_sizes)))
+    ALLOCATE(recv_buf(SUM(recv_sizes)))
 
     ! now that the send buffer is of correct size, do packing
     ! send_buf and recv_buf may be zero sized
@@ -839,18 +716,14 @@ CONTAINS
                      para_env%group)
 
     ! deallocate send buffers
-    DEALLOCATE(send_buf, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    DEALLOCATE(send_sizes, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    DEALLOCATE(send_disps, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    DEALLOCATE(send_buf)
+    DEALLOCATE(send_sizes)
+    DEALLOCATE(send_disps)
 
     ! allocate the output task list
     ntasks_out = SUM(recv_sizes) / task_dim
     ! this will not be deallocated in this subroutine
-    ALLOCATE(tasks_out(task_dim,ntasks_out), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    ALLOCATE(tasks_out(task_dim,ntasks_out))
 
     ! do unpacking
     itask = 0
@@ -870,24 +743,19 @@ CONTAINS
                              task_dim=task_dim, &
                              ntasks=ntasks_out, &
                              tasks=tasks_out, &
-                             nencode=nencode, &
-                             error=error)
+                             nencode=nencode)
     ELSE
        CALL fb_com_tasks_set(com_tasks=tasks_src_is_me, &
                              task_dim=task_dim, &
                              ntasks=ntasks_out, &
                              tasks=tasks_out, &
-                             nencode=nencode, &
-                             error=error)
+                             nencode=nencode)
     END IF
 
     ! deallocate recv buffers
-    DEALLOCATE(recv_buf, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    DEALLOCATE(recv_sizes, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    DEALLOCATE(recv_disps, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    DEALLOCATE(recv_buf)
+    DEALLOCATE(recv_sizes)
+    DEALLOCATE(recv_disps)
 
     CALL timestop(handle)
 
@@ -911,22 +779,19 @@ CONTAINS
 !>                      process
 !> \param symmetric whether the matrix the blocks are to be taken from
 !>                   is symmetric
-!> \param error CP2K data container for error logging
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
   SUBROUTINE fb_com_tasks_build_atom_pairs(com_tasks, &
                                            atom_pairs, &
                                            natoms_encode, &
                                            send_or_recv, &
-                                           symmetric, &
-                                           error)
+                                           symmetric)
     TYPE(fb_com_tasks_obj), INTENT(IN)       :: com_tasks
     TYPE(fb_com_atom_pairs_obj), &
       INTENT(INOUT)                          :: atom_pairs
     INTEGER, INTENT(IN)                      :: natoms_encode
     CHARACTER(len=*), INTENT(IN)             :: send_or_recv
     LOGICAL, INTENT(IN), OPTIONAL            :: symmetric
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: &
       routineN = 'fb_com_tasks_build_atom_pairs', &
@@ -934,27 +799,25 @@ CONTAINS
 
     INTEGER                                  :: acol, arow, handle, iatom, &
                                                 ii, itask, jatom, npairs, &
-                                                ntasks, rank, rank_pos, stat
+                                                ntasks, rank, rank_pos
     INTEGER(KIND=int_8)                      :: pair
     INTEGER(KIND=int_8), DIMENSION(:), &
       POINTER                                :: pairs
     INTEGER(KIND=int_8), DIMENSION(:, :), &
       POINTER                                :: tasks
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: tmp_index
-    LOGICAL                                  :: check_ok, failure, &
-                                                my_symmetric
+    LOGICAL                                  :: check_ok, my_symmetric
 
     CALL timeset(routineN, handle)
 
-    failure = .FALSE.
 
     NULLIFY(pairs, tasks)
 
     check_ok = fb_com_atom_pairs_has_data(atom_pairs)
-    CPPostcondition(check_ok, cp_failure_level, routineP, error, failure)
+    CPASSERT(check_ok)
 
     ! initialise atom_pairs
-    CALL fb_com_atom_pairs_init(atom_pairs, error)
+    CALL fb_com_atom_pairs_init(atom_pairs)
 
     IF (TRIM(send_or_recv) == "send") THEN
        rank_pos = TASK_DEST
@@ -970,11 +833,9 @@ CONTAINS
 
     CALL fb_com_tasks_get(com_tasks=com_tasks, &
                           ntasks=ntasks, &
-                          tasks=tasks, &
-                          error=error)
+                          tasks=tasks)
 
-    ALLOCATE(pairs(ntasks), STAT=stat)
-    CPPrecondition(stat==0, cp_failure_level, routineP, error, failure)
+    ALLOCATE(pairs(ntasks))
     ! we can have cases where ntasks == 0
     IF (SIZE(pairs) > 0) pairs = 0
     npairs = ntasks
@@ -1005,12 +866,10 @@ CONTAINS
     ! receive same information to the same destination or source more
     ! than once)
     IF (npairs > 0) THEN
-       ALLOCATE(tmp_index(npairs), STAT=stat)
-       CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+       ALLOCATE(tmp_index(npairs))
        ! only sort the actual pairs recorded in the send list
        CALL sort(pairs, npairs, tmp_index)
-       DEALLOCATE(tmp_index, STAT=stat)
-       CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+       DEALLOCATE(tmp_index)
     END IF
 
     ! remove duplicates
@@ -1030,8 +889,7 @@ CONTAINS
     CALL fb_com_atom_pairs_set(atom_pairs=atom_pairs, &
                                pairs=pairs, &
                                npairs=npairs, &
-                               natoms_encode=natoms_encode, &
-                               error=error)
+                               natoms_encode=natoms_encode)
 
     CALL timestop(handle)
 
@@ -1176,7 +1034,6 @@ CONTAINS
 !>                               location in atom_pairs array for
 !>                               all the pairs to be sent to or recv
 !>                               from process ipe
-!> \param error : cp2k error container
 !> \param row_map : optional blk row map for the DBCSR blocks
 !> \param col_map : optional blk col map for the DBCSR blocks
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
@@ -1189,7 +1046,6 @@ CONTAINS
                                                  sendrecv_disps, &
                                                  sendrecv_pair_counts, &
                                                  sendrecv_pair_disps, &
-                                                 error, &
                                                  row_map, &
                                                  col_map)
     TYPE(fb_com_atom_pairs_obj), INTENT(IN)  :: atom_pairs
@@ -1199,7 +1055,6 @@ CONTAINS
                                                 sendrecv_disps, &
                                                 sendrecv_pair_counts, &
                                                 sendrecv_pair_disps
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
     INTEGER, DIMENSION(:), INTENT(IN), &
       OPTIONAL                               :: row_map, col_map
 
@@ -1212,9 +1067,7 @@ CONTAINS
                                                 npairs, nrows_blk, pe
     INTEGER(KIND=int_8), DIMENSION(:), &
       POINTER                                :: pairs
-    LOGICAL                                  :: check_ok, failure
-
-    failure = .FALSE.
+    LOGICAL                                  :: check_ok
 
     NULLIFY(pairs)
 
@@ -1222,16 +1075,15 @@ CONTAINS
                SIZE(sendrecv_disps) == nprocs .AND. &
                SIZE(sendrecv_pair_counts) == nprocs .AND. &
                SIZE(sendrecv_pair_disps) == nprocs
-    CPPostcondition(check_ok, cp_failure_level, routineP, error, failure)
+    CPASSERT(check_ok)
 
     check_ok = fb_com_atom_pairs_has_data(atom_pairs)
-    CPPostcondition(check_ok, cp_failure_level, routineP, error, failure)
+    CPASSERT(check_ok)
 
     CALL fb_com_atom_pairs_get(atom_pairs=atom_pairs, &
                                pairs=pairs, &
                                npairs=npairs, &
-                               natoms_encode=natoms_encode, &
-                               error=error)
+                               natoms_encode=natoms_encode)
 
     sendrecv_sizes = 0
     sendrecv_pair_counts = 0
@@ -1272,21 +1124,18 @@ CONTAINS
 !> \param para_env        : CP2K parallel environment
 !> \param matrix_storage  : the fb_matrix_data object to store the
 !>                          received DBCSR matrix blocks
-!> \param error : cp2k error container
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
   SUBROUTINE fb_com_atom_pairs_gather_blks(dbcsr_mat, &
                                            atom_pairs_send, &
                                            atom_pairs_recv, &
                                            para_env, &
-                                           matrix_storage, &
-                                           error)
+                                           matrix_storage)
     TYPE(cp_dbcsr_type), POINTER             :: dbcsr_mat
     TYPE(fb_com_atom_pairs_obj), INTENT(IN)  :: atom_pairs_send, &
                                                 atom_pairs_recv
     TYPE(cp_para_env_type), POINTER          :: para_env
     TYPE(fb_matrix_data_obj), INTENT(INOUT)  :: matrix_storage
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: &
       routineN = 'fb_com_atom_pairs_gather_blks', &
@@ -1294,7 +1143,7 @@ CONTAINS
 
     INTEGER :: handle, iatom, ii, ind, ipair, ipe, jatom, jj, ncols_blk, &
       ncols_blk_max, npairs_recv, npairs_send, nrows_blk, nrows_blk_max, &
-      numprocs, pe, recv_encode, send_encode, stat
+      numprocs, pe, recv_encode, send_encode
     INTEGER(KIND=int_8), DIMENSION(:), &
       POINTER                                :: pairs_recv, pairs_send
     INTEGER, ALLOCATABLE, DIMENSION(:) :: recv_disps, recv_pair_count, &
@@ -1302,35 +1151,32 @@ CONTAINS
       send_pair_disps, send_sizes
     INTEGER, DIMENSION(:), POINTER           :: col_block_size_data, &
                                                 row_block_size_data
-    LOGICAL                                  :: check_ok, failure, found
+    LOGICAL                                  :: check_ok, found
     REAL(KIND=dp), ALLOCATABLE, DIMENSION(:) :: recv_buf, send_buf
     REAL(KIND=dp), DIMENSION(:, :), POINTER  :: mat_block
 
     CALL timeset(routineN, handle)
 
-    failure = .FALSE.
 
     NULLIFY(pairs_send, pairs_recv, mat_block, &
             row_block_size_data, col_block_size_data)
 
     check_ok = fb_com_atom_pairs_has_data(atom_pairs_send)
-    CPPostcondition(check_ok, cp_failure_level, routineP, error, failure)
+    CPASSERT(check_ok)
     check_ok = fb_com_atom_pairs_has_data(atom_pairs_send)
-    CPPostcondition(check_ok, cp_failure_level, routineP, error, failure)
+    CPASSERT(check_ok)
     check_ok = fb_matrix_data_has_data(matrix_storage)
-    CPPostcondition(check_ok, cp_failure_level, routineP, error, failure)
+    CPASSERT(check_ok)
 
     ! get com pair informations
     CALL fb_com_atom_pairs_get(atom_pairs=atom_pairs_send, &
                                pairs=pairs_send, &
                                npairs=npairs_send, &
-                               natoms_encode=send_encode, &
-                               error=error)
+                               natoms_encode=send_encode)
     CALL fb_com_atom_pairs_get(atom_pairs=atom_pairs_recv, &
                                pairs=pairs_recv, &
                                npairs=npairs_recv, &
-                               natoms_encode=recv_encode, &
-                               error=error)
+                               natoms_encode=recv_encode)
     ! get para_env info
     numprocs = para_env%num_pe
 
@@ -1339,14 +1185,10 @@ CONTAINS
     col_block_size_data => cp_dbcsr_col_block_sizes(dbcsr_mat)
 
     ! allocate temporary arrays for send
-    ALLOCATE(send_sizes(numprocs), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    ALLOCATE(send_disps(numprocs), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    ALLOCATE(send_pair_count(numprocs), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    ALLOCATE(send_pair_disps(numprocs), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    ALLOCATE(send_sizes(numprocs))
+    ALLOCATE(send_disps(numprocs))
+    ALLOCATE(send_pair_count(numprocs))
+    ALLOCATE(send_pair_disps(numprocs))
 
     ! setup send buffer sizes
     CALL fb_com_atom_pairs_calc_buffer_sizes(atom_pairs_send, &
@@ -1356,22 +1198,16 @@ CONTAINS
                                              send_sizes, &
                                              send_disps, &
                                              send_pair_count, &
-                                             send_pair_disps, &
-                                             error)
+                                             send_pair_disps)
 
     ! allocate send buffer
-    ALLOCATE(send_buf(SUM(send_sizes)), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    ALLOCATE(send_buf(SUM(send_sizes)))
 
     ! allocate temporary arrays for recv
-    ALLOCATE(recv_sizes(numprocs), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    ALLOCATE(recv_disps(numprocs), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    ALLOCATE(recv_pair_count(numprocs), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    ALLOCATE(recv_pair_disps(numprocs), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    ALLOCATE(recv_sizes(numprocs))
+    ALLOCATE(recv_disps(numprocs))
+    ALLOCATE(recv_pair_count(numprocs))
+    ALLOCATE(recv_pair_disps(numprocs))
 
     ! setup recv buffer sizes
     CALL fb_com_atom_pairs_calc_buffer_sizes(atom_pairs_recv, &
@@ -1381,12 +1217,10 @@ CONTAINS
                                              recv_sizes, &
                                              recv_disps, &
                                              recv_pair_count, &
-                                             recv_pair_disps, &
-                                             error)
+                                             recv_pair_disps)
 
     ! allocate recv buffer
-    ALLOCATE(recv_buf(SUM(recv_sizes)), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    ALLOCATE(recv_buf(SUM(recv_sizes)))
 
     ! do packing
     DO ipe = 1, numprocs
@@ -1401,7 +1235,7 @@ CONTAINS
                                     row=iatom, col=jatom, block=mat_block, &
                                     found=found)
           IF (.NOT. found) THEN
-             CALL stop_program(routineN, moduleN, __LINE__, "Matrix block not found")
+             CPABORT("Matrix block not found")
           ELSE
              ! we have found the matrix block
              DO jj = 1, ncols_blk
@@ -1422,23 +1256,17 @@ CONTAINS
                      para_env%group)
 
     ! cleanup temporary arrays no longer needed
-    DEALLOCATE(send_buf, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    DEALLOCATE(send_sizes, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    DEALLOCATE(send_disps, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    DEALLOCATE(send_pair_count, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    DEALLOCATE(send_pair_disps, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    DEALLOCATE(send_buf)
+    DEALLOCATE(send_sizes)
+    DEALLOCATE(send_disps)
+    DEALLOCATE(send_pair_count)
+    DEALLOCATE(send_pair_disps)
 
     ! unpack into matrix_data object
     NULLIFY(mat_block)
     nrows_blk_max = MAXVAL(row_block_size_data)
     ncols_blk_max = MAXVAL(col_block_size_data)
-    ALLOCATE(mat_block(nrows_blk_max,ncols_blk_max), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    ALLOCATE(mat_block(nrows_blk_max,ncols_blk_max))
     DO ipe = 1, numprocs
        recv_sizes(ipe) = 0
        DO ipair = 1, recv_pair_count(ipe)
@@ -1447,7 +1275,7 @@ CONTAINS
           nrows_blk = row_block_size_data(iatom)
           ncols_blk = col_block_size_data(jatom)
           ! ALLOCATE(mat_block(nrows_blk,ncols_blk), STAT=stat)
-          ! CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+          ! CPPostcondition(stat==0, cp_failure_level, routineP,failure)
           mat_block(:,:) = 0.0_dp
           DO jj = 1, ncols_blk
              DO ii = 1, nrows_blk
@@ -1458,27 +1286,20 @@ CONTAINS
           END DO ! jj
           CALL fb_matrix_data_add(matrix_storage, &
                                   iatom, jatom, &
-                                  mat_block(1:nrows_blk, 1:ncols_blk), &
-                                  error)
+                                  mat_block(1:nrows_blk, 1:ncols_blk))
           recv_sizes(ipe) = recv_sizes(ipe) + nrows_blk*ncols_blk
           ! DEALLOCATE(mat_block, STAT=stat)
-          ! CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+          ! CPPostcondition(stat==0, cp_failure_level, routineP,failure)
        END DO ! ipair
     END DO ! ipe
-    DEALLOCATE(mat_block, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    DEALLOCATE(mat_block)
 
     ! cleanup rest of the temporary arrays
-    DEALLOCATE(recv_buf, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    DEALLOCATE(recv_sizes, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    DEALLOCATE(recv_disps, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    DEALLOCATE(recv_pair_count, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    DEALLOCATE(recv_pair_disps, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    DEALLOCATE(recv_buf)
+    DEALLOCATE(recv_sizes)
+    DEALLOCATE(recv_disps)
+    DEALLOCATE(recv_pair_count)
+    DEALLOCATE(recv_pair_disps)
 
     CALL timestop(handle)
 
@@ -1499,21 +1320,18 @@ CONTAINS
 !> \param para_env        : CP2K parallel environment
 !> \param dbcsr_mat : the DBCSR matrix where the matrix blocks will be
 !>                    distributed to
-!> \param error : cp2k error container
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
   SUBROUTINE fb_com_atom_pairs_distribute_blks(matrix_storage, &
                                                atom_pairs_send, &
                                                atom_pairs_recv, &
                                                para_env, &
-                                               dbcsr_mat, &
-                                               error)
+                                               dbcsr_mat)
     TYPE(fb_matrix_data_obj), INTENT(IN)     :: matrix_storage
     TYPE(fb_com_atom_pairs_obj), INTENT(IN)  :: atom_pairs_send, &
                                                 atom_pairs_recv
     TYPE(cp_para_env_type), POINTER          :: para_env
     TYPE(cp_dbcsr_type), POINTER             :: dbcsr_mat
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: &
       routineN = 'fb_com_atom_pairs_distribute_blks', &
@@ -1521,7 +1339,7 @@ CONTAINS
 
     INTEGER :: handle, iatom, ii, ind, ipair, ipe, jatom, jj, ncols_blk, &
       npairs_recv, npairs_send, nrows_blk, numprocs, pe, recv_encode, &
-      send_encode, stat
+      send_encode
     INTEGER(KIND=int_8), DIMENSION(:), &
       POINTER                                :: pairs_recv, pairs_send
     INTEGER, ALLOCATABLE, DIMENSION(:) :: recv_disps, recv_pair_count, &
@@ -1529,35 +1347,32 @@ CONTAINS
       send_pair_disps, send_sizes
     INTEGER, DIMENSION(:), POINTER           :: col_block_size_data, &
                                                 row_block_size_data
-    LOGICAL                                  :: check_ok, failure, found
+    LOGICAL                                  :: check_ok, found
     REAL(KIND=dp), ALLOCATABLE, DIMENSION(:) :: recv_buf, send_buf
     REAL(KIND=dp), DIMENSION(:, :), POINTER  :: mat_block
 
     CALL timeset(routineN, handle)
 
-    failure = .FALSE.
 
     NULLIFY(pairs_send, pairs_recv, mat_block, &
             row_block_size_data, col_block_size_data)
 
     check_ok = fb_com_atom_pairs_has_data(atom_pairs_send)
-    CPPostcondition(check_ok, cp_failure_level, routineP, error, failure)
+    CPASSERT(check_ok)
     check_ok = fb_com_atom_pairs_has_data(atom_pairs_send)
-    CPPostcondition(check_ok, cp_failure_level, routineP, error, failure)
+    CPASSERT(check_ok)
     check_ok = fb_matrix_data_has_data(matrix_storage)
-    CPPostcondition(check_ok, cp_failure_level, routineP, error, failure)
+    CPASSERT(check_ok)
 
     ! get com pair informations
     CALL fb_com_atom_pairs_get(atom_pairs=atom_pairs_send, &
                                pairs=pairs_send, &
                                npairs=npairs_send, &
-                               natoms_encode=send_encode, &
-                               error=error)
+                               natoms_encode=send_encode)
     CALL fb_com_atom_pairs_get(atom_pairs=atom_pairs_recv, &
                                pairs=pairs_recv, &
                                npairs=npairs_recv, &
-                               natoms_encode=recv_encode, &
-                               error=error)
+                               natoms_encode=recv_encode)
     ! get para_env info
     numprocs = para_env%num_pe
 
@@ -1566,14 +1381,10 @@ CONTAINS
     col_block_size_data => cp_dbcsr_col_block_sizes(dbcsr_mat)
 
     ! allocate temporary arrays for send
-    ALLOCATE(send_sizes(numprocs), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    ALLOCATE(send_disps(numprocs), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    ALLOCATE(send_pair_count(numprocs), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    ALLOCATE(send_pair_disps(numprocs), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    ALLOCATE(send_sizes(numprocs))
+    ALLOCATE(send_disps(numprocs))
+    ALLOCATE(send_pair_count(numprocs))
+    ALLOCATE(send_pair_disps(numprocs))
 
     ! setup send buffer sizes
     CALL fb_com_atom_pairs_calc_buffer_sizes(atom_pairs_send, &
@@ -1583,22 +1394,16 @@ CONTAINS
                                              send_sizes, &
                                              send_disps, &
                                              send_pair_count, &
-                                             send_pair_disps, &
-                                             error)
+                                             send_pair_disps)
 
     ! allocate send buffer
-    ALLOCATE(send_buf(SUM(send_sizes)), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    ALLOCATE(send_buf(SUM(send_sizes)))
 
     ! allocate temporary arrays for recv
-    ALLOCATE(recv_sizes(numprocs), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    ALLOCATE(recv_disps(numprocs), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    ALLOCATE(recv_pair_count(numprocs), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    ALLOCATE(recv_pair_disps(numprocs), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    ALLOCATE(recv_sizes(numprocs))
+    ALLOCATE(recv_disps(numprocs))
+    ALLOCATE(recv_pair_count(numprocs))
+    ALLOCATE(recv_pair_disps(numprocs))
 
     ! setup recv buffer sizes
     CALL fb_com_atom_pairs_calc_buffer_sizes(atom_pairs_recv, &
@@ -1608,12 +1413,10 @@ CONTAINS
                                              recv_sizes, &
                                              recv_disps, &
                                              recv_pair_count, &
-                                             recv_pair_disps, &
-                                             error)
+                                             recv_pair_disps)
 
     ! allocate recv buffer
-    ALLOCATE(recv_buf(SUM(recv_sizes)), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    ALLOCATE(recv_buf(SUM(recv_sizes)))
 
     ! do packing
     DO ipe = 1, numprocs
@@ -1624,10 +1427,9 @@ CONTAINS
                                         pe, iatom, jatom, send_encode)
           CALL fb_matrix_data_get(matrix_storage, &
                                   iatom, jatom, &
-                                  mat_block, found, &
-                                  error)
+                                  mat_block, found)
           IF (.NOT. found) THEN
-             CALL stop_program(routineN, moduleN, __LINE__, "Matrix block not found")
+             CPABORT("Matrix block not found")
           ELSE
              nrows_blk = row_block_size_data(iatom)
              ncols_blk = col_block_size_data(jatom)
@@ -1649,16 +1451,11 @@ CONTAINS
                      para_env%group)
 
     ! cleanup temporary arrays no longer needed
-    DEALLOCATE(send_buf, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    DEALLOCATE(send_sizes, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    DEALLOCATE(send_disps, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    DEALLOCATE(send_pair_count, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    DEALLOCATE(send_pair_disps, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    DEALLOCATE(send_buf)
+    DEALLOCATE(send_sizes)
+    DEALLOCATE(send_disps)
+    DEALLOCATE(send_pair_count)
+    DEALLOCATE(send_pair_disps)
 
     ! unpack into DBCSR matrix
     DO ipe = 1, numprocs
@@ -1677,16 +1474,11 @@ CONTAINS
     END DO ! ipe
 
     ! cleanup rest of the temporary arrays
-    DEALLOCATE(recv_buf, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    DEALLOCATE(recv_sizes, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    DEALLOCATE(recv_disps, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    DEALLOCATE(recv_pair_count, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    DEALLOCATE(recv_pair_disps, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    DEALLOCATE(recv_buf)
+    DEALLOCATE(recv_sizes)
+    DEALLOCATE(recv_disps)
+    DEALLOCATE(recv_pair_count)
+    DEALLOCATE(recv_pair_disps)
 
     ! dbcsr matrix is not finalised in this subroutine
 

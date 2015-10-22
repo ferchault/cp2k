@@ -39,10 +39,9 @@ MODULE ewald_spline_util
   USE pw_types,                        ONLY: REALDATA3D,&
                                              REALSPACE,&
                                              pw_type
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 !NB parallelization
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -68,14 +67,12 @@ CONTAINS
 !> \param tag ...
 !> \param print_section ...
 !> \param para_env ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      12.2005 created [tlaino]
 !> \author Teodoro Laino
 ! *****************************************************************************
   SUBROUTINE Setup_Ewald_Spline(pw_grid, pw_pool, coeff, LG, gx, gy, gz, hmat, npts,&
-       param_section, tag, print_section, para_env, error)
+       param_section, tag, print_section, para_env)
     TYPE(pw_grid_type), POINTER              :: pw_grid
     TYPE(pw_pool_type), POINTER              :: pw_pool
     TYPE(pw_type), POINTER                   :: coeff
@@ -86,50 +83,44 @@ CONTAINS
     CHARACTER(LEN=*), INTENT(IN)             :: tag
     TYPE(section_vals_type), POINTER         :: print_section
     TYPE(cp_para_env_type), POINTER          :: para_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'Setup_Ewald_Spline', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: bo(2,3), iounit
-    LOGICAL                                  :: failure
     TYPE(cell_type), POINTER                 :: cell
     TYPE(cp_logger_type), POINTER            :: logger
     TYPE(pw_type), POINTER                   :: pw
 
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       !
-       ! Setting Up Fit Procedure
-       !
-       CPPrecondition(.NOT.ASSOCIATED(pw_grid),cp_failure_level,routineP,error,failure)
-       CPPrecondition(.NOT.ASSOCIATED(pw_pool),cp_failure_level,routineP,error,failure)
-       CPPrecondition(.NOT.ASSOCIATED(coeff),cp_failure_level,routineP,error,failure)
-       NULLIFY(cell, pw)
+!
+! Setting Up Fit Procedure
+!
 
-       CALL cell_create(cell, hmat=hmat, periodic=(/1,1,1/), error=error)
-       CALL pw_grid_create( pw_grid, para_env%group, local=.TRUE., error=error )
-       logger => cp_error_get_logger(error)
-       iounit = cp_print_key_unit_nr(logger,print_section,"",&
-            extension=".Log",error=error)
-       bo ( 1, 1:3 ) = 0
-       bo ( 2, 1:3 ) = npts(1:3) - 1
-       CALL pw_grid_setup (cell%hmat, pw_grid, grid_span=HALFSPACE, bounds=bo, iounit=iounit, error=error)
+    CPASSERT(.NOT.ASSOCIATED(pw_grid))
+    CPASSERT(.NOT.ASSOCIATED(pw_pool))
+    CPASSERT(.NOT.ASSOCIATED(coeff))
+    NULLIFY(cell, pw)
 
-       CALL cp_print_key_finished_output(iounit,logger,print_section,&
-           "",error=error)
-       ! pw_pool initialized
-       CALL pw_pool_create(pw_pool, pw_grid=pw_grid, error=error)
-       CALL pw_pool_create_pw ( pw_pool, pw, use_data = REALDATA3D, in_space = REALSPACE,&
-            error=error)
-       CALL pw_pool_create_pw ( pw_pool, coeff, use_data = REALDATA3D, in_space = REALSPACE,&
-            error=error)
-       ! Evaluate function on grid
-       CALL eval_pw_TabLR ( pw, pw_pool, coeff, Lg, gx, gy, gz, hmat_mm=hmat,&
-            param_section=param_section, tag=tag, error=error)
-       CALL pw_pool_give_back_pw ( pw_pool, pw, error=error)
-       CALL cell_release(cell , error)
-    END IF
+    CALL cell_create(cell, hmat=hmat, periodic=(/1,1,1/))
+    CALL pw_grid_create( pw_grid, para_env%group, local=.TRUE.)
+    logger => cp_get_default_logger()
+    iounit = cp_print_key_unit_nr(logger,print_section,"",&
+         extension=".Log")
+    bo ( 1, 1:3 ) = 0
+    bo ( 2, 1:3 ) = npts(1:3) - 1
+    CALL pw_grid_setup (cell%hmat, pw_grid, grid_span=HALFSPACE, bounds=bo, iounit=iounit)
+
+    CALL cp_print_key_finished_output(iounit,logger,print_section,&
+        "")
+    ! pw_pool initialized
+    CALL pw_pool_create(pw_pool, pw_grid=pw_grid)
+    CALL pw_pool_create_pw ( pw_pool, pw, use_data = REALDATA3D, in_space = REALSPACE)
+    CALL pw_pool_create_pw ( pw_pool, coeff, use_data = REALDATA3D, in_space = REALSPACE)
+    ! Evaluate function on grid
+    CALL eval_pw_TabLR ( pw, pw_pool, coeff, Lg, gx, gy, gz, hmat_mm=hmat,&
+         param_section=param_section, tag=tag)
+    CALL pw_pool_give_back_pw ( pw_pool, pw)
+    CALL cell_release(cell)
 
   END SUBROUTINE Setup_Ewald_Spline
 
@@ -146,14 +137,12 @@ CONTAINS
 !> \param hmat_mm ...
 !> \param param_section ...
 !> \param tag ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      12.2005 created [tlaino]
 !> \author Teodoro Laino
 ! *****************************************************************************
   SUBROUTINE eval_pw_TabLR( grid, pw_pool, TabLR, Lg, gx, gy, gz, hmat_mm,&
-       param_section, tag, error)
+       param_section, tag)
     TYPE(pw_type), POINTER                   :: grid
     TYPE(pw_pool_type), POINTER              :: pw_pool
     TYPE(pw_type), POINTER                   :: TabLR
@@ -161,16 +150,15 @@ CONTAINS
     REAL(KIND=dp), DIMENSION(3, 3)           :: hmat_mm
     TYPE(section_vals_type), POINTER         :: param_section
     CHARACTER(LEN=*), INTENT(IN)             :: tag
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'eval_pw_TabLR', &
       routineP = moduleN//':'//routineN
 
     INTEGER :: act_nx, act_ny, aint_precond, handle, i, iii, is, j, js, k, &
       ks, Lg_loc_max, Lg_loc_min, max_iter, my_i, my_j, my_k, n1, n2, n3, &
-      n_extra, NLg_loc, nxlim, nylim, nzlim, precond_kind, stat
+      n_extra, NLg_loc, nxlim, nylim, nzlim, precond_kind
     INTEGER, DIMENSION(2, 3)                 :: gbo
-    LOGICAL                                  :: failure, success
+    LOGICAL                                  :: success
     REAL(KIND=dp)                            :: dr1, dr2, dr3, eps_r, eps_x, &
                                                 xs1, xs2, xs3
     REAL(KIND=dp), ALLOCATABLE :: cos_gx(:,:), cos_gy(:,:), cos_gz(:,:), &
@@ -200,24 +188,18 @@ CONTAINS
     IF (2*nxlim /= n1) is = 1
     IF (2*nylim /= n2) js = 1
     IF (2*nzlim /= n3) ks = 1
-    CALL pw_zero(grid, error=error)
+    CALL pw_zero(grid)
 
     ! Used the full symmetry to reduce the evaluation to 1/64th
     !NB parallelization
     iii = 0
      !NB allocate temporaries for Cos refactoring
-     ALLOCATE(cos_gx(SIZE(Lg),gbo(1,1):gbo(2,1)),stat=stat)
-     CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-     ALLOCATE(sin_gx(SIZE(Lg),gbo(1,1):gbo(2,1)),stat=stat)
-     CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-     ALLOCATE(cos_gy(SIZE(Lg),gbo(1,2):gbo(2,2)),stat=stat)
-     CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-     ALLOCATE(sin_gy(SIZE(Lg),gbo(1,2):gbo(2,2)),stat=stat)
-     CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-     ALLOCATE(cos_gz(SIZE(Lg),gbo(1,3):gbo(2,3)),stat=stat)
-     CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-     ALLOCATE(sin_gz(SIZE(Lg),gbo(1,3):gbo(2,3)),stat=stat)
-     CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+     ALLOCATE(cos_gx(SIZE(Lg),gbo(1,1):gbo(2,1)))
+     ALLOCATE(sin_gx(SIZE(Lg),gbo(1,1):gbo(2,1)))
+     ALLOCATE(cos_gy(SIZE(Lg),gbo(1,2):gbo(2,2)))
+     ALLOCATE(sin_gy(SIZE(Lg),gbo(1,2):gbo(2,2)))
+     ALLOCATE(cos_gz(SIZE(Lg),gbo(1,3):gbo(2,3)))
+     ALLOCATE(sin_gz(SIZE(Lg),gbo(1,3):gbo(2,3)))
      !NB precalculate Cos(gx*xs1) etc for Cos refactoring
      DO k=gbo(1,3), gbo(2,3)
        my_k  = k-gbo(1,3)
@@ -263,10 +245,8 @@ CONTAINS
        act_nx = MIN(gbo(2,1),nxlim)-gbo(1,1)+1
        act_ny = MIN(gbo(2,2),nylim)-gbo(1,2)+1
        !NB temporaries for DGEMM use
-       ALLOCATE(lhs(act_nx,NLg_loc),stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       ALLOCATE(rhs(act_ny,NLg_loc),stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       ALLOCATE(lhs(act_nx,NLg_loc))
+       ALLOCATE(rhs(act_ny,NLg_loc))
 
        ! do cos(gx) cos(gy+gz) term
        DO i=gbo(1,1), gbo(2,1)
@@ -301,23 +281,15 @@ CONTAINS
        END DO
 
        !NB deallocate temporaries for DGEMM use
-       DEALLOCATE(lhs,stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       DEALLOCATE(rhs,stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE(lhs)
+       DEALLOCATE(rhs)
        !NB deallocate temporaries for Cos refactoring
-       DEALLOCATE(cos_gx,stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       DEALLOCATE(sin_gx,stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       DEALLOCATE(cos_gy,stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       DEALLOCATE(sin_gy,stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       DEALLOCATE(cos_gz,stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       DEALLOCATE(sin_gz,stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE(cos_gx)
+       DEALLOCATE(sin_gx)
+       DEALLOCATE(cos_gy)
+       DEALLOCATE(sin_gy)
+       DEALLOCATE(cos_gz)
+       DEALLOCATE(sin_gz)
        !NB parallelization
     ELSE ! no work for this node, just zero contribution
        grid%cr3d(gbo(1,1):nxlim,gbo(1,2):nylim,gbo(1,3):nzlim) = 0.0_dp
@@ -341,30 +313,30 @@ CONTAINS
     !
     ! Solve for spline coefficients
     !
-    interp_section =>  section_vals_get_subs_vals(param_section,"INTERPOLATOR",error=error)
-    CALL section_vals_val_get(interp_section,"aint_precond",i_val=aint_precond, error=error)
-    CALL section_vals_val_get(interp_section,"precond",i_val=precond_kind, error=error)
-    CALL section_vals_val_get(interp_section,"max_iter",i_val=max_iter, error=error)
-    CALL section_vals_val_get(interp_section,"eps_r",r_val=eps_r, error=error)
-    CALL section_vals_val_get(interp_section,"eps_x",r_val=eps_x, error=error)
+    interp_section =>  section_vals_get_subs_vals(param_section,"INTERPOLATOR")
+    CALL section_vals_val_get(interp_section,"aint_precond",i_val=aint_precond)
+    CALL section_vals_val_get(interp_section,"precond",i_val=precond_kind)
+    CALL section_vals_val_get(interp_section,"max_iter",i_val=max_iter)
+    CALL section_vals_val_get(interp_section,"eps_r",r_val=eps_r)
+    CALL section_vals_val_get(interp_section,"eps_x",r_val=eps_x)
     !
     ! Solve for spline coefficients
     !
     CALL pw_spline_precond_create(precond,precond_kind=aint_precond,&
-         pool=pw_pool,pbc=.TRUE.,transpose=.FALSE.,error=error)
-    CALL pw_spline_do_precond(precond,grid,TabLR,error=error)
-    CALL pw_spline_precond_set_kind(precond,precond_kind,error=error)
+         pool=pw_pool,pbc=.TRUE.,transpose=.FALSE.)
+    CALL pw_spline_do_precond(precond,grid,TabLR)
+    CALL pw_spline_precond_set_kind(precond,precond_kind)
     success=find_coeffs(values=grid,coeffs=TabLR,&
             linOp=spl3_pbc,preconditioner=precond, pool=pw_pool, &
             eps_r=eps_r,eps_x=eps_x,&
-            max_iter=max_iter,error=error)
-    CPPostconditionNoFail(success,cp_warning_level,routineP,error)
-    CALL pw_spline_precond_release(precond,error=error)
+            max_iter=max_iter)
+    CPASSERT(success)
+    CALL pw_spline_precond_release(precond)
     !
     ! Check for the interpolation Spline
     !
     CALL check_spline_interp_TabLR(hmat_mm, Lg, gx, gy, gz, TabLR, param_section,&
-         tag, error)
+         tag)
     CALL timestop(handle)
   END SUBROUTINE eval_pw_TabLR
 
@@ -378,20 +350,17 @@ CONTAINS
 !> \param TabLR ...
 !> \param param_section ...
 !> \param tag ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      12.2005 created [tlaino]
 !> \author Teodoro Laino
 ! *****************************************************************************
   SUBROUTINE check_spline_interp_TabLR(hmat_mm, Lg, gx, gy, gz, TabLR,&
-       param_section, tag, error)
+       param_section, tag)
     REAL(KIND=dp), DIMENSION(3, 3)           :: hmat_mm
     REAL(KIND=dp), DIMENSION(:), POINTER     :: Lg, gx, gy, gz
     TYPE(pw_type), POINTER                   :: TabLR
     TYPE(section_vals_type), POINTER         :: param_section
     CHARACTER(LEN=*), INTENT(IN)             :: tag
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'check_spline_interp_TabLR', &
       routineP = moduleN//':'//routineN
@@ -403,9 +372,9 @@ CONTAINS
     TYPE(cp_logger_type), POINTER            :: logger
 
     NULLIFY(logger)
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
     iw = cp_print_key_unit_nr(logger,param_section,"check_spline",&
-         extension="."//TRIM(tag)//"Log",error=error)
+         extension="."//TRIM(tag)//"Log")
     CALL timeset(routineN,handle)
     IF (iw > 0) THEN
        npoints   = 100
@@ -436,9 +405,9 @@ CONTAINS
              dzTerm = dzTerm - lg(kg)*SIN(vec(1)*xs1+vec(2)*xs2+vec(3)*xs3)*vec(3)
           END DO
           Na = SQRT(dxTerm*dxTerm + dyTerm*dyTerm + dzTerm*dzTerm)
-          dn = Eval_d_Interp_Spl3_pbc((/xs1,xs2,xs3/),TabLR,error)
+          dn = Eval_d_Interp_Spl3_pbc((/xs1,xs2,xs3/),TabLR)
           Nn = SQRT(DOT_PRODUCT(dn,dn))
-          Fterm = Eval_Interp_Spl3_pbc((/xs1,xs2,xs3/),TabLR,error)
+          Fterm = Eval_Interp_Spl3_pbc((/xs1,xs2,xs3/),TabLR)
           tmp1  = ABS(Term-Fterm)
           tmp2  = SQRT(DOT_PRODUCT(dn-(/dxTerm,dyTerm,dzTerm/),dn-(/dxTerm,dyTerm,dzTerm/)))
           errf     = errf + tmp1
@@ -455,7 +424,7 @@ CONTAINS
                                                                errd/REAL(npoints,kind=dp)
     END IF
     CALL timestop(handle)
-    CALL cp_print_key_finished_output(iw,logger,param_section,"check_spline", error=error)
+    CALL cp_print_key_finished_output(iw,logger,param_section,"check_spline")
 
   END SUBROUTINE check_spline_interp_TabLR
 

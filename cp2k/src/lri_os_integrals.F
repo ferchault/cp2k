@@ -22,9 +22,8 @@ MODULE lri_os_integrals
                                              overlap_ab_test,&
                                              overlap_abc_test
   USE orbital_pointers,                ONLY: ncoset
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -52,10 +51,9 @@ CONTAINS
 !> \param calculate_forces ...
 !> \param debug integrals are debugged by recursive routines if requested
 !> \param dmax maximal deviation between integrals when debugging
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE lri_int_ab(sab,dsab,ra,rb,rab,fba,fbb,calculate_forces,debug,&
-                        dmax,error)
+                        dmax)
 
     REAL(KIND=dp), DIMENSION(:, :), POINTER  :: sab
     REAL(KIND=dp), DIMENSION(:, :, :), &
@@ -64,18 +62,16 @@ CONTAINS
     TYPE(gto_basis_set_type), POINTER        :: fba, fbb
     LOGICAL, INTENT(IN)                      :: calculate_forces, debug
     REAL(KIND=dp), INTENT(INOUT)             :: dmax
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'lri_int_ab', &
       routineP = moduleN//':'//routineN
 
     INTEGER :: handle, i, iset, jset, lds, m1, m2, maxco, maxcoa, maxcob, &
-      maxl, maxla, maxlb, ncoa, ncob, nseta, nsetb, sgfa, sgfb, stat
+      maxl, maxla, maxlb, ncoa, ncob, nseta, nsetb, sgfa, sgfb
     INTEGER, DIMENSION(:), POINTER           :: la_max, la_min, lb_max, &
                                                 lb_min, npgfa, npgfb, nsgfa, &
                                                 nsgfb
     INTEGER, DIMENSION(:, :), POINTER        :: first_sgfa, first_sgfb
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: dab
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :)                        :: sint
@@ -85,7 +81,6 @@ CONTAINS
     REAL(KIND=dp), DIMENSION(:, :), POINTER  :: rpgfa, rpgfb, sphi_a, sphi_b, &
                                                 zeta, zetb
 
-    failure = .FALSE.
     CALL timeset(routineN,handle)
     NULLIFY(la_max, la_min, lb_max, lb_min, npgfa, npgfb, nsgfa, nsgfb,&
             first_sgfa, first_sgfb, set_radius_a, set_radius_b, rpgfa, rpgfb,&
@@ -123,16 +118,13 @@ CONTAINS
      maxl = MAX(maxla,maxlb)
     ENDIF
     lds = ncoset(maxl)
-    ALLOCATE(sint(maxco,maxco),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(sint(maxco,maxco))
     IF(calculate_forces) THEN
      !derivatives will be stored in devab(:,:,2:4)
-     ALLOCATE(swork(lds,lds,4),devab(maxco,maxco,4),STAT=stat)
-     CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+     ALLOCATE(swork(lds,lds,4),devab(maxco,maxco,4))
      devab = 0._dp
     ELSE
-     ALLOCATE(swork(lds,lds,1),STAT=stat)
-     CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+     ALLOCATE(swork(lds,lds,1))
     ENDIF
     sint  = 0._dp
     swork = 0._dp
@@ -165,7 +157,7 @@ CONTAINS
               !NOTE: devab(:,:,2:4) contains all derivatives for lmin=0 to lmax=lmax 
               !      correct after contraction (multiply with zero for elements l < lmin) 
               CALL ab_contract(dsab(sgfa:m1,sgfb:m2,i),devab(:,:,i+1),sphi_a(:,sgfa:),&
-                   sphi_b(:,sgfb:),ncoa,ncob,nsgfa(iset),nsgfb(jset),error)
+                   sphi_b(:,sgfb:),ncoa,ncob,nsgfa(iset),nsgfb(jset))
              ENDDO
 
           ELSE
@@ -177,21 +169,19 @@ CONTAINS
           IF(debug) THEN
              CALL overlap_ab_test(la_max(iset),la_min(iset),npgfa(iset),zeta(:,iset),&
                                   lb_max(jset),lb_min(jset),npgfb(jset),zetb(:,jset),&
-                                  ra,rb,sint,dmax,error)
+                                  ra,rb,sint,dmax)
           ENDIF
 
           CALL ab_contract(sab(sgfa:m1,sgfb:m2),sint,sphi_a(:,sgfa:),sphi_b(:,sgfb:),&
-               ncoa,ncob,nsgfa(iset),nsgfb(jset),error)
+               ncoa,ncob,nsgfa(iset),nsgfb(jset))
        END DO
     END DO
 
     IF(calculate_forces) THEN
-     DEALLOCATE(devab,STAT=stat)
-     CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+     DEALLOCATE(devab)
     ENDIF
 
-    DEALLOCATE(sint,swork,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(sint,swork)
 
     CALL timestop(handle)
 
@@ -210,10 +200,9 @@ CONTAINS
 !> \param calculate_forces ...
 !> \param debug integrals are debugged by recursive routines if requested
 !> \param dmax maximal deviation between integrals when debugging
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE lri_int_aba(abaint,dabdaint,ra,rb,rab,oba,obb,fba,&
-                         calculate_forces,debug,dmax,error)
+                         calculate_forces,debug,dmax)
 
     REAL(KIND=dp), DIMENSION(:, :, :), &
       POINTER                                :: abaint
@@ -223,7 +212,6 @@ CONTAINS
     TYPE(gto_basis_set_type), POINTER        :: oba, obb, fba
     LOGICAL, INTENT(IN)                      :: calculate_forces, debug
     REAL(KIND=dp), INTENT(INOUT)             :: dmax
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'lri_int_aba', &
       routineP = moduleN//':'//routineN
@@ -231,14 +219,13 @@ CONTAINS
     INTEGER                                  :: handle, i, iset, jset, kaset, &
                                                 m1, m2, m3, ncoa, ncob, ncoc, &
                                                 nseta, nsetb, nsetca, sgfa, &
-                                                sgfb, sgfc, stat
+                                                sgfb, sgfc
     INTEGER, DIMENSION(:), POINTER           :: la_max, la_min, lb_max, &
                                                 lb_min, lca_max, lca_min, &
                                                 npgfa, npgfb, npgfca, nsgfa, &
                                                 nsgfb, nsgfca
     INTEGER, DIMENSION(:, :), POINTER        :: first_sgfa, first_sgfb, &
                                                 first_sgfca
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: dab, dac, dbc
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :, :)                     :: saba
@@ -251,7 +238,6 @@ CONTAINS
                                                 sphi_b, sphi_ca, zeta, zetb, &
                                                 zetca
 
-    failure = .FALSE.
     CALL timeset(routineN,handle)
     NULLIFY(la_max, la_min, lb_max, lb_min, lca_max, lca_min, npgfa, npgfb,&
              npgfca, nsgfa, nsgfb, nsgfca) 
@@ -324,53 +310,47 @@ CONTAINS
              sgfc = first_sgfca(1,kaset)
              m3=sgfc+nsgfca(kaset)-1
              IF(ncoa*ncob*ncoc > 0) THEN
-                ALLOCATE(saba(ncoa,ncob,ncoc),STAT=stat)
-                CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+                ALLOCATE(saba(ncoa,ncob,ncoc))
                 saba(:,:,:)    = 0._dp
                 ! integrals
                 IF(calculate_forces) THEN
-                   ALLOCATE(sdaba(ncoa,ncob,ncoc,3),STAT=stat)
-                   CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-                   ALLOCATE(sabda(ncoa,ncob,ncoc,3),STAT=stat)
-                   CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-                   ALLOCATE(sdabda(ncoa,ncob,ncoc,3),STAT=stat)
-                   CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+                   ALLOCATE(sdaba(ncoa,ncob,ncoc,3))
+                   ALLOCATE(sabda(ncoa,ncob,ncoc,3))
+                   ALLOCATE(sdabda(ncoa,ncob,ncoc,3))
                    sdaba(:,:,:,:) = 0._dp
                    sabda(:,:,:,:) = 0._dp
                    sdabda(:,:,:,:) = 0._dp
                    CALL overlap3(la_max(iset),npgfa(iset),zeta(:,iset),rpgfa(:,iset),la_min(iset),&
                                  lb_max(jset),npgfb(jset),zetb(:,jset),rpgfb(:,jset),lb_min(jset),&
                                  lca_max(kaset),npgfca(kaset),zetca(:,kaset),rpgfca(:,kaset),lca_min(kaset),&
-                                 rab,dab,rac,dac,rbc,dbc,saba,sdaba,sabda,error=error)
+                                 rab,dab,rac,dac,rbc,dbc,saba,sdaba,sabda)
                    !d(a,b,a)/dA = (da/dA,b,a) + (a,b,da/dA)
                    sdabda(:,:,:,:) = sdaba + sabda
 
                    DO i=1,3
                     CALL abc_contract(dabdaint(sgfa:m1,sgfb:m2,sgfc:m3,i),sdabda(:,:,:,i),& 
                          sphi_a(:,sgfa:),sphi_b(:,sgfb:),sphi_ca(:,sgfc:),&
-                         ncoa,ncob,ncoc,nsgfa(iset),nsgfb(jset),nsgfca(kaset),error)
+                         ncoa,ncob,ncoc,nsgfa(iset),nsgfb(jset),nsgfca(kaset))
                    ENDDO
 
-                   DEALLOCATE(sdaba,sabda,sdabda,STAT=stat)
-                   CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+                   DEALLOCATE(sdaba,sabda,sdabda)
                 ELSE
                    CALL overlap3(la_max(iset),npgfa(iset),zeta(:,iset),rpgfa(:,iset),la_min(iset),&
                                  lb_max(jset),npgfb(jset),zetb(:,jset),rpgfb(:,jset),lb_min(jset),&
                                  lca_max(kaset),npgfca(kaset),zetca(:,kaset),rpgfca(:,kaset),lca_min(kaset),&
-                                 rab,dab,rac,dac,rbc,dbc,saba,error=error)
+                                 rab,dab,rac,dac,rbc,dbc,saba)
                 ENDIF
                 ! debug if requested
                 IF(debug) THEN
                    CALL overlap_abc_test(la_max(iset),npgfa(iset),zeta(:,iset),la_min(iset),&
                                          lb_max(jset),npgfb(jset),zetb(:,jset),lb_min(jset),&
                                          lca_max(kaset),npgfca(kaset),zetca(:,kaset),lca_min(kaset),&
-                                         ra,rb,ra,saba,dmax,error)
+                                         ra,rb,ra,saba,dmax)
                 ENDIF
                 CALL abc_contract(abaint(sgfa:m1,sgfb:m2,sgfc:m3),saba,& 
                      sphi_a(:,sgfa:),sphi_b(:,sgfb:),sphi_ca(:,sgfc:),&
-                     ncoa,ncob,ncoc,nsgfa(iset),nsgfb(jset),nsgfca(kaset),error)
-                DEALLOCATE(saba,STAT=stat)
-                CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+                     ncoa,ncob,ncoc,nsgfa(iset),nsgfb(jset),nsgfca(kaset))
+                DEALLOCATE(saba)
              END IF
           END DO
        END DO
@@ -393,10 +373,9 @@ CONTAINS
 !> \param calculate_forces ...
 !> \param debug integrals are debugged by recursive routines if requested
 !> \param dmax maximal deviation between integrals when debugging
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE lri_int_abb(abbint,dabbint,ra,rb,rab,oba,obb,fbb,calculate_forces,&
-                         debug,dmax,error)
+                         debug,dmax)
 
     REAL(KIND=dp), DIMENSION(:, :, :), &
       POINTER                                :: abbint
@@ -406,7 +385,6 @@ CONTAINS
     TYPE(gto_basis_set_type), POINTER        :: oba, obb, fbb
     LOGICAL, INTENT(IN)                      :: calculate_forces, debug
     REAL(KIND=dp), INTENT(INOUT)             :: dmax
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'lri_int_abb', &
       routineP = moduleN//':'//routineN
@@ -414,14 +392,13 @@ CONTAINS
     INTEGER                                  :: handle, i, iset, jset, kbset, &
                                                 m1, m2, m3, ncoa, ncob, ncoc, &
                                                 nseta, nsetb, nsetcb, sgfa, &
-                                                sgfb, sgfc, stat
+                                                sgfb, sgfc
     INTEGER, DIMENSION(:), POINTER           :: la_max, la_min, lb_max, &
                                                 lb_min, lcb_max, lcb_min, &
                                                 npgfa, npgfb, npgfcb, nsgfa, &
                                                 nsgfb, nsgfcb
     INTEGER, DIMENSION(:, :), POINTER        :: first_sgfa, first_sgfb, &
                                                 first_sgfcb
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: dab, dac, dbc
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :, :)                     :: sabb
@@ -434,7 +411,6 @@ CONTAINS
                                                 sphi_b, sphi_cb, zeta, zetb, &
                                                 zetcb
 
-    failure = .FALSE.
     CALL timeset(routineN,handle)
     NULLIFY(la_max, la_min, lb_max, lb_min, lcb_max, lcb_min, npgfa, npgfb,&
             npgfcb, nsgfa, nsgfb, nsgfcb)
@@ -507,42 +483,38 @@ CONTAINS
              sgfc = first_sgfcb(1,kbset)
              m3=sgfc+nsgfcb(kbset)-1
              IF(ncoa*ncob*ncoc > 0) THEN
-                ALLOCATE(sabb(ncoa,ncob,ncoc),STAT=stat)
-                CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+                ALLOCATE(sabb(ncoa,ncob,ncoc))
                 sabb(:,:,:) = 0._dp
                 IF(calculate_forces) THEN
-                   ALLOCATE(sdabb(ncoa,ncob,ncoc,3),STAT=stat)
-                   CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+                   ALLOCATE(sdabb(ncoa,ncob,ncoc,3))
                    sdabb(:,:,:,:) = 0._dp
                    CALL overlap3(la_max(iset),npgfa(iset),zeta(:,iset),rpgfa(:,iset),la_min(iset),&
                                 lb_max(jset),npgfb(jset),zetb(:,jset),rpgfb(:,jset),lb_min(jset),&
                                 lcb_max(kbset),npgfcb(kbset),zetcb(:,kbset),rpgfcb(:,kbset),lcb_min(kbset),&
-                                rab,dab,rac,dac,rbc,dbc,sabb,sdabc=sdabb,error=error)
+                                rab,dab,rac,dac,rbc,dbc,sabb,sdabc=sdabb)
                    DO i=1,3
                     CALL abc_contract(dabbint(sgfa:m1,sgfb:m2,sgfc:m3,i),sdabb(:,:,:,i),&
                          sphi_a(:,sgfa:),sphi_b(:,sgfb:),sphi_cb(:,sgfc:),&
-                         ncoa,ncob,ncoc,nsgfa(iset),nsgfb(jset),nsgfcb(kbset),error)
+                         ncoa,ncob,ncoc,nsgfa(iset),nsgfb(jset),nsgfcb(kbset))
                    ENDDO
-                   DEALLOCATE(sdabb,STAT=stat)
-                   CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+                   DEALLOCATE(sdabb)
                 ELSE
                    CALL overlap3(la_max(iset),npgfa(iset),zeta(:,iset),rpgfa(:,iset),la_min(iset),&
                                 lb_max(jset),npgfb(jset),zetb(:,jset),rpgfb(:,jset),lb_min(jset),&
                                 lcb_max(kbset),npgfcb(kbset),zetcb(:,kbset),rpgfcb(:,kbset),lcb_min(kbset),&
-                                rab,dab,rac,dac,rbc,dbc,sabb,error=error)
+                                rab,dab,rac,dac,rbc,dbc,sabb)
                 ENDIF
                 ! debug if requested
                 IF(debug) THEN
                    CALL overlap_abc_test(la_max(iset),npgfa(iset),zeta(:,iset),la_min(iset),&
                                          lb_max(jset),npgfb(jset),zetb(:,jset),lb_min(jset),&
                                          lcb_max(kbset),npgfcb(kbset),zetcb(:,kbset),lcb_min(kbset),&
-                                         ra,rb,rb,sabb,dmax,error)
+                                         ra,rb,rb,sabb,dmax)
                 ENDIF
                 CALL abc_contract(abbint(sgfa:m1,sgfb:m2,sgfc:m3),sabb,&
                      sphi_a(:,sgfa:),sphi_b(:,sgfb:),sphi_cb(:,sgfc:),&
-                     ncoa,ncob,ncoc,nsgfa(iset),nsgfb(jset),nsgfcb(kbset),error)
-                DEALLOCATE(sabb,STAT=stat)
-                CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+                     ncoa,ncob,ncoc,nsgfa(iset),nsgfb(jset),nsgfcb(kbset))
+                DEALLOCATE(sabb)
              ENDIF
           END DO
 
@@ -563,9 +535,8 @@ CONTAINS
 !> \param rb ...
 !> \param debug integrals are debugged by recursive routines if requested
 !> \param dmax maximal deviation between integrals when debugging
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE lri_int_aabb(saabb,oba,obb,rab,ra,rb,debug,dmax,error)
+  SUBROUTINE lri_int_aabb(saabb,oba,obb,rab,ra,rb,debug,dmax)
 
     REAL(KIND=dp), DIMENSION(:, :, :, :), &
       POINTER                                :: saabb
@@ -573,21 +544,18 @@ CONTAINS
     REAL(KIND=dp), DIMENSION(3), INTENT(IN)  :: rab, ra, rb
     LOGICAL, INTENT(IN)                      :: debug
     REAL(KIND=dp), INTENT(INOUT)             :: dmax
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'lri_int_aabb', &
       routineP = moduleN//':'//routineN
 
     INTEGER :: handle, iset, isgfa1, jset, jsgfa2, kset, ksgfb1, lds, lset, &
       lsgfb2, m1, m2, m3, m4, maxco, maxcoa, maxcob, maxl, maxla, maxlb, &
-      ncoa1, ncoa2, ncob1, ncob2, nseta, nsetb, sgfa1, sgfa2, sgfb1, sgfb2, &
-      stat
+      ncoa1, ncoa2, ncob1, ncob2, nseta, nsetb, sgfa1, sgfa2, sgfb1, sgfb2
     INTEGER, DIMENSION(:), POINTER           :: la_max, la_min, lb_max, &
                                                 lb_min, npgfa, npgfb, nsgfa, &
                                                 nsgfb
     INTEGER, DIMENSION(:, :), POINTER        :: first_sgfa, first_sgfb
-    LOGICAL                                  :: asets_equal, bsets_equal, &
-                                                failure
+    LOGICAL                                  :: asets_equal, bsets_equal
     REAL(KIND=dp)                            :: dab
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :)                        :: swork
@@ -597,7 +565,6 @@ CONTAINS
     REAL(KIND=dp), DIMENSION(:, :), POINTER  :: rpgfa, rpgfb, sphi_a, sphi_b, &
                                                 zeta, zetb
 
-    failure = .FALSE.
     CALL timeset(routineN,handle)
     NULLIFY(la_max, la_min, lb_max, lb_min, npgfa, npgfb, nsgfa, nsgfb,&
             first_sgfa, first_sgfb, set_radius_a, set_radius_b, rpgfa, rpgfb,&
@@ -633,10 +600,8 @@ CONTAINS
     maxlb = 2*maxlb
     maxl = MAX(maxla,maxlb)
     lds = ncoset(maxl)
-    ALLOCATE(sint(maxco,maxco,maxco,maxco),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(swork(lds,lds),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(sint(maxco,maxco,maxco,maxco))
+    ALLOCATE(swork(lds,lds))
     sint  = 0._dp
     swork = 0._dp
 
@@ -683,12 +648,12 @@ CONTAINS
                                           la_max(jset),la_min(jset),npgfa(jset),zeta(:,jset),&
                                           lb_max(kset),lb_min(kset),npgfb(kset),zetb(:,kset),&
                                           lb_max(lset),lb_min(lset),npgfb(lset),zetb(:,lset),&
-                                          ra,rb,sint,dmax,error)
+                                          ra,rb,sint,dmax)
                 ENDIF
 
                 CALL abcd_contract(saabb(sgfa1:m1,sgfa2:m2,sgfb1:m3,sgfb2:m4),sint,sphi_a(:,sgfa1:),&
                                    sphi_a(:,sgfa2:),sphi_b(:,sgfb1:),sphi_b(:,sgfb2:),ncoa1,ncoa2,&
-                                   ncob1,ncob2,nsgfa(iset),nsgfa(jset),nsgfb(kset),nsgfb(lset),error)
+                                   ncob1,ncob2,nsgfa(iset),nsgfa(jset),nsgfb(kset),nsgfb(lset))
 
                ! account for the fact that some integrals are alike
                 DO isgfa1 = sgfa1,m1
@@ -708,8 +673,7 @@ CONTAINS
        END DO
     END DO
 
-    DEALLOCATE(sint,swork,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(sint,swork)
 
     CALL timestop(handle)
 
@@ -725,23 +689,19 @@ CONTAINS
 !> \param ncob ...
 !> \param nsgfa ...
 !> \param nsgfb ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE ab_contract(abint,sab,sphi_a,sphi_b,ncoa,ncob,nsgfa,nsgfb,error)
+  SUBROUTINE ab_contract(abint,sab,sphi_a,sphi_b,ncoa,ncob,nsgfa,nsgfb)
 
     REAL(KIND=dp), DIMENSION(:, :), &
       INTENT(INOUT)                          :: abint
     REAL(KIND=dp), DIMENSION(:, :), &
       INTENT(IN)                             :: sab, sphi_a, sphi_b
     INTEGER, INTENT(IN)                      :: ncoa, ncob, nsgfa, nsgfb
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'ab_contract', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: m1, m2, msphia, msphib, nn, &
-                                                stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: m1, m2, msphia, msphib, nn
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :)                        :: cpp
 
@@ -753,15 +713,13 @@ CONTAINS
 
     nn = SIZE(abint,1)
 
-    ALLOCATE(cpp(nsgfa,m2),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(cpp(nsgfa,m2))
 
     CALL dgemm("T","N",nsgfa,m2,ncoa,1._dp,sphi_a,msphia,sab,m1,0.0_dp,cpp,nsgfa)
     CALL dgemm("N","N",nsgfa,nsgfb,ncob,1._dp,cpp,nsgfa,sphi_b,msphib,0.0_dp,&
                abint,nn)
 
-    DEALLOCATE(cpp,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(cpp)
 
   END SUBROUTINE ab_contract
 
@@ -779,23 +737,20 @@ CONTAINS
 !> \param nsgfa ...
 !> \param nsgfb ...
 !> \param nsgfc ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE abc_contract(abcint,sabc,sphi_a,sphi_b,sphi_c,ncoa,ncob,ncoc,&
-                          nsgfa,nsgfb,nsgfc,error)
+                          nsgfa,nsgfb,nsgfc)
 
     REAL(KIND=dp), DIMENSION(:, :, :)        :: abcint, sabc
     REAL(KIND=dp), DIMENSION(:, :)           :: sphi_a, sphi_b, sphi_c
     INTEGER, INTENT(IN)                      :: ncoa, ncob, ncoc, nsgfa, &
                                                 nsgfb, nsgfc
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'abc_contract', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, isgfc, m1, m2, m3, &
-                                                msphia, msphib, msphic, stat
-    LOGICAL                                  :: failure
+                                                msphia, msphib, msphic
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :)                        :: temp_ccc, work_cpc
     REAL(KIND=dp), ALLOCATABLE, &
@@ -811,12 +766,10 @@ CONTAINS
     m2 = SIZE(sabc,2)
     m3 = SIZE(sabc,3)
 
-    ALLOCATE(cpp(nsgfa,m2,m3),cpc(nsgfa,m2,nsgfc),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(cpp(nsgfa,m2,m3),cpc(nsgfa,m2,nsgfc))
     cpp = 0._dp
     cpc = 0._dp
-    ALLOCATE(work_cpc(nsgfa,m2),temp_ccc(nsgfa,nsgfb),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(work_cpc(nsgfa,m2),temp_ccc(nsgfa,nsgfb))
     work_cpc(:,:) = 0._dp
     temp_ccc(:,:) = 0._dp
 
@@ -831,8 +784,7 @@ CONTAINS
      abcint(:,:,isgfc)=temp_ccc(:,:)
     END DO
 
-    DEALLOCATE(cpp,cpc,work_cpc,temp_ccc,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(cpp,cpc,work_cpc,temp_ccc)
 
     CALL timestop(handle)
 
@@ -855,10 +807,9 @@ CONTAINS
 !> \param nsgfb ...
 !> \param nsgfc ...
 !> \param nsgfd ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE abcd_contract(abcdint,sabcd,sphi_a,sphi_b,sphi_c,sphi_d,ncoa,ncob,&
-                           ncoc,ncod,nsgfa,nsgfb,nsgfc,nsgfd,error)
+                           ncoc,ncod,nsgfa,nsgfb,nsgfc,nsgfd)
 
     REAL(KIND=dp), DIMENSION(:, :, :, :), &
       INTENT(INOUT)                          :: abcdint
@@ -868,15 +819,13 @@ CONTAINS
       INTENT(IN)                             :: sphi_a, sphi_b, sphi_c, sphi_d
     INTEGER, INTENT(IN)                      :: ncoa, ncob, ncoc, ncod, &
                                                 nsgfa, nsgfb, nsgfc, nsgfd
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'abcd_contract', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, isgfc, isgfd, m1, m2, &
                                                 m3, m4, msphia, msphib, &
-                                                msphic, msphid, stat
-    LOGICAL                                  :: failure
+                                                msphic, msphid
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :)                        :: temp_cccc, work_cpcc
     REAL(KIND=dp), ALLOCATABLE, &
@@ -897,16 +846,13 @@ CONTAINS
     m4 = SIZE(sabcd,4)
 
     ALLOCATE(cppp(nsgfa,m2,m3,m4),cppc(nsgfa,m2,m3,nsgfd),&
-             cpcc(nsgfa,m2,nsgfc,nsgfd),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+             cpcc(nsgfa,m2,nsgfc,nsgfd))
 
-    ALLOCATE(work_cppc(nsgfa,m2,m3),temp_cpcc(nsgfa,m2,nsgfc),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(work_cppc(nsgfa,m2,m3),temp_cpcc(nsgfa,m2,nsgfc))
     work_cppc = 0._dp
     temp_cpcc = 0._dp
 
-    ALLOCATE(work_cpcc(nsgfa,m2),temp_cccc(nsgfa,nsgfb),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(work_cpcc(nsgfa,m2),temp_cccc(nsgfa,nsgfb))
     work_cpcc = 0._dp
     temp_cccc = 0._dp
 
@@ -928,10 +874,8 @@ CONTAINS
       END DO
     END DO
 
-    DEALLOCATE(cpcc,cppc,cppp,stat=STAT)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    DEALLOCATE(work_cpcc,work_cppc,temp_cpcc,temp_cccc,stat=STAT)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(cpcc,cppc,cppp)
+    DEALLOCATE(work_cpcc,work_cppc,temp_cpcc,temp_cccc)
 
     CALL timestop(handle)
 

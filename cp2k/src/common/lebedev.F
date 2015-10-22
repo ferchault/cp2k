@@ -56,10 +56,8 @@ MODULE lebedev
 
   
   USE kinds,                           ONLY: dp
-  USE termination,                     ONLY: stop_program
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -117,6 +115,9 @@ CONTAINS
     INTEGER, INTENT(IN), OPTIONAL            :: l, n
     INTEGER                                  :: number_of_lebedev_grid
 
+    CHARACTER(len=*), PARAMETER :: routineN = 'get_number_of_lebedev_grid', &
+      routineP = moduleN//':'//routineN
+
     INTEGER                                  :: i
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: ll, nn
     INTEGER, DIMENSION(1)                    :: lgnum
@@ -136,11 +137,11 @@ CONTAINS
 !      lgnum(:) = MINLOC(lebedev_grid(:)%n,MASK=(lebedev_grid(:)%n >= n))
       lgnum(:) = MINLOC(nn(:),MASK=(nn(:) >= n))
     ELSE
-      STOP "*** ERROR in FUNCTION get_number_of_lebedev_grid ***"
+      CPABORT("*** ERROR in FUNCTION get_number_of_lebedev_grid ***")
     END IF
 
     IF (lgnum(1) == 0) THEN
-      STOP "*** ERROR in FUNCTION get_number_of_lebedev_grid ***"
+      CPABORT("*** ERROR in FUNCTION get_number_of_lebedev_grid ***")
     ELSE
       number_of_lebedev_grid = lgnum(1)
     END IF
@@ -173,13 +174,11 @@ CONTAINS
 !   *** Check argument values ***
 
     IF ((lgnum < 1).OR.(lgnum > nlg)) THEN
-      CALL stop_program(routineN,moduleN,__LINE__,&
-                        "Argument value #2 (lgnum) is out of range")
+      CPABORT("Argument value #2 (lgnum) is out of range")
     END IF
 
     IF ((np < 0).OR.(np > max_np)) THEN
-      CALL stop_program(routineN,moduleN,__LINE__,&
-                        "Argument value #3 (np) is out of range")
+      CPABORT("Argument value #3 (np) is out of range")
     END IF
 
     SELECT CASE (subsystem)
@@ -308,14 +307,13 @@ CONTAINS
                        z,-y,-x,-z, y,-x,-z,-y, x,-z,-y,-x/),(/3,nd/))
         END DO
       ELSE
-        CALL stop_program(routineN,moduleN,__LINE__,&
-                          "Subsytem D: np is not modulo 3 (check argument #3)")
+        CPABORT("Subsytem D: np is not modulo 3 (check argument #3)")
       END IF
       nlgp = nlgp + nd*np/3
     CASE DEFAULT
-      CALL stop_program(routineN,moduleN,__LINE__,&
-                        "The invalid subsystem <"//TRIM(subsystem)//"> was "//&
-                        "specified (check argument #1)")
+      CALL cp_abort(__LOCATION__,&
+           "The invalid subsystem <"//TRIM(subsystem)//"> was "//&
+           "specified (check argument #1)")
     END SELECT
 
 !   *** Reinitialize working storage ***

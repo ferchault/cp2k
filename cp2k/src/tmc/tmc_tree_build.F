@@ -36,8 +36,6 @@ MODULE tmc_tree_build
                                              next_random_number,&
                                              reset_to_next_rng_substream,&
                                              set_rng_stream
-  USE timings,                         ONLY: timeset,&
-                                             timestop
   USE tmc_calculations,                ONLY: calc_e_kin,&
                                              init_vel
   USE tmc_dot_tree,                    ONLY: create_dot,&
@@ -77,6 +75,7 @@ MODULE tmc_tree_build
   USE tmc_types,                       ONLY: tmc_env_type,&
                                              tmc_param_type
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -100,24 +99,19 @@ CONTAINS
 !> \brief allocates an elements of the global element structure 
 !> \param next_el ...
 !> \param nr_temp ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 11.2012
 ! *****************************************************************************
-  SUBROUTINE allocate_new_global_tree_node(next_el, nr_temp, error)
+  SUBROUTINE allocate_new_global_tree_node(next_el, nr_temp)
     TYPE(global_tree_type), POINTER          :: next_el
     INTEGER                                  :: nr_temp
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: &
       routineN = 'allocate_new_global_tree_node', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, itmp
-    LOGICAL                                  :: failure
 
-    failure = .FALSE.
-    CPPrecondition(.NOT.ASSOCIATED(next_el),cp_failure_level,routineP,error,failure)
+    CPASSERT(.NOT.ASSOCIATED(next_el))
 
     ! start the timing
     CALL timeset(routineN,handle)
@@ -141,22 +135,17 @@ CONTAINS
 ! *****************************************************************************
 !> \brief deallocates an elements of the global element structure 
 !> \param gt_elem ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 11.2012
 ! *****************************************************************************
-  SUBROUTINE deallocate_global_tree_node(gt_elem, error)
+  SUBROUTINE deallocate_global_tree_node(gt_elem)
     TYPE(global_tree_type), POINTER          :: gt_elem
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'deallocate_global_tree_node', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle
-    LOGICAL                                  :: failure
 
-    failure = .FALSE.
-    CPPrecondition(ASSOCIATED(gt_elem),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(gt_elem))
 
     ! start the timing
     CALL timeset(routineN,handle)
@@ -165,7 +154,6 @@ CONTAINS
     DEALLOCATE(gt_elem%conf_n_acc)
     DEALLOCATE(gt_elem%conf)
     DEALLOCATE(gt_elem)
-    NULLIFY(gt_elem)
     ! end the timing
     CALL timestop(handle)
   END SUBROUTINE deallocate_global_tree_node  
@@ -175,24 +163,19 @@ CONTAINS
 !> \param tmc_params structure for storing all (global) parameters
 !> \param next_el ...
 !> \param nr_dim ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 11.2012
 ! *****************************************************************************
-  SUBROUTINE allocate_new_sub_tree_node(tmc_params, next_el, nr_dim, error)
+  SUBROUTINE allocate_new_sub_tree_node(tmc_params, next_el, nr_dim)
     TYPE(tmc_param_type), POINTER            :: tmc_params
     TYPE(tree_type), POINTER                 :: next_el
     INTEGER                                  :: nr_dim
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'allocate_new_sub_tree_node', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle
-    LOGICAL                                  :: failure
 
-    failure = .FALSE.
-    CPPrecondition(.NOT.ASSOCIATED(next_el),cp_failure_level,routineP,error,failure)
+    CPASSERT(.NOT.ASSOCIATED(next_el))
 
     ! start the timing
     CALL timeset(routineN,handle)
@@ -241,22 +224,17 @@ CONTAINS
 ! *****************************************************************************
 !> \brief deallocates an elements of the subtree element structure 
 !> \param tree_elem ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 11.2012
 ! *****************************************************************************
-  SUBROUTINE deallocate_sub_tree_node(tree_elem, error)
+  SUBROUTINE deallocate_sub_tree_node(tree_elem)
     TYPE(tree_type), POINTER                 :: tree_elem
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'deallocate_sub_tree_node', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle
-    LOGICAL                                  :: failure
 
-    failure = .FALSE.
-    CPPrecondition(ASSOCIATED(tree_elem),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(tree_elem))
 
     ! start the timing
     CALL timeset(routineN,handle)
@@ -264,7 +242,7 @@ CONTAINS
     ! reference handling
     ! should be not necessary, subtree element should be only deallocated,
     !   if no global tree element points to anymore
-    CALL remove_subtree_element_of_all_references(ptr=tree_elem, error=error)
+    CALL remove_subtree_element_of_all_references(ptr=tree_elem)
 
     IF(ASSOCIATED(tree_elem%box_scale)) DEALLOCATE(tree_elem%box_scale)
     IF(ASSOCIATED(tree_elem%frc)) DEALLOCATE(tree_elem%frc)
@@ -276,7 +254,6 @@ CONTAINS
     IF(ASSOCIATED(tree_elem%pos)) DEALLOCATE(tree_elem%pos)
 
     DEALLOCATE(tree_elem)
-    NULLIFY(tree_elem)
     ! end the timing
     CALL timestop(handle)
   END SUBROUTINE deallocate_sub_tree_node
@@ -291,16 +268,13 @@ CONTAINS
 !> \param tmc_env structure for storing all (global) parameters
 !> \param job_counts ...
 !> \param worker_timings ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 11.2012
 ! *****************************************************************************
-  SUBROUTINE init_tree_mod(start_elem, tmc_env, job_counts, worker_timings, error)
+  SUBROUTINE init_tree_mod(start_elem, tmc_env, job_counts, worker_timings)
     TYPE(tree_type), POINTER                 :: start_elem
     TYPE(tmc_env_type), POINTER              :: tmc_env
     INTEGER, DIMENSION(:)                    :: job_counts
     REAL(KIND=dp), DIMENSION(4)              :: worker_timings
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'init_tree_mod', &
       routineP = moduleN//':'//routineN
@@ -310,35 +284,35 @@ CONTAINS
 
     NULLIFY(global_tree)
 
-    CPPreconditionNoFail(ASSOCIATED(start_elem),cp_failure_level,routineP,error)
-    CPPreconditionNoFail(ASSOCIATED(tmc_env),cp_failure_level,routineP,error)
-    CPPreconditionNoFail(ASSOCIATED(tmc_env%m_env),cp_failure_level,routineP,error)
+    CPASSERT(ASSOCIATED(start_elem))
+    CPASSERT(ASSOCIATED(tmc_env))
+    CPASSERT(ASSOCIATED(tmc_env%m_env))
 
     ! start the timing
     CALL timeset(routineN,handle)
 
     ! allocate everything
     CALL allocate_new_global_tree_node(next_el=tmc_env%m_env%gt_act, &
-                                       nr_temp=tmc_env%params%nr_temp, error=error)
+                                       nr_temp=tmc_env%params%nr_temp)
 
     ! use initial/default values
     CALL get_rng_stream(rng_stream=tmc_env%rng_stream, &
                         bg=tmc_env%m_env%gt_act%rng_seed(:,:,1), &
                         cg=tmc_env%m_env%gt_act%rng_seed(:,:,2), &
-                        ig=tmc_env%m_env%gt_act%rng_seed(:,:,3), error=error)
+                        ig=tmc_env%m_env%gt_act%rng_seed(:,:,3))
 
     global_tree => tmc_env%m_env%gt_act
     tmc_env%m_env%gt_head => tmc_env%m_env%gt_act
 
     ! set global random seed
     CALL set_rng_stream(rng_stream=tmc_env%rng_stream, bg=global_tree%rng_seed(:,:,1), &
-                        cg=global_tree%rng_seed(:,:,2), ig=global_tree%rng_seed(:,:,3), error=error)
-    global_tree%rnd_nr = next_random_number(tmc_env%rng_stream, error=error)
+                        cg=global_tree%rng_seed(:,:,2), ig=global_tree%rng_seed(:,:,3))
+    global_tree%rnd_nr = next_random_number(tmc_env%rng_stream)
 
     !-- SUBTREES: set initial values
     DO i=1, SIZE(global_tree%conf)
        CALL allocate_new_sub_tree_node(tmc_env%params, next_el=global_tree%conf(i)%elem, &
-                                       nr_dim=SIZE(start_elem%pos), error=error)
+                                       nr_dim=SIZE(start_elem%pos))
        global_tree%conf(i)%elem%move_type     = 0
        global_tree%conf(i)%elem%next_elem_nr  => tmc_env%m_env%tree_node_count(i)
        global_tree%conf(i)%elem%parent        => NULL()
@@ -360,10 +334,10 @@ CONTAINS
        END IF
 
        !-- different random seeds for every subtree
-       CALL reset_to_next_rng_substream(tmc_env%rng_stream, error=error)
+       CALL reset_to_next_rng_substream(tmc_env%rng_stream)
        CALL get_rng_stream(rng_stream=tmc_env%rng_stream, bg=global_tree%conf(i)%elem%rng_seed(:,:,1), &
                            cg=global_tree%conf(i)%elem%rng_seed(:,:,2), &
-                           ig=global_tree%conf(i)%elem%rng_seed(:,:,3), error=error)
+                           ig=global_tree%conf(i)%elem%rng_seed(:,:,3))
 
        !-- gaussian distributed velocities
        !-- calculating the kinetic energy of the initial configuration velocity
@@ -372,9 +346,9 @@ CONTAINS
              CALL init_vel(vel=global_tree%conf(i)%elem%vel, atoms=tmc_env%params%atoms, &
                            temerature=tmc_env%params%Temp(i), &
                            rng_stream=tmc_env%rng_stream, &
-                           rnd_seed=global_tree%conf(i)%elem%rng_seed, error=error)
+                           rnd_seed=global_tree%conf(i)%elem%rng_seed)
              global_tree%conf(i)%elem%ekin = calc_e_kin(vel=global_tree%conf(i)%elem%vel, &
-                                                        atoms=tmc_env%params%atoms, error=error)
+                                                        atoms=tmc_env%params%atoms)
           END IF
        END IF
 
@@ -401,18 +375,16 @@ CONTAINS
 
     ! simulated annealing start temperature
     global_tree%Temp = tmc_env%params%Temp(1)
-    CALL cp_assert(.NOT.(tmc_env%params%nr_temp.NE.1 .AND. tmc_env%m_env%temp_decrease.NE.1.0_dp),&
-                     cp_failure_level,cp_assertion_failed,routineP,&
-                     "there is no parallel tempering implementation for simulated annealing implemented "//&
-                     "(just one Temp per global tree element.",&
-                     error, only_ionode=.TRUE.)
+    IF(tmc_env%params%nr_temp.NE.1 .AND. tmc_env%m_env%temp_decrease.NE.1.0_dp)&
+       CALL cp_abort(__LOCATION__,&
+            "there is no parallel tempering implementation for simulated annealing implemented "//&
+            "(just one Temp per global tree element.")
 
     !-- IF program is restarted, read restart file
     IF(tmc_env%m_env%restart_in_file_name.NE."") THEN
       CALL read_restart_file(tmc_env=tmc_env, job_counts=job_counts, &
                              timings=worker_timings, &
-                             file_name=tmc_env%m_env%restart_in_file_name, &
-                             error=error)
+                             file_name=tmc_env%m_env%restart_in_file_name)
 
       tmc_env%m_env%tree_node_count(0) = global_tree%nr
 
@@ -436,14 +408,14 @@ CONTAINS
     END IF
 
     !-- set reference of global tree node 
-    CALL add_to_references(gt_elem=global_tree, error=error)
+    CALL add_to_references(gt_elem=global_tree)
 
     !-- draw the first global tree node
     IF(tmc_env%params%DRAW_TREE)THEN
       CALL create_global_tree_dot(new_element=global_tree, &
-                                  tmc_params=tmc_env%params, error=error)
+                                  tmc_params=tmc_env%params)
       CALL create_global_tree_dot_color(gt_tree_element=global_tree, &
-                                  tmc_params=tmc_env%params, error=error)
+                                  tmc_params=tmc_env%params)
     END IF
 
     ! end the timing
@@ -456,27 +428,22 @@ CONTAINS
 !> \param gt_tree_ptr global tree head (initial configuration)
 !> \param tmc_env master environment for restart 
 !>        (if restart the subtree heads are not equal), result counts and lists
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 12.2012
 ! *****************************************************************************
-  SUBROUTINE finalize_init(gt_tree_ptr, tmc_env, error)
+  SUBROUTINE finalize_init(gt_tree_ptr, tmc_env)
     TYPE(global_tree_type), POINTER          :: gt_tree_ptr
     TYPE(tmc_env_type), POINTER              :: tmc_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'finalize_init', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, i
-    LOGICAL                                  :: failure
 
-    failure = .FALSE.
-    CPPrecondition(ASSOCIATED(gt_tree_ptr),cp_failure_level,routineP,error,failure)
-    CPPrecondition(.NOT.ASSOCIATED(gt_tree_ptr%parent),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(tmc_env),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(tmc_env%m_env),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(tmc_env%params),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(gt_tree_ptr))
+    CPASSERT(.NOT.ASSOCIATED(gt_tree_ptr%parent))
+    CPASSERT(ASSOCIATED(tmc_env))
+    CPASSERT(ASSOCIATED(tmc_env%m_env))
+    CPASSERT(ASSOCIATED(tmc_env%params))
 
     ! start the timing
     CALL timeset(routineN,handle)
@@ -499,19 +466,19 @@ CONTAINS
         CALL write_result_list_element(result_list=tmc_env%m_env%result_list, &
                result_count=tmc_env%m_env%result_count,&
                conf_updated=i, accepted=.TRUE., &
-               tmc_params=tmc_env%params, error=error)
+               tmc_params=tmc_env%params)
         ! save for analysis
         IF(tmc_env%tmc_comp_set%para_env_m_ana%num_pe.GT.1) THEN
           CALL add_to_list(elem=tmc_env%m_env%result_list(i)%elem, &
                            list=tmc_env%m_env%analysis_list, &
                            nr=tmc_env%m_env%result_count(i), & 
-                           temp_ind=i, error=error)
+                           temp_ind=i)
         END IF
       END DO
       !CALL write_result_list_element(result_list=tmc_env%m_env%result_list, &
       !         result_count=tmc_env%m_env%result_count,&
       !         conf_updated=0, accepted=.TRUE., &
-      !         tmc_params=tmc_env%params, error=error)
+      !         tmc_params=tmc_env%params)
     END IF
     ! end the timing
     CALL timestop(handle)
@@ -526,35 +493,31 @@ CONTAINS
 !> \param stat return status value
 !> \param new_elem return gt element
 !> \param reactivation_cc_count counting the reactivation of subtree elements
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 12.2012
 ! *****************************************************************************
   SUBROUTINE create_new_gt_tree_node(tmc_env, stat, new_elem, &
-                                     reactivation_cc_count, error)
+                                     reactivation_cc_count)
     TYPE(tmc_env_type), POINTER              :: tmc_env
     INTEGER, INTENT(OUT)                     :: stat
     TYPE(global_tree_type), INTENT(OUT), &
       POINTER                                :: new_elem
     INTEGER                                  :: reactivation_cc_count
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'create_new_gt_tree_node', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, swap_conf
-    LOGICAL                                  :: failure, keep_on, n_acc
+    LOGICAL                                  :: keep_on, n_acc
     REAL(KIND=dp)                            :: prob, rnd, rnd2
     TYPE(global_tree_type), POINTER          :: tmp_elem
     TYPE(tree_type), POINTER                 :: tree_elem
 
-    failure = .FALSE.
     NULLIFY(tmp_elem, tree_elem, new_elem)
 
-    CPPrecondition(ASSOCIATED(tmc_env),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(tmc_env%params),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(tmc_env%m_env),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(tmc_env%m_env%gt_act),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(tmc_env))
+    CPASSERT(ASSOCIATED(tmc_env%params))
+    CPASSERT(ASSOCIATED(tmc_env%m_env))
+    CPASSERT(ASSOCIATED(tmc_env%m_env%gt_act))
 
     ! start the timing
     CALL timeset(routineN,handle)
@@ -565,7 +528,7 @@ CONTAINS
     n_acc = .TRUE.
 
     !-- search most probable end to create new element
-    CALL most_prob_end(global_tree_elem=tmp_elem, prob=prob, n_acc=n_acc, error=error)
+    CALL most_prob_end(global_tree_elem=tmp_elem, prob=prob, n_acc=n_acc)
 
     keep_on = .TRUE.
     IF(ASSOCIATED(tmp_elem).AND.(EXP(prob).LT.1.0E-10)) THEN
@@ -595,23 +558,22 @@ CONTAINS
            new_elem => tmp_elem%nacc
 
         ! check for existing subtree element
-        CPPrecondition(ASSOCIATED(new_elem%conf(new_elem%mv_conf)%elem),cp_failure_level,routineP,error,failure)
+        CPASSERT(ASSOCIATED(new_elem%conf(new_elem%mv_conf)%elem))
         SELECT CASE(new_elem%conf(new_elem%mv_conf)%elem%stat)
         CASE(status_cancel_nmc,status_cancel_ener,status_canceled_nmc,&
              status_canceled_ener)
           ! reactivating subtree element 
           !  (but global tree element already exist)
-          CALL add_to_references(gt_elem=new_elem, error=error)
+          CALL add_to_references(gt_elem=new_elem)
           reactivation_cc_count = reactivation_cc_count+1
         CASE DEFAULT
-          CALL cp_assert(.FALSE.,cp_failure_level,cp_assertion_failed,&
-              routineP,"global tree node creation using existing sub tree element, "//&
-              "but is not a canceled one, gt elem "//&
-              cp_to_string(new_elem%nr)//" st elem "//&
-              cp_to_string(new_elem%conf(new_elem%mv_conf)%elem%nr)//&
-              " with stat "//&
-              cp_to_string(new_elem%conf(new_elem%mv_conf)%elem%stat),&
-              error,failure)
+          CALL cp_abort(__LOCATION__,&
+               "global tree node creation using existing sub tree element, "//&
+               "but is not a canceled one, gt elem "//&
+               cp_to_string(new_elem%nr)//" st elem "//&
+               cp_to_string(new_elem%conf(new_elem%mv_conf)%elem%nr)//&
+               " with stat "//&
+               cp_to_string(new_elem%conf(new_elem%mv_conf)%elem%stat))
         END SELECT
         ! change the status of the reactivated subtree element
         ! move is only done by the master, 
@@ -622,50 +584,41 @@ CONTAINS
         CASE(mv_type_MD)
           new_elem%conf(new_elem%mv_conf)%elem%stat = status_calculate_MD
         CASE(mv_type_NMC_moves)
-          CALL cp_assert(new_elem%conf(new_elem%mv_conf)%elem%stat.EQ.&
-              status_canceled_nmc, cp_warning_level,cp_assertion_failed,&
-              routineP,"reactivating tree element with wrong status"//&
-              cp_to_string(new_elem%conf(new_elem%mv_conf)%elem%stat),& 
-              error,failure)
+          IF(new_elem%conf(new_elem%mv_conf)%elem%stat.NE.status_canceled_nmc)&
+             CALL cp_warn(__LOCATION__,&
+                  "reactivating tree element with wrong status"//&
+                  cp_to_string(new_elem%conf(new_elem%mv_conf)%elem%stat))
           new_elem%conf(new_elem%mv_conf)%elem%stat = status_calculate_NMC_steps
-          
+
           !IF(DEBUG.GE.1) WRITE(tmc_out_file_nr,*)"ATTENTION: reactivation of canceled subtree ", &
           !  new_elem%conf(new_elem%mv_conf)%elem%sub_tree_nr, "elem", new_elem%conf(new_elem%mv_conf)%elem%nr, &
           !  " of existing gt elem ",new_elem%nr,", again calculate NMC steps"
         CASE(mv_type_atom_trans, mv_type_mol_trans, mv_type_mol_rot, &
              mv_type_proton_reorder)
-          CALL cp_assert(.FALSE.,cp_failure_level,cp_assertion_failed,&
-              routineP,"reactivated st element has no NMC or MD move type, "//&
-              "but seems to be canceled. Move type"//&
-              cp_to_string(new_elem%conf(new_elem%mv_conf)%elem%move_type), &
-              error,failure)
+          CALL cp_abort(__LOCATION__,&
+               "reactivated st element has no NMC or MD move type, "//&
+               "but seems to be canceled. Move type"//&
+               cp_to_string(new_elem%conf(new_elem%mv_conf)%elem%move_type))
         CASE DEFAULT
-          CALL cp_assert(.FALSE.,cp_failure_level,cp_assertion_failed,&
-              routineP,"Unknown move type while reactivating subtree element.",&
-              error,failure)
+          CPABORT("Unknown move type while reactivating subtree element.")
         END SELECT
       ELSE
         !-- if end is found (NOT already existing element), create new elem at the end and if nessecarry new subtree element
         ! set initial values
         CALL allocate_new_global_tree_node(next_el=new_elem, &
-                                           nr_temp=tmc_env%params%nr_temp, &
-                                           error=error)
+                                           nr_temp=tmc_env%params%nr_temp)
         tmc_env%m_env%tree_node_count(0) = tmc_env%m_env%tree_node_count(0) +1
         new_elem%nr = tmc_env%m_env%tree_node_count(0)
 
         !-- set pointers to and from element one level up
         !-- paste new gt tree node element at right end
         IF(n_acc)THEN
-          CALL cp_assert(.NOT.ASSOCIATED(tmp_elem%acc),cp_failure_level,&
-              cp_assertion_failed, routineP,&
-              "creating new subtree element on an occupied acc branch",&
-              error,failure)
+          IF(ASSOCIATED(tmp_elem%acc))&
+             CPABORT("creating new subtree element on an occupied acc branch")
           tmp_elem%acc => new_elem
         ELSE
-          CALL cp_assert(.NOT.ASSOCIATED(tmp_elem%nacc),cp_failure_level,&
-              cp_assertion_failed, routineP,&
-              "creating new subtree element on an occupied nacc branch", &
-              error,failure)
+          IF(ASSOCIATED(tmp_elem%nacc))&
+             CPABORT("creating new subtree element on an occupied nacc branch")
           tmp_elem%nacc => new_elem
         END IF
         new_elem%parent   => tmp_elem
@@ -703,11 +656,10 @@ CONTAINS
         CALL set_rng_stream(rng_stream=tmc_env%rng_stream, &
                             bg=new_elem%parent%rng_seed(:,:,1), &
                             cg=new_elem%parent%rng_seed(:,:,2), &
-                            ig=new_elem%parent%rng_seed(:,:,3), &
-                            error=error)
-        CALL reset_to_next_rng_substream(tmc_env%rng_stream, error)
+                            ig=new_elem%parent%rng_seed(:,:,3))
+        CALL reset_to_next_rng_substream(tmc_env%rng_stream)
         ! the random number for acceptance check
-        new_elem%rnd_nr = next_random_number(tmc_env%rng_stream, error=error) 
+        new_elem%rnd_nr = next_random_number(tmc_env%rng_stream) 
 
         ! the next configuration index to move
         !rnd = next_random_number(tmc_env%rng_stream)
@@ -721,13 +673,12 @@ CONTAINS
         IF(n_acc) new_elem%Temp = tmp_elem%Temp * (1-tmc_env%m_env%temp_decrease)
 
         !-- rnd for swap
-        rnd = next_random_number(tmc_env%rng_stream, error=error)
-        rnd2= next_random_number(tmc_env%rng_stream, error=error)
+        rnd = next_random_number(tmc_env%rng_stream)
+        rnd2= next_random_number(tmc_env%rng_stream)
         CALL get_rng_stream(rng_stream=tmc_env%rng_stream, &
                             bg=new_elem%rng_seed(:,:,1), &
                             cg=new_elem%rng_seed(:,:,2), &
-                            ig=new_elem%rng_seed(:,:,3), &
-                            error=error)
+                            ig=new_elem%rng_seed(:,:,3))
 
         ! swap moves are not part of the subtree structure, 
         !  because exisiting elements from DIFFERENT subtrees are swaped
@@ -750,10 +701,10 @@ CONTAINS
           new_elem%swaped = .TRUE.
           new_elem%prob_acc = tmc_env%params%move_types%acc_prob(&
                                  mv_type_swap_conf,new_elem%mv_conf)
-          CALL add_to_references(gt_elem=new_elem, error=error)
+          CALL add_to_references(gt_elem=new_elem)
           IF(tmc_env%params%DRAW_TREE) &
             CALL create_global_tree_dot(new_element=new_elem, &
-                   tmc_params=tmc_env%params, error=error)
+                   tmc_params=tmc_env%params)
           ! nothing to do for the workers
           stat = status_calculated
           keep_on = .FALSE.
@@ -773,11 +724,11 @@ CONTAINS
             ELSE
               !-- if not exist create new subtree element
               CALL create_new_subtree_node(act_gt_el=new_elem, &
-                                           tmc_env=tmc_env, error=error)
+                                           tmc_env=tmc_env)
               IF(tmc_env%params%DRAW_TREE) &
                 CALL create_dot(new_element=new_elem%conf(new_elem%mv_conf)%elem,&
                                 conf=new_elem%conf(new_elem%mv_conf)%elem%sub_tree_nr,&
-                                tmc_params=tmc_env%params, error=error)
+                                tmc_params=tmc_env%params)
             END IF
           ELSE
             !-- check if child element in REJECTED direction already exist
@@ -788,11 +739,11 @@ CONTAINS
             ELSE
               !-- if not exist create new subtree element
               CALL create_new_subtree_node(act_gt_el=new_elem, &
-                                           tmc_env=tmc_env, error=error)
+                                           tmc_env=tmc_env)
               IF(tmc_env%params%DRAW_TREE) &
                 CALL create_dot(new_element=new_elem%conf(new_elem%mv_conf)%elem,&
                                 conf=new_elem%conf(new_elem%mv_conf)%elem%sub_tree_nr,&
-                                tmc_params=tmc_env%params, error=error)
+                                tmc_params=tmc_env%params)
             END IF
           END IF
           ! set approximate probability of acceptance 
@@ -801,23 +752,21 @@ CONTAINS
           new_elem%prob_acc = tmc_env%params%move_types%acc_prob(&
              new_elem%conf(new_elem%mv_conf)%elem%move_type, new_elem%mv_conf)
           ! add refence and dot
-          CALL add_to_references(gt_elem=new_elem, error=error)
+          CALL add_to_references(gt_elem=new_elem)
           IF(tmc_env%params%DRAW_TREE) &
             CALL create_global_tree_dot(new_element=new_elem, &
-                                        tmc_params=tmc_env%params, error=error)
+                                        tmc_params=tmc_env%params)
         END IF ! swap or no swap
       END IF ! global tree node already exist. Hence the Subtree node also (it is speculative canceled)
     END IF ! keep on (checking and creating)
 
 
     IF(keep_on) THEN ! status changes
-      CALL cp_assert(new_elem%stat.NE.status_accepted_result .AND. &
-                     new_elem%stat.NE.status_accepted .AND. &
-                     new_elem%stat.NE.status_rejected .AND. &
-                     new_elem%stat.NE.status_rejected_result, &
-                     cp_failure_level, cp_assertion_failed, routineP,&
-                     "selected existing RESULT gt node",&
-                     error,failure)
+      IF(new_elem%stat.EQ.status_accepted_result .OR. &
+         new_elem%stat.EQ.status_accepted .OR. &
+         new_elem%stat.EQ.status_rejected .OR. &
+         new_elem%stat.EQ.status_rejected_result)&
+           CPABORT("selected existing RESULT gt node")
       !-- set status of global tree element for decision in master routine
       SELECT CASE(new_elem%conf(new_elem%mv_conf)%elem%stat)
       CASE(status_rejected_result,status_rejected,status_accepted,&
@@ -827,14 +776,14 @@ CONTAINS
         stat = new_elem%conf(new_elem%mv_conf)%elem%stat
         IF(tmc_env%params%DRAW_TREE) &
           CALL create_dot_color(tree_element=new_elem%conf(new_elem%mv_conf)%elem,&
-                                tmc_params=tmc_env%params, error=error)
+                                tmc_params=tmc_env%params)
       CASE(status_calc_approx_ener)
         new_elem%stat = new_elem%conf(new_elem%mv_conf)%elem%stat
         IF(stat.NE.status_calculated)THEN
           stat = new_elem%conf(new_elem%mv_conf)%elem%stat
           IF(tmc_env%params%DRAW_TREE) &
             CALL create_dot_color(tree_element=new_elem%conf(new_elem%mv_conf)%elem,&
-                                  tmc_params=tmc_env%params, error=error)
+                                  tmc_params=tmc_env%params)
         END IF
       CASE(status_calculate_MD,status_calculate_energy,&
            status_calculate_NMC_steps, status_created)
@@ -844,7 +793,7 @@ CONTAINS
           stat = new_elem%conf(new_elem%mv_conf)%elem%stat
           IF(tmc_env%params%DRAW_TREE) &
             CALL create_dot_color(tree_element=new_elem%conf(new_elem%mv_conf)%elem,&
-                                  tmc_params=tmc_env%params, error=error)
+                                  tmc_params=tmc_env%params)
         END IF
       CASE(status_cancel_ener,status_canceled_ener)
          ! configuration is already created, 
@@ -856,7 +805,7 @@ CONTAINS
          stat = status_calculated
          IF(tmc_env%params%DRAW_TREE) &
            CALL create_dot_color(tree_element=new_elem%conf(new_elem%mv_conf)%elem,&
-                                 tmc_params=tmc_env%params, error=error)
+                                 tmc_params=tmc_env%params)
       CASE(status_cancel_nmc, status_canceled_nmc)
          ! reactivation canceled element (but with new global tree element)
          new_elem%conf(new_elem%mv_conf)%elem%stat = &
@@ -866,14 +815,13 @@ CONTAINS
          reactivation_cc_count = reactivation_cc_count+1
          IF(tmc_env%params%DRAW_TREE) &
            CALL create_dot_color(tree_element=new_elem%conf(new_elem%mv_conf)%elem,&
-                                 tmc_params=tmc_env%params, error=error)
+                                 tmc_params=tmc_env%params)
       CASE DEFAULT
-        CALL cp_assert(.FALSE.,cp_failure_level,cp_assertion_failed,&
-                       routineP, "unknown stat "//&
-                       cp_to_string(new_elem%conf(new_elem%mv_conf)%elem%stat)//&
-                       "of subtree element "//&
-                       "for creating new gt element", &
-                       error,failure)
+        CALL cp_abort(__LOCATION__,&
+             "unknown stat "//&
+             cp_to_string(new_elem%conf(new_elem%mv_conf)%elem%stat)//&
+             "of subtree element "//&
+             "for creating new gt element")
       END SELECT
 
       ! set stat TMC_STATUS_WAIT_FOR_NEW_TASK if no new calculation neccessary 
@@ -890,39 +838,33 @@ CONTAINS
 !> \brief create new subtree element using pointer of global tree
 !> \param act_gt_el global tree element 
 !> \param tmc_env ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 12.2012
 ! *****************************************************************************
-  SUBROUTINE create_new_subtree_node(act_gt_el, tmc_env, error)
+  SUBROUTINE create_new_subtree_node(act_gt_el, tmc_env)
     TYPE(global_tree_type), POINTER          :: act_gt_el
     TYPE(tmc_env_type), POINTER              :: tmc_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'create_new_subtree_node', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: conf, handle, itmp
-    LOGICAL                                  :: failure, mv_rejected, &
-                                                new_subbox
+    LOGICAL                                  :: mv_rejected, new_subbox
     REAL(KIND=dp)                            :: rnd
     TYPE(tree_type), POINTER                 :: new_elem, parent_elem
 
-    failure = .FALSE.
     NULLIFY(new_elem, parent_elem)
 
-    CPPrecondition(ASSOCIATED(act_gt_el),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(act_gt_el%conf(act_gt_el%mv_conf)%elem),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(tmc_env),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(tmc_env%params),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(act_gt_el))
+    CPASSERT(ASSOCIATED(act_gt_el%conf(act_gt_el%mv_conf)%elem))
+    CPASSERT(ASSOCIATED(tmc_env))
+    CPASSERT(ASSOCIATED(tmc_env%params))
 
     ! start the timing
     CALL timeset(routineN,handle)
 
     conf = act_gt_el%mv_conf
     CALL allocate_new_sub_tree_node(tmc_params=tmc_env%params,&
-           next_el=new_elem,nr_dim=SIZE(act_gt_el%parent%conf(conf)%elem%pos), &
-           error=error)
+           next_el=new_elem,nr_dim=SIZE(act_gt_el%parent%conf(conf)%elem%pos))
 
     !-- node one level up
     parent_elem     => act_gt_el%conf(conf)%elem
@@ -942,7 +884,7 @@ CONTAINS
 
     !-- real parent node (taking the configuration from)
     ! search parent
-    parent_elem => search_parent_element(current=new_elem, error=error)
+    parent_elem => search_parent_element(current=new_elem)
     new_elem%pos(:)       = parent_elem%pos(:)
     new_elem%mol(:)       = parent_elem%mol(:)
     new_elem%vel(:)       = parent_elem%vel(:)
@@ -963,12 +905,11 @@ CONTAINS
     CALL set_rng_stream(rng_stream=tmc_env%rng_stream, &
                         bg=new_elem%rng_seed(:,:,1), &
                         cg=new_elem%rng_seed(:,:,2), &
-                        ig=new_elem%rng_seed(:,:,3), &
-                        error=error)
-    CALL reset_to_next_rng_substream(tmc_env%rng_stream, error=error)
+                        ig=new_elem%rng_seed(:,:,3))
+    CALL reset_to_next_rng_substream(tmc_env%rng_stream)
 
     ! set the temperature for the NMC moves
-    rnd =next_random_number(tmc_env%rng_stream, error=error)
+    rnd =next_random_number(tmc_env%rng_stream)
     IF(tmc_env%params%NMC_inp_file.NE."") THEN
       new_elem%temp_created = INT(tmc_env%params%nr_temp*rnd)+1
     ELSE
@@ -976,16 +917,15 @@ CONTAINS
     END IF
 
     ! rnd nr for selecting move
-    rnd= next_random_number(tmc_env%rng_stream, error=error)
+    rnd= next_random_number(tmc_env%rng_stream)
     !-- set move type
     new_elem%move_type = select_random_move_type(&
                            move_types=tmc_env%params%move_types, &
-                           rnd=rnd, error=error)
+                           rnd=rnd)
     CALL get_rng_stream(rng_stream=tmc_env%rng_stream, &
                         bg=new_elem%rng_seed(:,:,1), &
                         cg=new_elem%rng_seed(:,:,2), &
-                        ig=new_elem%rng_seed(:,:,3), &
-                        error=error)
+                        ig=new_elem%rng_seed(:,:,3))
 
     ! move is only done by the master, 
     !  when standard MC moves with single potential are done
@@ -1001,14 +941,14 @@ CONTAINS
       !-- set the subbox (elements in subbox)
       CALL elements_in_new_subbox(tmc_params=tmc_env%params, &
              rng_stream=tmc_env%rng_stream, elem=new_elem, &
-             nr_of_sub_box_elements=itmp, error=error)
+             nr_of_sub_box_elements=itmp)
       ! the move is performed on a worker group
     CASE(mv_type_NMC_moves)
       new_elem%stat = status_calculate_NMC_steps
       !-- set the subbox (elements in subbox)
       CALL elements_in_new_subbox(tmc_params=tmc_env%params, &
              rng_stream=tmc_env%rng_stream, elem=new_elem, &
-             nr_of_sub_box_elements=itmp, error=error)
+             nr_of_sub_box_elements=itmp)
        ! the move is performed on a worker group
     ! the following moves new no force_env and can be performed on the master directly
     CASE(mv_type_atom_trans, mv_type_atom_swap, mv_type_mol_trans, &
@@ -1023,7 +963,7 @@ CONTAINS
              move_types=tmc_env%params%move_types, &
              rng_stream=tmc_env%rng_stream, elem=new_elem, &
              mv_conf=conf, new_subbox=new_subbox, &
-             move_rejected=mv_rejected, error=error)
+             move_rejected=mv_rejected)
       IF(mv_rejected) THEN
         new_elem%potential = HUGE(new_elem%potential)
         new_elem%e_pot_approx = HUGE(new_elem%e_pot_approx)
@@ -1036,17 +976,15 @@ CONTAINS
     CASE(mv_type_gausian_adapt)
       ! still could be implemented
     CASE DEFAULT
-      CALL cp_assert(.FALSE.,&
-                  cp_failure_level,cp_assertion_failed,routineP,&
-                  "unknown move type ("//cp_to_string(new_elem%move_type)//&
-                  "), while creating subtree element.",&
-                  error)
+      CALL cp_abort(__LOCATION__,&
+           "unknown move type ("//cp_to_string(new_elem%move_type)//&
+           "), while creating subtree element.")
     END SELECT
     act_gt_el%conf(act_gt_el%mv_conf)%elem => new_elem
 
     ! end the timing
     CALL timestop(handle)
-    CPPostcondition(ASSOCIATED(act_gt_el%conf(act_gt_el%mv_conf)%elem),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(act_gt_el%conf(act_gt_el%mv_conf)%elem))
   END SUBROUTINE create_new_subtree_node
 
   !============================================================================
@@ -1058,31 +996,25 @@ CONTAINS
 !> \param gt_ptr the global tree element 
 !> \param draw if present, changes the coleor in the dot file
 !> \param tmc_env tmc environment
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 12.2012
 ! *****************************************************************************
-  SUBROUTINE remove_gt_elem(gt_ptr, draw, tmc_env, error)
+  SUBROUTINE remove_gt_elem(gt_ptr, draw, tmc_env)
     TYPE(global_tree_type), POINTER          :: gt_ptr
     LOGICAL, OPTIONAL                        :: draw
     TYPE(tmc_env_type), POINTER              :: tmc_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'remove_gt_elem', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle
-    LOGICAL                                  :: failure
 
-    failure = .FALSE.
-
-    CPPrecondition(ASSOCIATED(gt_ptr),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(tmc_env),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(gt_ptr))
+    CPASSERT(ASSOCIATED(tmc_env))
 
     ! start the timing
     CALL timeset(routineN,handle)
 
-    CALL remove_gt_references(gt_ptr=gt_ptr, tmc_env=tmc_env, error=error)
+    CALL remove_gt_references(gt_ptr=gt_ptr, tmc_env=tmc_env)
 
     ! set status and draw in tree
     IF((gt_ptr%stat.EQ.status_accepted_result).OR.(gt_ptr%stat.EQ.status_rejected_result))THEN
@@ -1091,7 +1023,7 @@ CONTAINS
        gt_ptr%stat = status_deleted
     END IF
     IF(tmc_env%params%DRAW_TREE .AND. PRESENT(draw)) &
-      CALL create_global_tree_dot_color(gt_tree_element=gt_ptr, tmc_params=tmc_env%params, error=error)
+      CALL create_global_tree_dot_color(gt_tree_element=gt_ptr, tmc_params=tmc_env%params)
 
     !remove pointer from tree parent
     IF(ASSOCIATED(gt_ptr%parent)) THEN
@@ -1112,11 +1044,11 @@ CONTAINS
        gt_ptr%nacc%parent => NULL()
     END IF
 
-    CALL deallocate_global_tree_node(gt_elem=gt_ptr, error=error)
+    CALL deallocate_global_tree_node(gt_elem=gt_ptr)
     ! end the timing
     CALL timestop(handle)
 
-    CPPostcondition(.NOT.ASSOCIATED(gt_ptr),cp_failure_level,routineP,error,failure) 
+    CPASSERT(.NOT.ASSOCIATED(gt_ptr))
   END SUBROUTINE remove_gt_elem
 
 ! *****************************************************************************
@@ -1125,39 +1057,35 @@ CONTAINS
 !> \param ptr the sub tree element 
 !> \param draw if present, changes the coleor in the dot file
 !> \param tmc_env tmc environment
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 12.2012
 ! *****************************************************************************
-  SUBROUTINE remove_st_elem(ptr, draw, tmc_env, error)
+  SUBROUTINE remove_st_elem(ptr, draw, tmc_env)
     TYPE(tree_type), POINTER                 :: ptr
     LOGICAL, OPTIONAL                        :: draw
     TYPE(tmc_env_type), POINTER              :: tmc_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'remove_st_elem', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle
-    LOGICAL                                  :: failure, ready
+    LOGICAL                                  :: ready
 
-    failure = .FALSE.
     ready = .TRUE.
-    CPPrecondition(ASSOCIATED(ptr),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(tmc_env),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(ptr))
+    CPASSERT(ASSOCIATED(tmc_env))
 
     ! start the timing
     CALL timeset(routineN,handle)
 
     ! if there is still e reference to a global tree pointer, do not deallocate element
     IF(ASSOCIATED(ptr%gt_nodes_references)) THEN
-      CALL cp_assert(.NOT.ASSOCIATED(ptr%parent),cp_warning_level,cp_assertion_failed,&
-                   routineP,"try to deallocate subtree element"//&
-                   cp_to_string(ptr%sub_tree_nr)//cp_to_string(ptr%nr)//&
-                   " still with global tree element references e.g."//&
-                   cp_to_string(ptr%gt_nodes_references%gt_elem%nr),&
-                   error,failure)
-      CPPrecondition(ASSOCIATED(ptr%gt_nodes_references%gt_elem),cp_failure_level,routineP,error,failure)
+      IF(ASSOCIATED(ptr%parent))&
+         CALL cp_warn(__LOCATION__,&
+              "try to deallocate subtree element"//&
+              cp_to_string(ptr%sub_tree_nr)//cp_to_string(ptr%nr)//&
+              " still with global tree element references e.g."//&
+              cp_to_string(ptr%gt_nodes_references%gt_elem%nr))
+      CPASSERT(ASSOCIATED(ptr%gt_nodes_references%gt_elem))
     ELSE
       SELECT CASE(ptr%stat)
       ! if element is still in progress, do not delete, wait for responding 
@@ -1165,7 +1093,7 @@ CONTAINS
            status_calculate_NMC_steps, status_calculate_MD)
         ! in case of speculative canceling: should be already canceled
         !  try to deallocate subtree element (still in progress)
-        CPPrecondition(tmc_env%params%SPECULATIVE_CANCELING,cp_failure_level,routineP,error,failure)
+        CPASSERT(tmc_env%params%SPECULATIVE_CANCELING)
       CASE(status_cancel_nmc, status_cancel_ener)
         ! do not return in case of finalizing (do not wait for canceling receipt)
         IF(PRESENT(draw)) ready = .FALSE. 
@@ -1175,7 +1103,7 @@ CONTAINS
       ! check if real top to bottom or bottom to top deallocation (no middle element deallocation)
       IF(ASSOCIATED(ptr%parent).AND.&
          (ASSOCIATED(ptr%acc).OR.ASSOCIATED(ptr%nacc)))THEN
-        CPPrecondition(.FALSE.,cp_failure_level,routineP,error,failure)
+        CPABORT("")
       END IF
  
       IF(ready) THEN 
@@ -1187,8 +1115,7 @@ CONTAINS
            ptr%stat = status_deleted
         END IF
         IF(tmc_env%params%DRAW_TREE.AND.PRESENT(draw))&
-          CALL create_dot_color(tree_element=ptr,tmc_params=tmc_env%params, &
-                                error=error)
+          CALL create_dot_color(tree_element=ptr,tmc_params=tmc_env%params)
   
         !remove pointer from tree parent
         IF(ASSOCIATED(ptr%parent)) THEN
@@ -1201,7 +1128,7 @@ CONTAINS
         IF(ASSOCIATED(ptr%nacc)) ptr%nacc%parent => NULL()
         
         ! deallocate
-        CALL deallocate_sub_tree_node(tree_elem=ptr, error=error)
+        CALL deallocate_sub_tree_node(tree_elem=ptr)
       END IF
     END IF
     ! end the timing
@@ -1215,30 +1142,25 @@ CONTAINS
 !> \param end_ptr end of the tree region to be cleaned
 !> \param removed retun value if brance is clean
 !> \param tmc_env tmc environment
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 12.2012
 ! *****************************************************************************
-  RECURSIVE SUBROUTINE remove_unused_g_tree(begin_ptr, end_ptr, removed, tmc_env, error)
+  RECURSIVE SUBROUTINE remove_unused_g_tree(begin_ptr, end_ptr, removed, tmc_env)
     TYPE(global_tree_type), POINTER          :: begin_ptr, end_ptr
     LOGICAL                                  :: removed
     TYPE(tmc_env_type), POINTER              :: tmc_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'remove_unused_g_tree', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle
-    LOGICAL                                  :: acc_removed, failure, &
-                                                nacc_removed
+    LOGICAL                                  :: acc_removed, nacc_removed
     TYPE(global_tree_type), POINTER          :: acc_ptr, nacc_ptr, tmp_ptr
 
-    failure = .FALSE.
     NULLIFY(acc_ptr, nacc_ptr, tmp_ptr)
 
-    CPPrecondition(ASSOCIATED(begin_ptr),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(end_ptr),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(tmc_env),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(begin_ptr))
+    CPASSERT(ASSOCIATED(end_ptr))
+    CPASSERT(ASSOCIATED(tmc_env))
 
     ! start the timing
     CALL timeset(routineN,handle)
@@ -1252,13 +1174,13 @@ CONTAINS
       !-- check if child nodes exist and possibly deallocate child node
       IF(ASSOCIATED(begin_ptr%acc))THEN
          acc_ptr => begin_ptr%acc
-         CALL remove_unused_g_tree(acc_ptr, end_ptr, acc_removed, tmc_env, error)
+         CALL remove_unused_g_tree(acc_ptr, end_ptr, acc_removed, tmc_env)
       ELSE
          acc_removed = .TRUE.
       END IF
       IF(ASSOCIATED(begin_ptr%nacc))THEN
          nacc_ptr => begin_ptr%nacc
-         CALL remove_unused_g_tree(nacc_ptr, end_ptr, nacc_removed, tmc_env, error)
+         CALL remove_unused_g_tree(nacc_ptr, end_ptr, nacc_removed, tmc_env)
       ELSE
          nacc_removed = .TRUE.
       END IF
@@ -1272,19 +1194,19 @@ CONTAINS
           ! delete references, cancel elements calculation and deallocate global tree element
           tmp_ptr => begin_ptr
   
-          CALL remove_gt_elem(gt_ptr=tmp_ptr, draw=.TRUE., tmc_env=tmc_env, error=error)
+          CALL remove_gt_elem(gt_ptr=tmp_ptr, draw=.TRUE., tmc_env=tmc_env)
           IF(.NOT.ASSOCIATED(tmp_ptr)) removed = .TRUE.
         CASE(status_accepted_result, status_rejected_result)
         CASE DEFAULT
-          CALL cp_assert(.FALSE.,cp_failure_level,cp_assertion_failed,&
-                  routineP,"try to dealloc unused tree element with status of begin element"& 
-                  //cp_to_string(begin_ptr%stat),error,failure)
+          CALL cp_abort(__LOCATION__,&
+               "try to dealloc unused tree element with status of begin element"&
+               //cp_to_string(begin_ptr%stat))
         END SELECT
       END IF
     END IF
     ! end the timing
     CALL timestop(handle)
-    CPPostcondition(ASSOCIATED(end_ptr),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(end_ptr))
   END SUBROUTINE remove_unused_g_tree
 
 ! *****************************************************************************
@@ -1295,29 +1217,25 @@ CONTAINS
 !> \param working_elem_list ...
 !> \param removed retun value if brance is clean
 !> \param tmc_env tmc environment
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 12.2012
 ! *****************************************************************************
   RECURSIVE SUBROUTINE remove_unused_s_tree(begin_ptr, end_ptr,working_elem_list,&
-                                          removed, tmc_env, error)
+                                          removed, tmc_env)
     TYPE(tree_type), POINTER                 :: begin_ptr
     TYPE(tree_type), INTENT(IN), POINTER     :: end_ptr
     TYPE(elem_array_type), DIMENSION(:), &
       POINTER                                :: working_elem_list
     LOGICAL                                  :: removed
     TYPE(tmc_env_type), POINTER              :: tmc_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'remove_unused_s_tree', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, i
-    LOGICAL                                  :: acc_removed, failure, &
-                                                nacc_removed, remove_this
+    LOGICAL                                  :: acc_removed, nacc_removed, &
+                                                remove_this
     TYPE(tree_type), POINTER                 :: acc_ptr, nacc_ptr, tmp_ptr
 
-    failure = .FALSE.
     NULLIFY(acc_ptr, nacc_ptr, tmp_ptr)
     remove_this  = .FALSE.
     removed      = .FALSE.
@@ -1327,10 +1245,10 @@ CONTAINS
     ! start the timing
     CALL timeset(routineN,handle)
 
-    CPPrecondition(ASSOCIATED(begin_ptr),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(end_ptr),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(working_elem_list),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(tmc_env),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(begin_ptr))
+    CPASSERT(ASSOCIATED(end_ptr))
+    CPASSERT(ASSOCIATED(working_elem_list))
+    CPASSERT(ASSOCIATED(tmc_env))
 
     !-- if element is last checked in trajectory, go back
     IF(.NOT.ASSOCIATED(begin_ptr, end_ptr)) THEN
@@ -1339,14 +1257,14 @@ CONTAINS
       IF(ASSOCIATED(begin_ptr%acc))THEN
          acc_ptr => begin_ptr%acc
          CALL remove_unused_s_tree(acc_ptr, end_ptr, working_elem_list, &
-                                 acc_removed, tmc_env, error)
+                                 acc_removed, tmc_env)
       ELSE
          acc_removed = .TRUE.
       END IF
       IF(ASSOCIATED(begin_ptr%nacc))THEN
          nacc_ptr => begin_ptr%nacc
          CALL remove_unused_s_tree(nacc_ptr, end_ptr, working_elem_list, &
-                                 nacc_removed, tmc_env, error)
+                                 nacc_removed, tmc_env)
       ELSE
          nacc_removed = .TRUE.
       END IF
@@ -1371,22 +1289,22 @@ CONTAINS
            ! -- delete when calculation is finished or aborted
            ! removed should still be .FALSE.
         CASE DEFAULT
-          CALL cp_assert(.FALSE.,cp_failure_level,cp_assertion_failed,routineP,&
-                     "unknown status "//cp_to_string(begin_ptr%stat)//&
-                     "of sub tree element "//&
-                     cp_to_string(begin_ptr%sub_tree_nr)//" "//&
-                     cp_to_string(begin_ptr%nr),error)
+          CALL cp_abort(__LOCATION__,&
+               "unknown status "//cp_to_string(begin_ptr%stat)//&
+               "of sub tree element "//&
+               cp_to_string(begin_ptr%sub_tree_nr)//" "//&
+               cp_to_string(begin_ptr%nr))
         END SELECT
   
         ! delete element
         IF(remove_this)THEN
           !-- mark as deleted and draw it in tree
-          CALL cp_assert(ASSOCIATED(begin_ptr%parent),cp_failure_level,&
-                         cp_assertion_failed,routineP,&
-                         "try to remove unused subtree element "//&
-                         cp_to_string(begin_ptr%sub_tree_nr)//" "//&
-                         cp_to_string(begin_ptr%nr)//&
-                         " but parent does not exist", error)
+          IF(.NOT.ASSOCIATED(begin_ptr%parent))&
+             CALL cp_abort(__LOCATION__,&
+                  "try to remove unused subtree element "//&
+                  cp_to_string(begin_ptr%sub_tree_nr)//" "//&
+                  cp_to_string(begin_ptr%nr)//&
+                  " but parent does not exist")
           tmp_ptr => begin_ptr
           ! check if a working group is still working on this element
           removed = .TRUE.
@@ -1399,8 +1317,7 @@ CONTAINS
           IF(removed) THEN
             !IF (DEBUG.GE.20) WRITE(tmc_out_file_nr,*)"deallocation of node ", begin_ptr%nr, "with status ", begin_ptr%stat
             ! if all groups are finished with this element, we can deallocate
-            CALL remove_st_elem(ptr=tmp_ptr, draw=.TRUE., tmc_env=tmc_env, &
-                                error=error)
+            CALL remove_st_elem(ptr=tmp_ptr, draw=.TRUE., tmc_env=tmc_env)
             IF(.NOT.ASSOCIATED(tmp_ptr))THEN
               removed = .TRUE.
             ELSE
@@ -1420,26 +1337,21 @@ CONTAINS
 !> \param end_of_clean_tree ...
 !> \param actual_ptr ...
 !> \param tmc_env TMC environment for deallocation
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 12.2012
 ! *****************************************************************************
   RECURSIVE SUBROUTINE remove_result_g_tree(end_of_clean_tree, actual_ptr, &
-                                              tmc_env, error)
+                                              tmc_env)
     TYPE(global_tree_type), POINTER          :: end_of_clean_tree, actual_ptr
     TYPE(tmc_env_type), POINTER              :: tmc_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'remove_result_g_tree', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle
-    LOGICAL                                  :: failure
     TYPE(global_tree_type), POINTER          :: tmp_ptr
 
-    failure = .FALSE.
-    CPPrecondition(ASSOCIATED(end_of_clean_tree),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(actual_ptr),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(end_of_clean_tree))
+    CPASSERT(ASSOCIATED(actual_ptr))
 
     ! start the timing
     CALL timeset(routineN,handle)
@@ -1448,13 +1360,13 @@ CONTAINS
     IF(ASSOCIATED(actual_ptr%parent))&
       CALL remove_result_g_tree(end_of_clean_tree=end_of_clean_tree, &
                                   actual_ptr=actual_ptr%parent, &
-                                  tmc_env=tmc_env, error=error)
+                                  tmc_env=tmc_env)
     !-- new tree head has no parent
     IF(.NOT.ASSOCIATED(actual_ptr, end_of_clean_tree)) THEN
       !-- deallocate node
       !IF(DEBUG.GE.20) WRITE(tmc_out_file_nr,*)"dealloc gt result tree element: ",actual_ptr%nr
       tmp_ptr => actual_ptr
-      CALL remove_gt_elem(gt_ptr=tmp_ptr, draw=.TRUE., tmc_env=tmc_env, error=error)
+      CALL remove_gt_elem(gt_ptr=tmp_ptr, draw=.TRUE., tmc_env=tmc_env)
       actual_ptr => tmp_ptr
     END IF
     ! end the timing
@@ -1468,27 +1380,22 @@ CONTAINS
 !> \param end_of_clean_tree ...
 !> \param actual_ptr ...
 !> \param tmc_env TMC environment for deallocation
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 12.2012
 ! *****************************************************************************
   RECURSIVE SUBROUTINE remove_result_s_tree(end_of_clean_tree, actual_ptr,&
-                                           tmc_env,error)
+                                           tmc_env)
     TYPE(tree_type), POINTER                 :: end_of_clean_tree, actual_ptr
     TYPE(tmc_env_type), POINTER              :: tmc_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'remove_result_s_tree', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle
-    LOGICAL                                  :: failure
     TYPE(tree_type), POINTER                 :: tmp_ptr
 
-    failure = .FALSE.
-    CPPrecondition(ASSOCIATED(end_of_clean_tree),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(actual_ptr),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(tmc_env),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(end_of_clean_tree))
+    CPASSERT(ASSOCIATED(actual_ptr))
+    CPASSERT(ASSOCIATED(tmc_env))
 
     ! start the timing
     CALL timeset(routineN,handle)
@@ -1496,20 +1403,20 @@ CONTAINS
     !-- going up to the head ot the subtree
     IF(ASSOCIATED(actual_ptr%parent)) &
       CALL remove_result_s_tree(end_of_clean_tree, actual_ptr%parent, &
-                               tmc_env, error)
+                               tmc_env)
 
     !-- new tree head has no parent
     IF(.NOT.ASSOCIATED(actual_ptr, end_of_clean_tree)) THEN
       ! in trajectory just one direction should exist
       IF(ASSOCIATED(actual_ptr%acc).AND.ASSOCIATED(actual_ptr%nacc)) THEN
-      CPPrecondition(.FALSE.,cp_failure_level,routineP,error,failure)
+      CPABORT("")
       END IF
       ! the parent should be deleted already, but global tree is allocated to the second last accepted, &
       !   hence there could be still a reference to an element...
       IF(.NOT.ASSOCIATED(actual_ptr%parent)) THEN
         !-- deallocate node
         tmp_ptr => actual_ptr
-        CALL remove_st_elem(ptr=tmp_ptr,draw=.TRUE.,tmc_env=tmc_env,error=error)
+        CALL remove_st_elem(ptr=tmp_ptr,draw=.TRUE.,tmc_env=tmc_env)
         actual_ptr => tmp_ptr
       END IF
     END IF
@@ -1523,34 +1430,30 @@ CONTAINS
 !>        in global and subtrees
 !> \param working_elem_list list of actual calculating elements for canceling
 !> \param tmc_env TMC environment
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 12.2012
 ! *****************************************************************************
-  SUBROUTINE remove_all_trees(working_elem_list, tmc_env, error)
+  SUBROUTINE remove_all_trees(working_elem_list, tmc_env)
     TYPE(elem_array_type), DIMENSION(:), &
       POINTER                                :: working_elem_list
     TYPE(tmc_env_type), POINTER              :: tmc_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'remove_all_trees', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, i, tree
-    LOGICAL                                  :: change_trajec, failure, flag
+    LOGICAL                                  :: change_trajec, flag
     TYPE(global_tree_type), POINTER          :: tmp_gt_ptr
     TYPE(tree_type), POINTER                 :: last_acc_st_elem, tmp_ptr
 
-    failure = .FALSE.
     NULLIFY(last_acc_st_elem, tmp_ptr, tmp_gt_ptr)
 
-    CPPrecondition(ASSOCIATED(working_elem_list),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(tmc_env),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(tmc_env%m_env),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(tmc_env%m_env%gt_act),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(tmc_env%m_env%gt_clean_end),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(tmc_env%m_env%result_list),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(tmc_env%m_env%st_clean_ends),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(working_elem_list))
+    CPASSERT(ASSOCIATED(tmc_env))
+    CPASSERT(ASSOCIATED(tmc_env%m_env))
+    CPASSERT(ASSOCIATED(tmc_env%m_env%gt_act))
+    CPASSERT(ASSOCIATED(tmc_env%m_env%gt_clean_end))
+    CPASSERT(ASSOCIATED(tmc_env%m_env%result_list))
+    CPASSERT(ASSOCIATED(tmc_env%m_env%st_clean_ends))
 
     flag = .FALSE.
     change_trajec = .FALSE.
@@ -1561,22 +1464,21 @@ CONTAINS
     !-- deallocate unused pt tree
     CALL remove_unused_g_tree(begin_ptr=tmc_env%m_env%gt_clean_end, &
                               end_ptr=tmc_env%m_env%gt_act, removed=flag, &
-                              tmc_env=tmc_env, error=error)
+                              tmc_env=tmc_env)
     tmp_gt_ptr => tmc_env%m_env%gt_clean_end
     CALL search_end_of_clean_g_tree(last_acc=tmc_env%m_env%gt_clean_end, &
-                                    tree_ptr=tmp_gt_ptr, error=error)
+                                    tree_ptr=tmp_gt_ptr)
     !-- deallocate unused pt trajectory tree elements
     IF(tmc_env%params%USE_REDUCED_TREE)THEN
       tmp_gt_ptr => tmc_env%m_env%gt_clean_end
       CALL remove_result_g_tree(end_of_clean_tree=tmc_env%m_env%gt_clean_end,&
-                                actual_ptr=tmp_gt_ptr, tmc_env=tmc_env, &
-                                error=error)
+                                actual_ptr=tmp_gt_ptr, tmc_env=tmc_env)
 
       !check if something changed, if not no deallocation of result subtree necessary
       IF(.NOT.ASSOCIATED(tmc_env%m_env%gt_head,tmc_env%m_env%gt_clean_end)) &
         change_trajec=.TRUE.
       tmc_env%m_env%gt_head => tmc_env%m_env%gt_clean_end
-      CPPostcondition(.NOT.ASSOCIATED(tmc_env%m_env%gt_head%parent),cp_failure_level,routineP,error,failure)
+      CPASSERT(.NOT.ASSOCIATED(tmc_env%m_env%gt_head%parent))
       !IF (DEBUG.GE.20) WRITE(tmc_out_file_nr,*)"new head of pt tree is ",tmc_env%m_env%gt_head%nr
     END IF
 
@@ -1589,21 +1491,20 @@ CONTAINS
         IF(last_acc_st_elem%sub_tree_nr .EQ. tree) &
           EXIT conf_loop
       END DO conf_loop
-      CPPostcondition(last_acc_st_elem%sub_tree_nr.EQ.tree,cp_failure_level,routineP,error,failure)
+      CPASSERT(last_acc_st_elem%sub_tree_nr.EQ.tree)
       CALL remove_unused_s_tree(begin_ptr=tmc_env%m_env%st_clean_ends(tree)%elem, &
                  end_ptr=last_acc_st_elem, working_elem_list=working_elem_list, &
-                 removed=flag, tmc_env=tmc_env,error=error)
+                 removed=flag, tmc_env=tmc_env)
       CALL search_end_of_clean_tree(tree_ptr=tmc_env%m_env%st_clean_ends(tree)%elem, &
-                                    last_acc=last_acc_st_elem, &
-                                    error=error)
+                                    last_acc=last_acc_st_elem)
     END DO
     !-- deallocate the trajectory subtree elements
     IF(tmc_env%params%USE_REDUCED_TREE .AND. change_trajec)THEN
       DO tree=1, tmc_env%params%nr_temp
         tmp_ptr => tmc_env%m_env%st_clean_ends(tree)%elem
-        CPPostcondition(tmp_ptr%sub_tree_nr.EQ.tree,cp_failure_level,routineP,error,failure)
+        CPASSERT(tmp_ptr%sub_tree_nr.EQ.tree)
         CALL remove_result_s_tree(end_of_clean_tree=tmc_env%m_env%st_clean_ends(tree)%elem,&
-                                 actual_ptr=tmp_ptr, tmc_env=tmc_env, error=error)
+                                 actual_ptr=tmp_ptr, tmc_env=tmc_env)
         tmc_env%m_env%st_heads(tree)%elem => tmc_env%m_env%st_clean_ends(tree)%elem
         !IF(DEBUG.GE.20) &
         !  WRITE(tmc_out_file_nr,*)"new head of tree ",tree," is ",&
@@ -1613,8 +1514,8 @@ CONTAINS
 
     ! end the timing
     CALL timestop(handle)
-    CPPostcondition(ASSOCIATED(tmc_env%m_env%gt_act),cp_failure_level,routineP,error,failure)
-    CPPostcondition(ASSOCIATED(tmc_env%m_env%gt_clean_end),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(tmc_env%m_env%gt_act))
+    CPASSERT(ASSOCIATED(tmc_env%m_env%gt_clean_end))
   END SUBROUTINE remove_all_trees
 
 ! *****************************************************************************
@@ -1622,36 +1523,31 @@ CONTAINS
 !> \param begin_ptr pointer to global tree head
 !> \param removed flag, if the this element is removed
 !> \param tmc_env ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 01.2013
 ! *****************************************************************************
-  RECURSIVE SUBROUTINE dealloc_whole_g_tree(begin_ptr, removed, tmc_env,error)
+  RECURSIVE SUBROUTINE dealloc_whole_g_tree(begin_ptr, removed, tmc_env)
     TYPE(global_tree_type), POINTER          :: begin_ptr
     LOGICAL                                  :: removed
     TYPE(tmc_env_type), POINTER              :: tmc_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'dealloc_whole_g_tree', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: acc_removed, failure, &
-                                                nacc_removed
+    LOGICAL                                  :: acc_removed, nacc_removed
     TYPE(global_tree_type), POINTER          :: acc_ptr, nacc_ptr, tmp_ptr
 
-    failure = .FALSE.
-    CPPrecondition(ASSOCIATED(begin_ptr),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(tmc_env),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(begin_ptr))
+    CPASSERT(ASSOCIATED(tmc_env))
 
     IF(ASSOCIATED(begin_ptr%acc))THEN
       acc_ptr => begin_ptr%acc
-      CALL dealloc_whole_g_tree(acc_ptr, acc_removed, tmc_env, error)
+      CALL dealloc_whole_g_tree(acc_ptr, acc_removed, tmc_env)
     ELSE
       acc_removed = .TRUE.
     END IF
     IF(ASSOCIATED(begin_ptr%nacc))THEN
       nacc_ptr => begin_ptr%nacc
-      CALL dealloc_whole_g_tree(nacc_ptr, nacc_removed, tmc_env, error)
+      CALL dealloc_whole_g_tree(nacc_ptr, nacc_removed, tmc_env)
     ELSE
       nacc_removed = .TRUE.
     END IF
@@ -1659,11 +1555,10 @@ CONTAINS
     !-- deallocate node if no child node exist
     IF(acc_removed.AND.nacc_removed)THEN
       CALL search_and_remove_reference_in_list(gt_ptr=begin_ptr, &
-             elem=begin_ptr%conf(begin_ptr%mv_conf)%elem, tmc_env=tmc_env, &
-             error=error)
+             elem=begin_ptr%conf(begin_ptr%mv_conf)%elem, tmc_env=tmc_env)
       tmp_ptr => begin_ptr
-      CALL remove_gt_elem(gt_ptr=tmp_ptr, draw=.FALSE., tmc_env=tmc_env, error=error)
-      !CALL deallocate_global_tree_node(gt_elem=tmp_ptr, error=error)
+      CALL remove_gt_elem(gt_ptr=tmp_ptr, draw=.FALSE., tmc_env=tmc_env)
+      !CALL deallocate_global_tree_node(gt_elem=tmp_ptr)
       removed = .TRUE.
     END IF
   END SUBROUTINE dealloc_whole_g_tree
@@ -1672,36 +1567,31 @@ CONTAINS
 !> \param begin_ptr pointer to sub tree head
 !> \param removed flag, if the this element is removed
 !> \param tmc_params ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 01.2013
 ! *****************************************************************************
-  RECURSIVE SUBROUTINE dealloc_whole_subtree(begin_ptr, removed, tmc_params, error)
+  RECURSIVE SUBROUTINE dealloc_whole_subtree(begin_ptr, removed, tmc_params)
     TYPE(tree_type), POINTER                 :: begin_ptr
     LOGICAL                                  :: removed
     TYPE(tmc_param_type), POINTER            :: tmc_params
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'dealloc_whole_subtree', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: acc_removed, failure, &
-                                                nacc_removed
+    LOGICAL                                  :: acc_removed, nacc_removed
     TYPE(tree_type), POINTER                 :: acc_ptr, nacc_ptr, tmp_ptr
 
-    failure = .FALSE.
-    CPPrecondition(ASSOCIATED(begin_ptr),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(tmc_params),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(begin_ptr))
+    CPASSERT(ASSOCIATED(tmc_params))
 
     IF(ASSOCIATED(begin_ptr%acc))THEN
       acc_ptr => begin_ptr%acc
-      CALL dealloc_whole_subtree(acc_ptr, acc_removed, tmc_params, error)
+      CALL dealloc_whole_subtree(acc_ptr, acc_removed, tmc_params)
     ELSE
        acc_removed = .TRUE.
     END IF
     IF(ASSOCIATED(begin_ptr%nacc))THEN
       nacc_ptr => begin_ptr%nacc
-      CALL dealloc_whole_subtree(nacc_ptr, nacc_removed, tmc_params, error)
+      CALL dealloc_whole_subtree(nacc_ptr, nacc_removed, tmc_params)
     ELSE
       nacc_removed = .TRUE.
     END IF
@@ -1709,7 +1599,7 @@ CONTAINS
     !-- deallocate node if no child node exist
     IF(acc_removed.AND.nacc_removed)THEN
       tmp_ptr => begin_ptr
-      CALL deallocate_sub_tree_node(tree_elem=begin_ptr, error=error)
+      CALL deallocate_sub_tree_node(tree_elem=begin_ptr)
       removed = .TRUE.
     END IF
   END SUBROUTINE dealloc_whole_subtree
@@ -1720,24 +1610,20 @@ CONTAINS
 ! *****************************************************************************
 !> \brief deallocating every tree node of every trees (clean up)
 !> \param tmc_env TMC environment structure
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 01.2013
 ! *****************************************************************************
-  SUBROUTINE finalize_trees(tmc_env, error)
+  SUBROUTINE finalize_trees(tmc_env)
     TYPE(tmc_env_type), POINTER              :: tmc_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'finalize_trees', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: i
-    LOGICAL                                  :: failure, flag
+    LOGICAL                                  :: flag
     TYPE(global_tree_type), POINTER          :: global_tree
 
-    failure = .FALSE.
-    CPPrecondition(ASSOCIATED(tmc_env),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(tmc_env%m_env),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(tmc_env))
+    CPASSERT(ASSOCIATED(tmc_env%m_env))
 
     global_tree => tmc_env%m_env%gt_act
     !-- deallocate pt tree
@@ -1746,7 +1632,7 @@ CONTAINS
       global_tree => global_tree%parent
     END DO
     CALL dealloc_whole_g_tree(begin_ptr=global_tree, removed=flag, &
-                               tmc_env=tmc_env, error=error)
+                               tmc_env=tmc_env)
 
     !-- deallocate subtrees
     trees_loop: DO i=1, SIZE(tmc_env%m_env%st_clean_ends(:))
@@ -1755,7 +1641,7 @@ CONTAINS
           tmc_env%m_env%st_clean_ends(i)%elem%parent
       END DO
       CALL dealloc_whole_subtree(begin_ptr=tmc_env%m_env%st_clean_ends(i)%elem,&
-             removed=flag, tmc_params=tmc_env%params, error=error)
+             removed=flag, tmc_params=tmc_env%params)
     END DO trees_loop
     DEALLOCATE(tmc_env%params%atoms)
   END SUBROUTINE finalize_trees

@@ -7,9 +7,8 @@
 MODULE powell
   USE kinds,                           ONLY: dp
   USE mathconstants,                   ONLY: twopi
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -93,7 +92,7 @@ CONTAINS
        DEALLOCATE(optstate%xopt)
        optstate%state = -1
     CASE DEFAULT
-       STOP
+       CPABORT("")
     END SELECT
 
     CALL timestop(handle)
@@ -909,7 +908,7 @@ CONTAINS
 ! *****************************************************************************
 !> \brief ...
 ! *****************************************************************************
-    SUBROUTINE get_state
+    SUBROUTINE get_state()
       opt%np       = np
       opt%nh       = nh
       opt%nptm     = nptm
@@ -960,7 +959,7 @@ CONTAINS
 ! *****************************************************************************
 !> \brief ...
 ! *****************************************************************************
-    SUBROUTINE set_state
+    SUBROUTINE set_state()
       np           = opt%np
       nh           = opt%nh
       nptm         = opt%nptm

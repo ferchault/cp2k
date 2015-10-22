@@ -26,6 +26,7 @@ MODULE qs_rho_types
   USE pw_types,                        ONLY: pw_p_type,&
                                              pw_release
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -102,17 +103,15 @@ CONTAINS
 ! *****************************************************************************
 !> \brief Allocates a new instance of rho.
 !> \param rho ...
-!> \param error ...
 !> \author Ole Schuett
 ! *****************************************************************************
- SUBROUTINE qs_rho_create(rho, error)
+ SUBROUTINE qs_rho_create(rho)
     TYPE(qs_rho_type), POINTER               :: rho
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'qs_rho_create', &
       routineP = moduleN//':'//routineN
 
-   IF(ASSOCIATED(rho)) STOP routineP//" rho already associated"
+   IF(ASSOCIATED(rho)) CPABORT("rho already associated")
 
    ALLOCATE(rho)
    last_rho_id_nr=last_rho_id_nr+1
@@ -125,28 +124,19 @@ CONTAINS
 !> \brief retains a rho_struct by increasing the reference count by one
 !>      (to be called when you want to keep a shared copy)
 !> \param rho_struct the structure to retain
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      08.2002 created [fawzi]
 !> \author Fawzi Mohamed
 ! *****************************************************************************
-  SUBROUTINE qs_rho_retain(rho_struct,error)
+  SUBROUTINE qs_rho_retain(rho_struct)
     TYPE(qs_rho_type), POINTER               :: rho_struct
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'qs_rho_retain', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
-
-    CPPrecondition(ASSOCIATED(rho_struct),cp_failure_level,routineP,error,failure)
-    IF (.NOT.failure) THEN
-       CPPrecondition(rho_struct%ref_count>0,cp_failure_level,routineP,error,failure)
-       rho_struct%ref_count=rho_struct%ref_count+1
-    END IF
+    CPASSERT(ASSOCIATED(rho_struct))
+    CPASSERT(rho_struct%ref_count>0)
+    rho_struct%ref_count=rho_struct%ref_count+1
   END SUBROUTINE qs_rho_retain
 
 ! *****************************************************************************
@@ -154,28 +144,21 @@ CONTAINS
 !>      and deallocating if it reaches 0 (to be called when you don't want
 !>      anymore a shared copy)
 !> \param rho_struct the structure to retain
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      08.2002 created [fawzi]
 !> \author Fawzi Mohamed
 ! *****************************************************************************
-  SUBROUTINE qs_rho_release(rho_struct,error)
+  SUBROUTINE qs_rho_release(rho_struct)
     TYPE(qs_rho_type), POINTER               :: rho_struct
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'qs_rho_release', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
-
     IF (ASSOCIATED(rho_struct)) THEN
-       CPPrecondition(rho_struct%ref_count>0,cp_failure_level,routineP,error,failure)
+       CPASSERT(rho_struct%ref_count>0)
        rho_struct%ref_count=rho_struct%ref_count-1
        IF (rho_struct%ref_count<1) THEN
-          CALL qs_rho_clear(rho_struct, error)
+          CALL qs_rho_clear(rho_struct)
           DEALLOCATE(rho_struct)
        END IF
     END IF
@@ -188,12 +171,10 @@ CONTAINS
 ! *****************************************************************************
 !> \brief Deallocates all components, whithout deallocating rho_struct itself.
 !> \param rho_struct ...
-!> \param error ...
 !> \author Ole Schuett
 ! *****************************************************************************
-  SUBROUTINE qs_rho_clear(rho_struct, error)
+  SUBROUTINE qs_rho_clear(rho_struct)
     TYPE(qs_rho_type), POINTER               :: rho_struct
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'qs_rho_clear', &
       routineP = moduleN//':'//routineN
@@ -202,49 +183,49 @@ CONTAINS
 
     IF (ASSOCIATED(rho_struct%rho_r)) THEN
        DO i=1,SIZE(rho_struct%rho_r)
-          CALL pw_release(rho_struct%rho_r(i)%pw,error=error)
+          CALL pw_release(rho_struct%rho_r(i)%pw)
        END DO
        DEALLOCATE(rho_struct%rho_r)
     END IF
     IF (ASSOCIATED(rho_struct%drho_r)) THEN
        DO i=1,SIZE(rho_struct%drho_r)
-          CALL pw_release(rho_struct%drho_r(i)%pw,error=error)
+          CALL pw_release(rho_struct%drho_r(i)%pw)
        END DO
        DEALLOCATE(rho_struct%drho_r)
     END IF
     IF (ASSOCIATED(rho_struct%drho_g)) THEN
        DO i=1,SIZE(rho_struct%drho_g)
-          CALL pw_release(rho_struct%drho_g(i)%pw,error=error)
+          CALL pw_release(rho_struct%drho_g(i)%pw)
        END DO
        DEALLOCATE(rho_struct%drho_g)
     END IF
     IF (ASSOCIATED(rho_struct%tau_r)) THEN
        DO i=1,SIZE(rho_struct%tau_r)
-          CALL pw_release(rho_struct%tau_r(i)%pw,error=error)
+          CALL pw_release(rho_struct%tau_r(i)%pw)
        END DO
        DEALLOCATE(rho_struct%tau_r)
     END IF
     IF (ASSOCIATED(rho_struct%rho_g)) THEN
        DO i=1,SIZE(rho_struct%rho_g)
-          CALL pw_release(rho_struct%rho_g(i)%pw,error=error)
+          CALL pw_release(rho_struct%rho_g(i)%pw)
        END DO
        DEALLOCATE(rho_struct%rho_g)
     END IF
     IF (ASSOCIATED(rho_struct%tau_g)) THEN
        DO i=1,SIZE(rho_struct%tau_g)
-          CALL pw_release(rho_struct%tau_g(i)%pw,error=error)
+          CALL pw_release(rho_struct%tau_g(i)%pw)
        END DO
        DEALLOCATE(rho_struct%tau_g)
     END IF
     IF (ASSOCIATED(rho_struct%rho_r_sccs)) THEN
-       CALL pw_release(rho_struct%rho_r_sccs%pw,error=error)
+       CALL pw_release(rho_struct%rho_r_sccs%pw)
        DEALLOCATE(rho_struct%rho_r_sccs)
     END IF
 
-    CALL kpoint_transitional_release(rho_struct%rho_ao, error)
+    CALL kpoint_transitional_release(rho_struct%rho_ao)
 
     IF (ASSOCIATED(rho_struct%rho_ao_im))&
-       CALL cp_dbcsr_deallocate_matrix_set(rho_struct%rho_ao_im,error=error)
+       CALL cp_dbcsr_deallocate_matrix_set(rho_struct%rho_ao_im)
     IF (ASSOCIATED(rho_struct%tot_rho_r))&
        DEALLOCATE(rho_struct%tot_rho_r)
     IF (ASSOCIATED(rho_struct%tot_rho_g))&
@@ -276,9 +257,6 @@ CONTAINS
 !> \param tot_rho_g ...
 !> \param rho_r_sccs ...
 !> \param soft_valid ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
-!>      For the other inputs the qs_rho_type attributes
 !> \par History
 !>      08.2002 created [fawzi]
 !> \author Fawzi Mohamed
@@ -286,7 +264,7 @@ CONTAINS
   SUBROUTINE qs_rho_get(rho_struct, rho_ao, rho_ao_im, rho_ao_kp, rho_r, drho_r, &
        rho_g, drho_g, tau_r, tau_g, rho_r_valid, drho_r_valid, rho_g_valid, &
        drho_g_valid, tau_r_valid, tau_g_valid, rebuild_each, tot_rho_r, tot_rho_g,&
-       rho_r_sccs, soft_valid, error)
+       rho_r_sccs, soft_valid)
     TYPE(qs_rho_type), POINTER               :: rho_struct
     TYPE(cp_dbcsr_p_type), DIMENSION(:), &
       OPTIONAL, POINTER                      :: rho_ao, rho_ao_im
@@ -303,17 +281,12 @@ CONTAINS
       POINTER                                :: tot_rho_r, tot_rho_g
     TYPE(pw_p_type), OPTIONAL, POINTER       :: rho_r_sccs
     LOGICAL, INTENT(out), OPTIONAL           :: soft_valid
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'qs_rho_get', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
-
-    CPPrecondition(ASSOCIATED(rho_struct),cp_failure_level,routineP,error,failure)
-    CPPrecondition(rho_struct%ref_count>0,cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(rho_struct))
+    CPASSERT(rho_struct%ref_count>0)
 
     IF (PRESENT(rho_ao))    rho_ao    => get_1d_pointer(rho_struct%rho_ao)
     IF (PRESENT(rho_ao_kp)) rho_ao_kp => get_2d_pointer(rho_struct%rho_ao)
@@ -362,13 +335,12 @@ CONTAINS
 !> \param tot_rho_g ...
 !> \param rho_r_sccs ...
 !> \param soft_valid ...
-!> \param error ...
 !> \author Ole Schuett
 ! *****************************************************************************
   SUBROUTINE qs_rho_set(rho_struct, rho_ao, rho_ao_im, rho_ao_kp, rho_r, drho_r, &
        rho_g, drho_g, tau_r, tau_g, rho_r_valid, drho_r_valid, rho_g_valid, &
        drho_g_valid, tau_r_valid, tau_g_valid, rebuild_each, tot_rho_r, tot_rho_g,&
-       rho_r_sccs, soft_valid, error)
+       rho_r_sccs, soft_valid)
     TYPE(qs_rho_type), POINTER               :: rho_struct
     TYPE(cp_dbcsr_p_type), DIMENSION(:), &
       OPTIONAL, POINTER                      :: rho_ao, rho_ao_im
@@ -385,17 +357,12 @@ CONTAINS
       POINTER                                :: tot_rho_r, tot_rho_g
     TYPE(pw_p_type), OPTIONAL, POINTER       :: rho_r_sccs
     LOGICAL, INTENT(in), OPTIONAL            :: soft_valid
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'qs_rho_set', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
-
-    CPPrecondition(ASSOCIATED(rho_struct),cp_failure_level,routineP,error,failure)
-    CPPrecondition(rho_struct%ref_count>0,cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(rho_struct))
+    CPASSERT(rho_struct%ref_count>0)
 
     IF (PRESENT(rho_ao))    CALL set_1d_pointer(rho_struct%rho_ao, rho_ao)
     IF (PRESENT(rho_ao_kp)) CALL set_2d_pointer(rho_struct%rho_ao, rho_ao_kp)

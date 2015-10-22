@@ -12,15 +12,14 @@ MODULE fermi_utils
   
   USE kahan_sum,                       ONLY: accurate_sum
   USE kinds,                           ONLY: dp
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "common/cp_common_uses.f90"
+#include "base/base_uses.f90"
 
   IMPLICIT NONE
 
   PRIVATE
 
-  PUBLIC :: Fermi, FermiFixed, FermiFixedDeriv, Fermikp
+  PUBLIC :: Fermi, FermiFixed, FermiFixedDeriv, Fermikp, Fermikp2
 
   CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'fermi_utils'
 
@@ -170,7 +169,6 @@ CONTAINS
          END DO
       END DO
    ELSE
-      beta = HUGE(1.0_dp)
       DO ik=1,nkp
          DO is=1,nmo
             IF (e(is,ik) <= mu) THEN
@@ -303,35 +301,108 @@ CONTAINS
 
     CHARACTER(len=*), PARAMETER :: routineN = 'Fermikp', &
       routineP = moduleN//':'//routineN
+    REAL(KIND=dp), PARAMETER                 :: epsocc = 1.0e-12_dp
 
     INTEGER                                  :: iter
-    REAL(KIND=dp)                            :: mu_max, mu_min, mu_now, &
+    REAL(KIND=dp)                            :: de, mu_max, mu_min, mu_now, &
                                                 N_max, N_min, N_now
 
 ! bisection search to find mu for a given nel
 
-    mu_min=MINVAL(e) - 0.5_dp
-    mu_max=MAXVAL(e) + 0.5_dp
+    de = t*LOG((1.0_dp-epsocc)/epsocc)
+    de = MAX(de,0.5_dp)
+    mu_min=MINVAL(e) - de
+    mu_max=MAXVAL(e) + de
     iter=0
     DO WHILE( mu_max-mu_min > EPSILON(mu)*MAX(1.0_dp,ABS(mu_max),ABS(mu_min)) )
-       iter=iter+1
        mu_now = (mu_max+mu_min)/2.0_dp
        CALL Fermi2(f,N_now,kTS,e,mu_now,wk,T,maxocc)
        iter = iter + 1
-       IF (N_now<=nel) THEN
+       IF (ABS(N_now-nel) < nel*epsocc) THEN
+          mu_min = mu_now
+          N_min  = N_now
+          mu_max = mu_now
+          N_max  = N_now
+       ELSEIF (N_now<=nel) THEN
           mu_min = mu_now
           N_min  = N_now
        ELSE
           mu_max = mu_now
           N_max  = N_now
        ENDIF
-       IF (iter>200) EXIT
+       IF (iter>400) EXIT
     ENDDO
 
     mu=(mu_max+mu_min)/2.0_dp
     CALL Fermi2(f,N_now,kTS,e,mu,wk,T,maxocc)
 
  END SUBROUTINE Fermikp
+
+! *****************************************************************************
+!> \brief Bisection search to find mu for a given nel (kpoint case)
+!> \param f   Occupation numbers
+!> \param mu  chemical potential
+!> \param kTS Entropic energy contribution
+!> \param e   orbital (band) energies
+!> \param nel Number of electrons (total)
+!> \param wk  kpoint weights
+!> \param t   Temperature
+! *****************************************************************************
+ SUBROUTINE Fermikp2(f,mu,kTS,e,nel,wk,t)
+    REAL(KIND=dp), DIMENSION(:, :, :), &
+      INTENT(OUT)                            :: f
+    REAL(KIND=dp), INTENT(OUT)               :: mu, kTS
+    REAL(KIND=dp), DIMENSION(:, :, :), &
+      INTENT(IN)                             :: e
+    REAL(KIND=dp), INTENT(IN)                :: nel
+    REAL(KIND=dp), DIMENSION(:), INTENT(IN)  :: wk
+    REAL(KIND=dp), INTENT(IN)                :: t
+
+    CHARACTER(len=*), PARAMETER :: routineN = 'Fermikp2', &
+      routineP = moduleN//':'//routineN
+    REAL(KIND=dp), PARAMETER                 :: epsocc = 1.0e-12_dp
+
+    INTEGER                                  :: iter
+    REAL(KIND=dp)                            :: de, kTSa, kTSb, mu_max, &
+                                                mu_min, mu_now, N_max, N_min, &
+                                                N_now, na, nb
+
+! only do spin polarized case
+
+    CPASSERT(SIZE(f,3)==2 .AND. SIZE(e,3)==2)
+    ! bisection search to find mu for a given nel
+    de = t*LOG((1.0_dp-epsocc)/epsocc)
+    de = MAX(de,0.5_dp)
+    mu_min=MINVAL(e) - de
+    mu_max=MAXVAL(e) + de
+    iter=0
+    DO WHILE( mu_max-mu_min > EPSILON(mu)*MAX(1.0_dp,ABS(mu_max),ABS(mu_min)) )
+       mu_now = (mu_max+mu_min)/2.0_dp
+       CALL Fermi2(f(:,:,1),na,kTSa,e(:,:,1),mu_now,wk,T,1.0_dp)
+       CALL Fermi2(f(:,:,2),nb,kTSb,e(:,:,2),mu_now,wk,T,1.0_dp)
+       N_now = na+nb
+       iter = iter + 1
+       IF (ABS(N_now-nel) < nel*epsocc) THEN
+          mu_min = mu_now
+          N_min  = N_now
+          mu_max = mu_now
+          N_max  = N_now
+       ELSEIF (N_now<=nel) THEN
+          mu_min = mu_now
+          N_min  = N_now
+       ELSE
+          mu_max = mu_now
+          N_max  = N_now
+       ENDIF
+       IF (iter>400) EXIT
+    ENDDO
+
+    mu=(mu_max+mu_min)/2.0_dp
+    CALL Fermi2(f(:,:,1),na,kTSa,e(:,:,1),mu,wk,T,1.0_dp)
+    CALL Fermi2(f(:,:,2),na,kTSb,e(:,:,2),mu,wk,T,1.0_dp)
+    kTS = kTSa + kTSb
+
+ END SUBROUTINE Fermikp2
 
 ! *****************************************************************************
 !> \brief   returns f and dfde for a given set of energies and number of electrons

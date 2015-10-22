@@ -17,6 +17,7 @@ MODULE admm_dm_types
                                              do_admm_purify_mcweeny
   USE kinds,                           ONLY: dp
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -96,12 +97,10 @@ MODULE admm_dm_types
 ! *****************************************************************************
 !> \brief Release a admm_dm type
 !> \param admm_dm ...
-!> \param error ...
 !> \author Ole Schuett
 ! *****************************************************************************
-  SUBROUTINE admm_dm_release(admm_dm, error)
+  SUBROUTINE admm_dm_release(admm_dm)
     TYPE(admm_dm_type), POINTER              :: admm_dm
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'admm_dm_release', &
       routineP = moduleN//':'//routineN
@@ -109,7 +108,7 @@ MODULE admm_dm_types
     IF(.NOT. ASSOCIATED(admm_dm)) RETURN
 
     IF(ASSOCIATED(admm_dm%matrix_a)) THEN
-      CALL cp_dbcsr_release(admm_dm%matrix_a, error)
+      CALL cp_dbcsr_release(admm_dm%matrix_a)
       DEALLOCATE(admm_dm%matrix_a)
     ENDIF
 

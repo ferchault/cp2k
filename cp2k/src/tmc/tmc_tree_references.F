@@ -18,14 +18,13 @@
 ! *****************************************************************************
 
 MODULE tmc_tree_references
-  USE timings,                         ONLY: timeset,&
-                                             timestop
   USE tmc_cancelation,                 ONLY: add_to_canceling_list
   USE tmc_tree_types,                  ONLY: global_tree_type,&
                                              gt_elem_list_type,&
                                              tree_type
   USE tmc_types,                       ONLY: tmc_env_type
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -42,25 +41,20 @@ CONTAINS
 ! *****************************************************************************
 !> \brief adds global tree reference to the modified sub tree element(s)
 !> \param gt_elem actual global tree element
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 12.2012
 ! *****************************************************************************
-  SUBROUTINE add_to_references(gt_elem, error)
+  SUBROUTINE add_to_references(gt_elem)
     TYPE(global_tree_type), POINTER          :: gt_elem
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'add_to_references', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle
-    LOGICAL                                  :: failure
     TYPE(gt_elem_list_type), POINTER         :: tmp_pt_list_elem
 
-    failure = .FALSE.
     NULLIFY(tmp_pt_list_elem)
 
-    CPPrecondition(ASSOCIATED(gt_elem),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(gt_elem))
 
     ! start the timing
     CALL timeset(routineN,handle)
@@ -97,35 +91,30 @@ CONTAINS
 !>        from all related sub tree elements
 !> \param gt_ptr actual global tree element
 !> \param tmc_env ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 12.2012
 ! *****************************************************************************
-  SUBROUTINE remove_gt_references(gt_ptr, tmc_env, error)
+  SUBROUTINE remove_gt_references(gt_ptr, tmc_env)
     TYPE(global_tree_type), POINTER          :: gt_ptr
     TYPE(tmc_env_type), POINTER              :: tmc_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'remove_gt_references', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle
-    LOGICAL                                  :: failure
 
-    failure = .FALSE.
-    CPPrecondition(ASSOCIATED(gt_ptr),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(tmc_env),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(gt_ptr))
+    CPASSERT(ASSOCIATED(tmc_env))
 
     ! start the timing
     CALL timeset(routineN,handle)
 
     CALL search_and_remove_reference_in_list(gt_ptr=gt_ptr, &
-            elem=gt_ptr%conf(gt_ptr%mv_conf)%elem, tmc_env=tmc_env,error=error)
+            elem=gt_ptr%conf(gt_ptr%mv_conf)%elem, tmc_env=tmc_env)
 
     ! in case of parallel tempering also the reference in the second swaped configuration has to be removed
     IF(gt_ptr%swaped) THEN
        CALL search_and_remove_reference_in_list(gt_ptr=gt_ptr, &
-               elem=gt_ptr%conf(gt_ptr%mv_conf+1)%elem, tmc_env=tmc_env, error=error)
+               elem=gt_ptr%conf(gt_ptr%mv_conf+1)%elem, tmc_env=tmc_env)
     END IF
     ! end the timing
     CALL timestop(handle)
@@ -135,13 +124,10 @@ CONTAINS
 !> \brief removes the pointers to a certain subtree element from every related
 !>        global tree element
 !> \param ptr sub tree element
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 12.2012
 ! *****************************************************************************
-  SUBROUTINE remove_subtree_element_of_all_references(ptr, error)
+  SUBROUTINE remove_subtree_element_of_all_references(ptr)
     TYPE(tree_type), POINTER                 :: ptr
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: &
       routineN = 'remove_subtree_element_of_all_references', &
@@ -149,26 +135,23 @@ CONTAINS
 
     CHARACTER(len=2000)                      :: list_of_nr
     INTEGER                                  :: handle, i
-    LOGICAL                                  :: failure
     TYPE(gt_elem_list_type), POINTER         :: tmp_gt_list_ptr
 
-    failure = .FALSE.
     NULLIFY(tmp_gt_list_ptr)
 
-    CPPrecondition(ASSOCIATED(ptr),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(ptr))
 
     ! start the timing
     CALL timeset(routineN,handle)
 
     pt_node_ref_loop: DO WHILE(ASSOCIATED(ptr%gt_nodes_references))
       tmp_gt_list_ptr => ptr%gt_nodes_references
-      CPPrecondition(ASSOCIATED(tmp_gt_list_ptr%gt_elem),cp_failure_level,routineP,error,failure)
-      CALL cp_assert(.FALSE.,cp_failure_level,cp_assertion_failed,&
-                   routineP,"found reference of global tree node "//&
-                   cp_to_string(tmp_gt_list_ptr%gt_elem%nr)//&
-                   ", while removing sub tree node "//&
-                   cp_to_string(ptr%sub_tree_nr)//cp_to_string(ptr%nr),&
-                   error,failure)
+      CPASSERT(ASSOCIATED(tmp_gt_list_ptr%gt_elem))
+      CALL cp_abort(__LOCATION__,&
+           "found reference of global tree node "//&
+           cp_to_string(tmp_gt_list_ptr%gt_elem%nr)//&
+           ", while removing sub tree node "//&
+           cp_to_string(ptr%sub_tree_nr)//cp_to_string(ptr%nr))
       ! check if configurations exist
       IF(ASSOCIATED(tmp_gt_list_ptr%gt_elem%conf(tmp_gt_list_ptr%gt_elem%mv_conf)%elem)) THEN
         IF(ASSOCIATED(ptr, tmp_gt_list_ptr%gt_elem%conf(tmp_gt_list_ptr%gt_elem%mv_conf)%elem)) THEN
@@ -182,33 +165,31 @@ CONTAINS
             WRITE(list_of_nr,*)TRIM(ADJUSTL(list_of_nr)), tmp_gt_list_ptr%gt_elem%conf(i)%elem%sub_tree_nr, &
                   tmp_gt_list_ptr%gt_elem%conf(i)%elem%nr, " | "
           END DO
-          CALL cp_assert(.FALSE.,cp_warning_level,cp_assertion_failed,&
-                   routineP,"for subtree "//&
-                   cp_to_string(ptr%sub_tree_nr)//&
-                   "element "//cp_to_string(ptr%nr)//&
-                   "global tree element"//cp_to_string(tmp_gt_list_ptr%gt_elem%nr)//&
-                   "swaped"//cp_to_string(tmp_gt_list_ptr%gt_elem%swaped)//&
-                   "moved elem"//cp_to_string(tmp_gt_list_ptr%gt_elem%mv_conf)//&
-                   "with the related subtree, elements: "//&
-                   TRIM(ADJUSTL(list_of_nr)), &
-                   error,failure)
+          CALL cp_warn(__LOCATION__,&
+               "for subtree "//&
+               cp_to_string(ptr%sub_tree_nr)//&
+               "element "//cp_to_string(ptr%nr)//&
+               "global tree element"//cp_to_string(tmp_gt_list_ptr%gt_elem%nr)//&
+               "swaped"//cp_to_string(tmp_gt_list_ptr%gt_elem%swaped)//&
+               "moved elem"//cp_to_string(tmp_gt_list_ptr%gt_elem%mv_conf)//&
+               "with the related subtree, elements: "//&
+               TRIM(ADJUSTL(list_of_nr)))
         END IF
       ELSE
-        CALL cp_assert(.FALSE.,cp_warning_level,cp_assertion_failed,&
-                   routineP,"for subtree "//cp_to_string(ptr%sub_tree_nr)//&
-                   "element "//cp_to_string(ptr%nr)//&
-                   " is not related to global tree node "//cp_to_string(tmp_gt_list_ptr%gt_elem%nr)//&
-                   "(anymore).",error,failure)
+        CALL cp_warn(__LOCATION__,&
+             "for subtree "//cp_to_string(ptr%sub_tree_nr)//&
+             "element "//cp_to_string(ptr%nr)//&
+             " is not related to global tree node "//cp_to_string(tmp_gt_list_ptr%gt_elem%nr)//&
+             "(anymore).")
       END IF
       ptr%gt_nodes_references => ptr%gt_nodes_references%next
       DEALLOCATE(tmp_gt_list_ptr)
-      NULLIFY(tmp_gt_list_ptr)
     END DO pt_node_ref_loop
 
     ! end the timing
     CALL timestop(handle)
 
-    CPPostcondition(.NOT.ASSOCIATED(ptr%gt_nodes_references),cp_failure_level,routineP,error,failure)
+    CPASSERT(.NOT.ASSOCIATED(ptr%gt_nodes_references))
   END SUBROUTINE remove_subtree_element_of_all_references
 
 ! *****************************************************************************
@@ -217,33 +198,28 @@ CONTAINS
 !> \param gt_ptr actual global tree element
 !> \param elem ...
 !> \param tmc_env TMC environment
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 12.2012
 ! *****************************************************************************
-  SUBROUTINE search_and_remove_reference_in_list(gt_ptr, elem, tmc_env, error)
+  SUBROUTINE search_and_remove_reference_in_list(gt_ptr, elem, tmc_env)
     TYPE(global_tree_type), POINTER          :: gt_ptr
     TYPE(tree_type), POINTER                 :: elem
     TYPE(tmc_env_type), POINTER              :: tmc_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: &
       routineN = 'search_and_remove_reference_in_list', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle
-    LOGICAL                                  :: failure
     TYPE(gt_elem_list_type), POINTER         :: tmp_gt_list_last_ptr, &
                                                 tmp_gt_list_ptr
 
-    failure = .FALSE.
     NULLIFY(tmp_gt_list_ptr, tmp_gt_list_last_ptr)
 
     ! nothing to do, when subtree element is already deleted
     IF(.NOT.ASSOCIATED(elem)) RETURN
     IF(.NOT.ASSOCIATED(gt_ptr)) RETURN
 
-    CPPrecondition(ASSOCIATED(tmc_env),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(tmc_env))
 
     ! start the timing
     CALL timeset(routineN,handle)
@@ -261,7 +237,7 @@ CONTAINS
              ! additionally last reference (the only one)?
              IF(.NOT.ASSOCIATED(tmp_gt_list_ptr%next)) THEN
                 ! last element in list -> cancel calculation
-                CALL add_to_canceling_list(elem=elem, tmc_env=tmc_env, error=error)
+                CALL add_to_canceling_list(elem=elem, tmc_env=tmc_env)
                 elem%gt_nodes_references => NULL()
                 tmp_gt_list_last_ptr => NULL()
              ELSE
@@ -278,7 +254,6 @@ CONTAINS
 
           ! deallocate list element
           DEALLOCATE(tmp_gt_list_ptr)
-          NULLIFY(tmp_gt_list_ptr)
           ! going back to last list element
           tmp_gt_list_ptr => tmp_gt_list_last_ptr
        END IF

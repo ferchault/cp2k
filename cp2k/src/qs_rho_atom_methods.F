@@ -43,7 +43,6 @@ MODULE qs_rho_atom_methods
   USE qs_kind_types,                   ONLY: get_qs_kind,&
                                              get_qs_kind_set,&
                                              qs_kind_type
-  USE qs_linres_types,                 ONLY: linres_control_type
   USE qs_neighbor_list_types,          ONLY: get_iterator_info,&
                                              neighbor_list_iterate,&
                                              neighbor_list_iterator_create,&
@@ -61,12 +60,11 @@ MODULE qs_rho_atom_methods
   USE spherical_harmonics,             ONLY: clebsch_gordon,&
                                              clebsch_gordon_deallocate,&
                                              clebsch_gordon_init
-  USE timings,                         ONLY: timeset,&
-                                             timestop
   USE util,                            ONLY: get_limit
   USE whittaker,                       ONLY: whittaker_c0a,&
                                              whittaker_ci
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -96,10 +94,9 @@ MODULE qs_rho_atom_methods
 !> \param nspins ...
 !> \param tot_rho1_h ...
 !> \param tot_rho1_s ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE calculate_rho_atom(para_env,rho_atom_set,qs_kind,atom_list,&
-                                grid_atom, natom, nspins, tot_rho1_h, tot_rho1_s, error)
+                                grid_atom, natom, nspins, tot_rho1_h, tot_rho1_s)
 
     TYPE(cp_para_env_type), POINTER          :: para_env
     TYPE(rho_atom_type), DIMENSION(:), &
@@ -109,7 +106,6 @@ MODULE qs_rho_atom_methods
     TYPE(grid_atom_type), INTENT(IN)         :: grid_atom
     INTEGER, INTENT(IN)                      :: natom, nspins
     REAL(dp), DIMENSION(:), INTENT(INOUT)    :: tot_rho1_h, tot_rho1_s
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'calculate_rho_atom', &
       routineP = moduleN//':'//routineN
@@ -125,7 +121,6 @@ MODULE qs_rho_atom_methods
     INTEGER, ALLOCATABLE, DIMENSION(:, :, :) :: cg_list, dacg_list, dbcg_list
     INTEGER, DIMENSION(2)                    :: bo
     INTEGER, DIMENSION(:), POINTER           :: lmax, lmin, npgf, o2nindex
-    LOGICAL                                  :: failure
     LOGICAL, ALLOCATABLE, DIMENSION(:, :)    :: done_vgg
     REAL(dp)                                 :: c1, c2, rho_h, rho_s, &
                                                 root_zet12, zet12
@@ -144,12 +139,11 @@ MODULE qs_rho_atom_methods
 
     CALL timeset(routineN,handle)
 
-    failure = .FALSE.
     NULLIFY(orb_basis)
     NULLIFY(harmonics)
     NULLIFY(lmin,lmax,npgf,zet,my_CG,my_dCG,my_CG_dxyz,coeff)
 
-    CALL get_qs_kind(qs_kind,orb_basis_set=orb_basis,&
+    CALL get_qs_kind(qs_kind,basis_set=orb_basis,&
                          paw_proj_set=paw_proj,harmonics=harmonics)
 
     CALL get_gto_basis_set(gto_basis_set=orb_basis,lmax=lmax,lmin=lmin,&
@@ -173,32 +167,26 @@ MODULE qs_rho_atom_methods
     my_dCG       => harmonics%my_dCG
     my_CG_dxyz   => harmonics%my_CG_dxyz
 
-    ALLOCATE(CPCH_sphere(nsoset(maxl),nsoset(maxl)),STAT=istat)
-    CPPrecondition(istat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(CPCS_sphere(nsoset(maxl),nsoset(maxl)),STAT=istat)
-    CPPrecondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(CPCH_sphere(nsoset(maxl),nsoset(maxl)))
+    ALLOCATE(CPCS_sphere(nsoset(maxl),nsoset(maxl)))
     ALLOCATE(g1(nr),g2(nr),gg0(nr),gg(nr,0:2*maxl),dgg(nr,0:2*maxl),&
-             gg_lm1(nr,0:2*maxl),STAT=istat)
-    CPPrecondition(istat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(erf_zet12(nr),vgg(nr,0:2*maxl,0:indso(1,max_iso_not0)),STAT=istat)
-    CPPrecondition(istat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(done_vgg(0:2*maxl,0:indso(1,max_iso_not0)),STAT=istat)
-    CPPrecondition(istat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(dd(nr),int1(nr),int2(nr),STAT=istat)
-    CPPrecondition(istat==0,cp_failure_level,routineP,error,failure)
+             gg_lm1(nr,0:2*maxl))
+    ALLOCATE(erf_zet12(nr),vgg(nr,0:2*maxl,0:indso(1,max_iso_not0)))
+    ALLOCATE(done_vgg(0:2*maxl,0:indso(1,max_iso_not0)))
+    ALLOCATE(dd(nr),int1(nr),int2(nr))
     ALLOCATE(cg_list(2,nsoset(maxl)**2,max_s_harm),cg_n_list(max_s_harm),&
              dacg_list(2,nsoset(maxl)**2,max_s_harm),dacg_n_list(max_s_harm),&
              dbcg_list(2,nsoset(maxl)**2,max_s_harm),dbcg_n_list(max_s_harm),&
              STAT=istat)
-    CPPrecondition(istat==0,cp_failure_level,routineP,error,failure)
+    CPASSERT(istat==0)
 
     DO iat = bo(1),bo(2)
       iatom = atom_list(iat)
       DO i=1,nspins
         IF(.NOT. ASSOCIATED(rho_atom_set(iatom)%rho_rad_h(i)%r_coef)) THEN
-            CALL allocate_rho_atom_rad(rho_atom_set,iatom,i,nr,max_iso_not0,error=error)
+            CALL allocate_rho_atom_rad(rho_atom_set,iatom,i,nr,max_iso_not0)
         ELSE
-            CALL set2zero_rho_atom_rad(rho_atom_set,iatom,i,error=error)
+            CALL set2zero_rho_atom_rad(rho_atom_set,iatom,i)
         ENDIF
       END DO
     END DO
@@ -209,12 +197,12 @@ MODULE qs_rho_atom_methods
         DO iset2 = 1,nset
 
            CALL get_none0_cg_list(my_CG,lmin(iset1),lmax(iset1),lmin(iset2),lmax(iset2),&
-                                  max_s_harm,lmax_expansion,cg_list,cg_n_list,max_iso_not0_local,error)
-           CPPrecondition(max_iso_not0_local.LE.max_iso_not0,cp_failure_level,routineP,error,failure)
+                                  max_s_harm,lmax_expansion,cg_list,cg_n_list,max_iso_not0_local)
+           CPASSERT(max_iso_not0_local.LE.max_iso_not0)
            CALL get_none0_cg_list(my_CG_dxyz,lmin(iset1),lmax(iset1),lmin(iset2),lmax(iset2),&
-                                  max_s_harm,lmax_expansion,dacg_list,dacg_n_list,damax_iso_not0_local,error)
+                                  max_s_harm,lmax_expansion,dacg_list,dacg_n_list,damax_iso_not0_local)
            CALL get_none0_cg_list(my_dCG,lmin(iset1),lmax(iset1),lmin(iset2),lmax(iset2),&
-                                  max_s_harm,lmax_expansion,dbcg_list,dbcg_n_list,dbmax_iso_not0_local,error)
+                                  max_s_harm,lmax_expansion,dbcg_list,dbcg_n_list,dbmax_iso_not0_local)
 
            n1s = nsoset(lmax(iset1))
            DO ipgf1  = 1,npgf(iset1)
@@ -224,7 +212,7 @@ MODULE qs_rho_atom_methods
               iso1_first = o2nindex(iso1_first)
               iso1_last  = o2nindex(iso1_last)
               i1 = iso1_last - iso1_first + 1
-              CPPrecondition(size1==i1,cp_failure_level,routineP,error,failure)
+              CPASSERT(size1==i1)
               i1 = nsoset(lmin(iset1)-1)+1
 
               g1(1:nr) = EXP(-zet(ipgf1,iset1)*grid_atom%rad2(1:nr))
@@ -237,7 +225,7 @@ MODULE qs_rho_atom_methods
                  iso2_first = o2nindex(iso2_first)
                  iso2_last  = o2nindex(iso2_last)
                  i2 = iso2_last - iso2_first + 1
-                 CPPrecondition(size2==i2,cp_failure_level,routineP,error,failure)
+                 CPASSERT(size2==i2)
                  i2 = nsoset(lmin(iset2)-1)+1
 
                  g2(1:nr) = EXP(-zet(ipgf2,iset2)*grid_atom%rad2(1:nr))
@@ -291,27 +279,23 @@ MODULE qs_rho_atom_methods
                           iso2 = cg_list(2,icg,iso)
 
                           l = indso(1,iso1) + indso(1,iso2)
-                          CPPrecondition(l<=lmax_expansion,cp_failure_level,routineP,error,failure)
-                          IF(.NOT. failure) THEN
+                          CPASSERT(l<=lmax_expansion)
+                          IF(done_vgg(l,l_iso)) CYCLE
+                          L_sum = l + l_iso
+                          L_sub = l - l_iso
 
-                             IF(done_vgg(l,l_iso)) CYCLE
-                             L_sum = l + l_iso
-                             L_sub = l - l_iso
+                          IF(l_sum == 0) THEN
+                             vgg(1:nr,l,l_iso) = erf_zet12(1:nr)* grid_atom%oorad2l(1:nr,1) * c2
+                          ELSE
+                             CALL whittaker_c0a(int1,grid_atom%rad,gg0,erf_zet12,zet12,l,l_iso,nr)
+                             CALL whittaker_ci(int2,grid_atom%rad,gg0,zet12,L_sub,nr)
 
-                             IF(l_sum == 0) THEN
-                                vgg(1:nr,l,l_iso) = erf_zet12(1:nr)* grid_atom%oorad2l(1:nr,1) * c2
-                             ELSE
-                                CALL whittaker_c0a(int1,grid_atom%rad,gg0,erf_zet12,zet12,l,l_iso,nr)
-                                CALL whittaker_ci(int2,grid_atom%rad,gg0,zet12,L_sub,nr)
-
-                                DO ir = 1,nr
-                                   int2(ir) = grid_atom%rad2l(ir,l_iso)*int2(ir)
-                                   vgg(ir,l,l_iso) = c1 * (int1(ir) + int2(ir))
-                                END DO
-                             END IF
-                             done_vgg(l,l_iso) = .TRUE.
-                          END IF ! failure
-
+                             DO ir = 1,nr
+                                int2(ir) = grid_atom%rad2l(ir,l_iso)*int2(ir)
+                                vgg(ir,l,l_iso) = c1 * (int1(ir) + int2(ir))
+                             END DO
+                          END IF
+                          done_vgg(l,l_iso) = .TRUE.
                        END DO
                     END DO
                  END IF ! lmax_expansion
@@ -345,51 +329,48 @@ MODULE qs_rho_atom_methods
                                   - 2._dp*REAL(l2,dp)*zet(ipgf1,iset1) &
                                   + 4._dp*zet(ipgf1,iset1)*zet(ipgf2,iset2)*grid_atom%rad2(1:nr)
                              l = indso(1,iso1) + indso(1,iso2)
-                             CPPrecondition(l<=lmax_expansion,cp_failure_level,routineP,error,failure)
-                             IF(.NOT. failure) THEN
-                                rho_atom_set(iatom)%rho_rad_h(i)%r_coef(1:nr,iso) =&
-                                     rho_atom_set(iatom)%rho_rad_h(i)%r_coef(1:nr,iso) +&
-                                     gg(1:nr,l)*CPCH_sphere(iso1,iso2)*my_CG(iso1,iso2,iso)
+                             CPASSERT(l<=lmax_expansion)
+                             rho_atom_set(iatom)%rho_rad_h(i)%r_coef(1:nr,iso) =&
+                                  rho_atom_set(iatom)%rho_rad_h(i)%r_coef(1:nr,iso) +&
+                                  gg(1:nr,l)*CPCH_sphere(iso1,iso2)*my_CG(iso1,iso2,iso)
 
-                                rho_atom_set(iatom)%rho_rad_s(i)%r_coef(1:nr,iso) =&
-                                     rho_atom_set(iatom)%rho_rad_s(i)%r_coef(1:nr,iso) +&
-                                     gg(1:nr,l)*CPCS_sphere(iso1,iso2)*my_CG(iso1,iso2,iso)
+                             rho_atom_set(iatom)%rho_rad_s(i)%r_coef(1:nr,iso) =&
+                                  rho_atom_set(iatom)%rho_rad_s(i)%r_coef(1:nr,iso) +&
+                                  gg(1:nr,l)*CPCS_sphere(iso1,iso2)*my_CG(iso1,iso2,iso)
 
-                                rho_atom_set(iatom)%drho_rad_h(i)%r_coef(1:nr,iso) =&
-                                     rho_atom_set(iatom)%drho_rad_h(i)%r_coef(1:nr,iso) +&
-                                     dgg(1:nr,l)*CPCH_sphere(iso1,iso2)*my_CG(iso1,iso2,iso)
+                             rho_atom_set(iatom)%drho_rad_h(i)%r_coef(1:nr,iso) =&
+                                  rho_atom_set(iatom)%drho_rad_h(i)%r_coef(1:nr,iso) +&
+                                  dgg(1:nr,l)*CPCH_sphere(iso1,iso2)*my_CG(iso1,iso2,iso)
 
-                                rho_atom_set(iatom)%drho_rad_s(i)%r_coef(1:nr,iso) =&
-                                     rho_atom_set(iatom)%drho_rad_s(i)%r_coef(1:nr,iso) +&
-                                     dgg(1:nr,l)*CPCS_sphere(iso1,iso2)*my_CG(iso1,iso2,iso)
+                             rho_atom_set(iatom)%drho_rad_s(i)%r_coef(1:nr,iso) =&
+                                  rho_atom_set(iatom)%drho_rad_s(i)%r_coef(1:nr,iso) +&
+                                  dgg(1:nr,l)*CPCS_sphere(iso1,iso2)*my_CG(iso1,iso2,iso)
 
-                                rho_atom_set(iatom)%vrho_rad_h(i)%r_coef(1:nr,iso) =&
-                                     rho_atom_set(iatom)%vrho_rad_h(i)%r_coef(1:nr,iso) +&
-                                     vgg(1:nr,l,l_iso)*CPCH_sphere(iso1,iso2)*my_CG(iso1,iso2,iso)
+                             rho_atom_set(iatom)%vrho_rad_h(i)%r_coef(1:nr,iso) =&
+                                  rho_atom_set(iatom)%vrho_rad_h(i)%r_coef(1:nr,iso) +&
+                                  vgg(1:nr,l,l_iso)*CPCH_sphere(iso1,iso2)*my_CG(iso1,iso2,iso)
 
-                                rho_atom_set(iatom)%vrho_rad_s(i)%r_coef(1:nr,iso) =&
-                                     rho_atom_set(iatom)%vrho_rad_s(i)%r_coef(1:nr,iso) +&
-                                     vgg(1:nr,l,l_iso)*CPCS_sphere(iso1,iso2)*my_CG(iso1,iso2,iso)
+                             rho_atom_set(iatom)%vrho_rad_s(i)%r_coef(1:nr,iso) =&
+                                  rho_atom_set(iatom)%vrho_rad_s(i)%r_coef(1:nr,iso) +&
+                                  vgg(1:nr,l,l_iso)*CPCS_sphere(iso1,iso2)*my_CG(iso1,iso2,iso)
 
-                                rho_atom_set(iatom)%trho_rad_h(1,i)%r_coef(1:nr,iso) =&
-                                     rho_atom_set(iatom)%trho_rad_h(1,i)%r_coef(1:nr,iso) +&
-                                     0.5_dp*gg(1:nr,l)*dd(1:nr)*CPCH_sphere(iso1,iso2)*my_CG(iso1,iso2,iso)
+                             rho_atom_set(iatom)%trho_rad_h(1,i)%r_coef(1:nr,iso) =&
+                                  rho_atom_set(iatom)%trho_rad_h(1,i)%r_coef(1:nr,iso) +&
+                                  0.5_dp*gg(1:nr,l)*dd(1:nr)*CPCH_sphere(iso1,iso2)*my_CG(iso1,iso2,iso)
 
-                                rho_atom_set(iatom)%trho_rad_s(1,i)%r_coef(1:nr,iso) =&
-                                     rho_atom_set(iatom)%trho_rad_s(1,i)%r_coef(1:nr,iso) +&
-                                     0.5_dp*gg(1:nr,l)*dd(1:nr)*CPCS_sphere(iso1,iso2)*my_CG(iso1,iso2,iso)
+                             rho_atom_set(iatom)%trho_rad_s(1,i)%r_coef(1:nr,iso) =&
+                                  rho_atom_set(iatom)%trho_rad_s(1,i)%r_coef(1:nr,iso) +&
+                                  0.5_dp*gg(1:nr,l)*dd(1:nr)*CPCS_sphere(iso1,iso2)*my_CG(iso1,iso2,iso)
 
-                                rho_atom_set(iatom)%trho_rad_h(3,i)%r_coef(1:nr,iso) =&
-                                     rho_atom_set(iatom)%trho_rad_h(3,i)%r_coef(1:nr,iso) +&
-                                     0.5_dp*REAL(m1*m2,dp)*gg(1:nr,l)*CPCH_sphere(iso1,iso2)*&
-                                     my_CG(iso1,iso2,iso)/grid_atom%rad2(1:nr)
+                             rho_atom_set(iatom)%trho_rad_h(3,i)%r_coef(1:nr,iso) =&
+                                  rho_atom_set(iatom)%trho_rad_h(3,i)%r_coef(1:nr,iso) +&
+                                  0.5_dp*REAL(m1*m2,dp)*gg(1:nr,l)*CPCH_sphere(iso1,iso2)*&
+                                  my_CG(iso1,iso2,iso)/grid_atom%rad2(1:nr)
 
-                                rho_atom_set(iatom)%trho_rad_s(3,i)%r_coef(1:nr,iso) =&
-                                     rho_atom_set(iatom)%trho_rad_s(3,i)%r_coef(1:nr,iso) +&
-                                     0.5_dp*REAL(m1*m2,dp)*gg(1:nr,l)*CPCS_sphere(iso1,iso2)*&
-                                     my_CG(iso1,iso2,iso)/grid_atom%rad2(1:nr)
-
-                             END IF !failure
+                             rho_atom_set(iatom)%trho_rad_s(3,i)%r_coef(1:nr,iso) =&
+                                  rho_atom_set(iatom)%trho_rad_s(3,i)%r_coef(1:nr,iso) +&
+                                  0.5_dp*REAL(m1*m2,dp)*gg(1:nr,l)*CPCS_sphere(iso1,iso2)*&
+                                  my_CG(iso1,iso2,iso)/grid_atom%rad2(1:nr)
 
                           ENDDO  ! icg
 
@@ -401,18 +382,16 @@ MODULE qs_rho_atom_methods
                              iso1 = dacg_list(1,icg,iso)
                              iso2 = dacg_list(2,icg,iso)
                              l = indso(1,iso1) + indso(1,iso2)
-                             CPPrecondition(l<=lmax_expansion,cp_failure_level,routineP,error,failure)
-                             IF(.NOT. failure) THEN
-                                DO j = 1,3
-                                   rho_atom_set(iatom)%rho_rad_h_d(j,i)%r_coef(1:nr,iso) =&
-                                        rho_atom_set(iatom)%rho_rad_h_d(j,i)%r_coef(1:nr,iso) +&
-                                        gg_lm1(1:nr,l)*CPCH_sphere(iso1,iso2)*my_CG_dxyz(j,iso1,iso2,iso)
+                             CPASSERT(l<=lmax_expansion)
+                             DO j = 1,3
+                                rho_atom_set(iatom)%rho_rad_h_d(j,i)%r_coef(1:nr,iso) =&
+                                     rho_atom_set(iatom)%rho_rad_h_d(j,i)%r_coef(1:nr,iso) +&
+                                     gg_lm1(1:nr,l)*CPCH_sphere(iso1,iso2)*my_CG_dxyz(j,iso1,iso2,iso)
 
-                                   rho_atom_set(iatom)%rho_rad_s_d(j,i)%r_coef(1:nr,iso) =&
-                                        rho_atom_set(iatom)%rho_rad_s_d(j,i)%r_coef(1:nr,iso) +&
-                                        gg_lm1(1:nr,l)*CPCS_sphere(iso1,iso2)*my_CG_dxyz(j,iso1,iso2,iso)
-                                END DO
-                             END IF !failure
+                                rho_atom_set(iatom)%rho_rad_s_d(j,i)%r_coef(1:nr,iso) =&
+                                     rho_atom_set(iatom)%rho_rad_s_d(j,i)%r_coef(1:nr,iso) +&
+                                     gg_lm1(1:nr,l)*CPCS_sphere(iso1,iso2)*my_CG_dxyz(j,iso1,iso2,iso)
+                             END DO
                           END DO  ! icg
 
                        ENDDO  ! iso
@@ -427,16 +406,16 @@ MODULE qs_rho_atom_methods
                              iso2 = dbcg_list(2,icg,iso)
 
                              l = indso(1,iso1) + indso(1,iso2)
-                             CPPrecondition(l<=lmax_expansion,cp_failure_level,routineP,error,failure)
-                             IF(.NOT.failure) THEN
-                                rho_atom_set(iatom)%trho_rad_h(2,i)%r_coef(1:nr,iso) =&
-                                     rho_atom_set(iatom)%trho_rad_h(2,i)%r_coef(1:nr,iso) +&
-                                     0.5_dp*gg(1:nr,l)*CPCH_sphere(iso1,iso2)*my_dCG(iso1,iso2,iso)/grid_atom%rad2(1:nr)
+                             CPASSERT(l<=lmax_expansion)
+                             rho_atom_set(iatom)%trho_rad_h(2,i)%r_coef(1:nr,iso) =&
+                                  rho_atom_set(iatom)%trho_rad_h(2,i)%r_coef(1:nr,iso) +&
+                                  0.5_dp*gg(1:nr,l)*CPCH_sphere(iso1,iso2)*&
+                                  my_dCG(iso1,iso2,iso)/grid_atom%rad2(1:nr)
 
-                                rho_atom_set(iatom)%trho_rad_s(2,i)%r_coef(1:nr,iso) =&
-                                     rho_atom_set(iatom)%trho_rad_s(2,i)%r_coef(1:nr,iso) +&
-                                     0.5_dp*gg(1:nr,l)*CPCS_sphere(iso1,iso2)*my_dCG(iso1,iso2,iso)/grid_atom%rad2(1:nr)
-                             END IF !failure
+                             rho_atom_set(iatom)%trho_rad_s(2,i)%r_coef(1:nr,iso) =&
+                                  rho_atom_set(iatom)%trho_rad_s(2,i)%r_coef(1:nr,iso) +&
+                                  0.5_dp*gg(1:nr,l)*CPCS_sphere(iso1,iso2)*&
+                                  my_dCG(iso1,iso2,iso)/grid_atom%rad2(1:nr)
                           END DO  ! icg
                        ENDDO  ! iso
 
@@ -472,12 +451,9 @@ MODULE qs_rho_atom_methods
 
     END DO  ! iat
 
-    DEALLOCATE(CPCH_sphere,CPCS_sphere,STAT=istat)
-    CPPrecondition(istat==0,cp_failure_level,routineP,error,failure)
-    DEALLOCATE(g1,g2,gg0,gg,gg_lm1,dgg,vgg,done_vgg,erf_zet12,int1,int2,STAT=istat)
-    CPPrecondition(istat==0,cp_failure_level,routineP,error,failure)
-    DEALLOCATE(cg_list,cg_n_list,dacg_list,dacg_n_list,dbcg_list,dbcg_n_list,STAT=istat)
-    CPPrecondition(istat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(CPCH_sphere,CPCS_sphere)
+    DEALLOCATE(g1,g2,gg0,gg,gg_lm1,dgg,vgg,done_vgg,erf_zet12,int1,int2)
+    DEALLOCATE(cg_list,cg_n_list,dacg_list,dacg_n_list,dbcg_list,dbcg_n_list)
 
     CALL timestop(handle)
 
@@ -490,16 +466,14 @@ MODULE qs_rho_atom_methods
 !> \param qs_env ...
 !> \param rho_ao ...
 !> \param rho_atom_set ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE calculate_rho_atom_coeff(qs_env, rho_ao, rho_atom_set,error)
+  SUBROUTINE calculate_rho_atom_coeff(qs_env, rho_ao, rho_atom_set)
 
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(cp_dbcsr_p_type), DIMENSION(:, :), &
       POINTER                                :: rho_ao
     TYPE(rho_atom_type), DIMENSION(:), &
       OPTIONAL, POINTER                      :: rho_atom_set
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'calculate_rho_atom_coeff', &
       routineP = moduleN//':'//routineN
@@ -512,8 +486,8 @@ MODULE qs_rho_atom_methods
     INTEGER, DIMENSION(3)                    :: cell_b
     INTEGER, DIMENSION(:), POINTER           :: a_list, list_a, list_b
     INTEGER, DIMENSION(:, :, :), POINTER     :: cell_to_index
-    LOGICAL                                  :: dista, distab, distb, &
-                                                failure, found, paw_atom
+    LOGICAL                                  :: dista, distab, distb, found, &
+                                                paw_atom
     REAL(dp), ALLOCATABLE, DIMENSION(:, :)   :: p_matrix
     REAL(KIND=dp)                            :: eps_cpc, factor, pmax
     REAL(KIND=dp), ALLOCATABLE, DIMENSION(:) :: CPC, PC1
@@ -546,7 +520,6 @@ MODULE qs_rho_atom_methods
 
     CALL timeset(routineN,handle)
 
-    failure = .FALSE.
 
     NULLIFY(dft_control)
     NULLIFY(qs_kind_set)
@@ -561,8 +534,7 @@ MODULE qs_rho_atom_methods
             qs_kind_set=qs_kind_set,&
             para_env=para_env,&
             oce=oce,sab_orb=sab_orb,&
-            rho_atom_set=rho_atom,&
-            error=error)
+            rho_atom_set=rho_atom)
 
     eps_cpc = dft_control%qs_control%gapw_control%eps_cpc
 
@@ -573,12 +545,11 @@ MODULE qs_rho_atom_methods
 
     NULLIFY(cell_to_index)
     IF (nimages > 1) THEN
-       CALL get_qs_env(qs_env=qs_env,kpoints=kpoints,error=error)
-       CALL get_kpoint_info(kpoint=kpoints,cell_to_index=cell_to_index,error=error)
+       CALL get_qs_env(qs_env=qs_env,kpoints=kpoints)
+       CALL get_kpoint_info(kpoint=kpoints,cell_to_index=cell_to_index)
     END IF
 
-    ALLOCATE(p_block_spin(nspins),STAT=istat)
-    CPPrecondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(p_block_spin(nspins))
     DO ispin = 1,nspins
       NULLIFY(p_block_spin(ispin)%r_coef)
     END DO
@@ -588,13 +559,13 @@ MODULE qs_rho_atom_methods
 
     ALLOCATE (PC1(max_nsgf*max_gau),CPC(max_gau*max_gau),p_matrix(max_nsgf,max_nsgf),&
               STAT=istat)
-    CPPrecondition(istat==0,cp_failure_level,routineP,error,failure)
+    CPASSERT(istat==0)
 
     nkind = SIZE(atomic_kind_set)
 !   Inizialize to 0 the CPC coefficients and the local density arrays
     DO ikind = 1, nkind
-      CALL get_atomic_kind(atomic_kind_set(ikind), atom_list=a_list,natom=nat_kind)
-      CALL get_qs_kind(qs_kind_set(ikind), paw_atom=paw_atom)
+      CALL get_atomic_kind(atomic_kind_set(ikind),atom_list=a_list,natom=nat_kind)
+      CALL get_qs_kind(qs_kind_set(ikind),paw_atom=paw_atom)
 
       IF(.NOT. paw_atom) CYCLE
       DO i = 1,nat_kind
@@ -617,10 +588,9 @@ MODULE qs_rho_atom_methods
       ENDDO  ! i
     END DO ! ikind
 
-    ALLOCATE (basis_set_list(nkind),STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (basis_set_list(nkind))
     DO ikind=1,nkind
-      CALL get_qs_kind(qs_kind_set(ikind), orb_basis_set=basis_set_a)
+      CALL get_qs_kind(qs_kind_set(ikind),basis_set=basis_set_a)
       IF (ASSOCIATED(basis_set_a)) THEN
         basis_set_list(ikind)%gto_basis_set => basis_set_a
       ELSE
@@ -649,7 +619,7 @@ MODULE qs_rho_atom_methods
 
        IF(nimages > 1) THEN
           img = cell_to_index(cell_b(1),cell_b(2),cell_b(3))
-          CPPostcondition(img > 0,cp_failure_level,routineP,error,failure)
+          CPASSERT(img > 0)
        ELSE
           img = 1
        END IF
@@ -664,7 +634,7 @@ MODULE qs_rho_atom_methods
 
        DO kkind = 1 ,nkind
          CALL get_qs_kind(qs_kind_set(kkind),&
-                          orb_basis_set=orb_basis_set,&
+                          basis_set=orb_basis_set,&
                           paw_proj_set=paw_proj,paw_atom=paw_atom)
 
          CALL get_gto_basis_set(gto_basis_set=orb_basis_set,nset =nsetc,maxso=maxsoc)
@@ -679,8 +649,8 @@ MODULE qs_rho_atom_methods
 
          IF (.NOT.ASSOCIATED(oce%intac(iac)%alist)) CYCLE
          IF (.NOT.ASSOCIATED(oce%intac(ibc)%alist)) CYCLE
-         CALL get_alist(oce%intac(iac), alist_ac, iatom, error)
-         CALL get_alist(oce%intac(ibc), alist_bc, jatom, error)
+         CALL get_alist(oce%intac(iac), alist_ac, iatom)
+         CALL get_alist(oce%intac(ibc), alist_bc, jatom)
          IF (.NOT.ASSOCIATED(alist_ac)) CYCLE
          IF (.NOT.ASSOCIATED(alist_bc)) CYCLE
 
@@ -758,8 +728,7 @@ MODULE qs_rho_atom_methods
     END DO
     CALL neighbor_list_iterator_release(nl_iterator)
 
-    ALLOCATE (kind_of(natom),STAT=istat)
-    CPPrecondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (kind_of(natom))
     CALL get_atomic_kind_set(atomic_kind_set,kind_of=kind_of)
 
     DO iatom = 1,natom
@@ -778,8 +747,7 @@ MODULE qs_rho_atom_methods
 
     END DO
 
-    DEALLOCATE(PC1,CPC,p_block_spin,p_matrix,kind_of,basis_set_list,STAT=istat)
-    CPPrecondition(istat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(PC1,CPC,p_block_spin,p_matrix,kind_of,basis_set_list)
 
     CALL timestop(handle)
 
@@ -789,23 +757,20 @@ MODULE qs_rho_atom_methods
 !> \brief ...
 !> \param qs_env ...
 !> \param gapw_control ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE init_rho_atom(qs_env,gapw_control,error)
+  SUBROUTINE init_rho_atom(qs_env,gapw_control)
 
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(gapw_control_type), POINTER         :: gapw_control
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'init_rho_atom', &
       routineP = moduleN//':'//routineN
 
-    INTEGER :: handle, ikind, il, iso, iso1, iso2, istat, l1, l1l2, l2, la, &
-      lc1, lc2, lcleb, ll, llmax, lmax_sphere, lp, m1, m2, max_s_harm, &
-      max_s_set, maxl, maxlgto, maxs, mm, mp, na, nat, natom, nr, nspins, &
-      quadrature
+    INTEGER :: handle, ikind, il, iso, iso1, iso2, l1, l1l2, l2, la, lc1, &
+      lc2, lcleb, ll, llmax, lmax_sphere, lp, m1, m2, max_s_harm, max_s_set, &
+      maxl, maxlgto, maxs, mm, mp, na, nat, natom, nr, nspins, quadrature
     INTEGER, DIMENSION(:), POINTER           :: atom_list
-    LOGICAL                                  :: failure, paw_atom
+    LOGICAL                                  :: paw_atom
     REAL(dp), ALLOCATABLE, DIMENSION(:, :)   :: rga
     REAL(dp), DIMENSION(:, :, :), POINTER    :: my_CG
     TYPE(atomic_kind_type), DIMENSION(:), &
@@ -814,25 +779,23 @@ MODULE qs_rho_atom_methods
     TYPE(grid_atom_type), POINTER            :: grid_atom
     TYPE(gto_basis_set_type), POINTER        :: orb_basis_set
     TYPE(harmonics_atom_type), POINTER       :: harmonics
-    TYPE(linres_control_type), POINTER       :: linres_control
     TYPE(qs_kind_type), DIMENSION(:), &
       POINTER                                :: qs_kind_set
     TYPE(rho_atom_type), DIMENSION(:), &
       POINTER                                :: rho_atom_set
 
     CALL timeset(routineN,handle)
-    failure=.FALSE.
 
     NULLIFY(rho_atom_set)
     NULLIFY(qs_kind_set, atomic_kind_set)
-    NULLIFY(dft_control,linres_control)
+    NULLIFY(dft_control)
     NULLIFY(orb_basis_set)
     NULLIFY(my_CG, grid_atom, harmonics,atom_list)
 
     CALL get_qs_env(qs_env=qs_env, qs_kind_set=qs_kind_set, atomic_kind_set=atomic_kind_set,&
-                    dft_control=dft_control,linres_control=linres_control,error=error)
+                    dft_control=dft_control)
     CALL get_atomic_kind_set(atomic_kind_set, natom=natom)
-    CALL get_qs_kind_set(qs_kind_set, maxlgto=maxlgto)
+    CALL get_qs_kind_set(qs_kind_set,maxlgto=maxlgto)
 
     nspins = dft_control%nspins
 
@@ -848,8 +811,7 @@ MODULE qs_rho_atom_methods
     CALL clebsch_gordon_init ( lcleb )
     CALL reallocate(my_CG,1,max_s_set,1,max_s_set,1,max_s_harm)
 
-    ALLOCATE(rga(lcleb,2),STAT=istat)
-    CPPrecondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(rga(lcleb,2))
     DO lc1 = 0,maxlgto
       DO  iso1=nsoset(lc1-1)+1,nsoset(lc1)
         l1 = indso(1,iso1)
@@ -896,8 +858,7 @@ MODULE qs_rho_atom_methods
         ENDDO  ! lc2
       ENDDO    ! iso1
     ENDDO      ! lc1
-    DEALLOCATE(rga,STAT=istat)
-    CPPrecondition(istat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(rga)
     CALL clebsch_gordon_deallocate()
 
 !   *** initialize the Lebedev grids ***
@@ -934,23 +895,23 @@ MODULE qs_rho_atom_methods
 
 !     *** calculate the spherical harmonics on the grid ***
 
-      CALL get_qs_kind(qs_kind_set(ikind), orb_basis_set=orb_basis_set)
+      CALL get_qs_kind(qs_kind_set(ikind),basis_set=orb_basis_set)
       CALL get_gto_basis_set(gto_basis_set=orb_basis_set,maxl=maxl)
       maxs=nsoset(maxl)
       CALL create_harmonics_atom(harmonics,&
                    my_CG,na,llmax,maxs,max_s_harm,ll,grid_atom%wa,&
                    grid_atom%pol,grid_atom%cos_pol,&
-                   grid_atom%cotan_azi,error)
-      CALL get_maxl_CG(harmonics,orb_basis_set,llmax,max_s_harm,error)
+                   grid_atom%cotan_azi)
+      CALL get_maxl_CG(harmonics,orb_basis_set,llmax,max_s_harm)
 
     END DO
 
     CALL deallocate_lebedev_grids()
     DEALLOCATE(my_CG)
 
-    CALL allocate_rho_atom_internals(qs_env, rho_atom_set,error=error)
+    CALL allocate_rho_atom_internals(qs_env, rho_atom_set)
 
-    CALL set_qs_env(qs_env=qs_env, rho_atom_set=rho_atom_set,error=error)
+    CALL set_qs_env(qs_env=qs_env, rho_atom_set=rho_atom_set)
 
     CALL timestop(handle)
 
@@ -960,14 +921,12 @@ MODULE qs_rho_atom_methods
 !> \brief ...
 !> \param qs_env ...
 !> \param rho_atom_set ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE allocate_rho_atom_internals(qs_env,rho_atom_set,error)
+  SUBROUTINE allocate_rho_atom_internals(qs_env,rho_atom_set)
 
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(rho_atom_type), DIMENSION(:), &
       POINTER                                :: rho_atom_set
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'allocate_rho_atom_internals', &
       routineP = moduleN//':'//routineN
@@ -975,7 +934,7 @@ MODULE qs_rho_atom_methods
     INTEGER :: bo(2), handle, iat, iatom, ikind, ispin, istat, j, &
       max_iso_not0, mepos, nat, natom, nr, nsatbas, nsotot, nspins, num_pe
     INTEGER, DIMENSION(:), POINTER           :: atom_list
-    LOGICAL                                  :: failure, paw_atom
+    LOGICAL                                  :: paw_atom
     TYPE(atomic_kind_type), DIMENSION(:), &
       POINTER                                :: atomic_kind_set
     TYPE(cp_para_env_type), POINTER          :: para_env
@@ -988,14 +947,12 @@ MODULE qs_rho_atom_methods
     CALL timeset(routineN,handle)
 
     NULLIFY(qs_kind_set,para_env,rho_atom_set,dft_control)
-    failure = .FALSE.
 
     CALL get_qs_env(qs_env,&
                     qs_kind_set=qs_kind_set, &
                     atomic_kind_set=atomic_kind_set,&
                     para_env=para_env,&
-                    dft_control=dft_control,&
-                    error=error)
+                    dft_control=dft_control)
 
     CALL get_atomic_kind_set(atomic_kind_set, natom=natom)
 
@@ -1022,14 +979,10 @@ MODULE qs_rho_atom_methods
           iatom = atom_list(iat)
           !       *** allocate the radial density for each LM,for each atom ***
 
-          ALLOCATE (rho_atom_set(iatom)%rho_rad_h(nspins),STAT=istat)
-          CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
-          ALLOCATE (rho_atom_set(iatom)%rho_rad_s(nspins),STAT=istat)
-          CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
-          ALLOCATE (rho_atom_set(iatom)%vrho_rad_h(nspins),STAT=istat)
-          CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
-          ALLOCATE (rho_atom_set(iatom)%vrho_rad_s(nspins),STAT=istat)
-          CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+          ALLOCATE (rho_atom_set(iatom)%rho_rad_h(nspins))
+          ALLOCATE (rho_atom_set(iatom)%rho_rad_s(nspins))
+          ALLOCATE (rho_atom_set(iatom)%vrho_rad_h(nspins))
+          ALLOCATE (rho_atom_set(iatom)%vrho_rad_s(nspins))
 
           istat = 0
           DO ispin = 1,nspins
@@ -1049,7 +1002,7 @@ MODULE qs_rho_atom_methods
                     rho_atom_set(iatom)%rho_rad_h_d(3,nspins), &
                     rho_atom_set(iatom)%rho_rad_s_d(3,nspins), &
                     STAT=istat)
-          CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+          CPASSERT(istat==0)
 
           IF (paw_atom) THEN
              DO ispin = 1,nspins
@@ -1064,7 +1017,7 @@ MODULE qs_rho_atom_methods
                 ALLOCATE(rho_atom_set(iatom)%cpc_h(ispin)%r_coef(1:nsatbas,1:nsatbas), &
                          rho_atom_set(iatom)%cpc_s(ispin)%r_coef(1:nsatbas,1:nsatbas),&
                          STAT=istat)
-                CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+                CPASSERT(istat==0)
 
                 rho_atom_set(iatom)%cpc_h(ispin)%r_coef = 0.0_dp
                 rho_atom_set(iatom)%cpc_s(ispin)%r_coef = 0.0_dp
@@ -1096,7 +1049,7 @@ MODULE qs_rho_atom_methods
           ALLOCATE (rho_atom_set(iatom)%ga_Vlocal_gb_h(nspins), &
                     rho_atom_set(iatom)%ga_Vlocal_gb_s(nspins), &
                     STAT=istat)
-          CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+          CPASSERT(istat==0)
           IF (paw_atom) THEN
              DO ispin = 1,nspins
                 NULLIFY(rho_atom_set(iatom)%ga_Vlocal_gb_h(ispin)%r_coef)
@@ -1132,30 +1085,26 @@ MODULE qs_rho_atom_methods
 !> \param ispin ...
 !> \param nr ...
 !> \param max_iso_not0 ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE allocate_rho_atom_rad(rho_atom_set,iatom,ispin,nr,max_iso_not0,error)
+  SUBROUTINE allocate_rho_atom_rad(rho_atom_set,iatom,ispin,nr,max_iso_not0)
 
     TYPE(rho_atom_type), DIMENSION(:), &
       POINTER                                :: rho_atom_set
     INTEGER, INTENT(IN)                      :: iatom, ispin, nr, max_iso_not0
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'allocate_rho_atom_rad', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, istat, j
-    LOGICAL                                  :: failure
 
     CALL timeset(routineN,handle)
-    failure = .FALSE.
 
          ALLOCATE(rho_atom_set(iatom)%rho_rad_h(ispin)%r_coef(1:nr,1:max_iso_not0), &
                   rho_atom_set(iatom)%rho_rad_s(ispin)%r_coef(1:nr,1:max_iso_not0), &
                   rho_atom_set(iatom)%vrho_rad_h(ispin)%r_coef(1:nr,1:max_iso_not0), &
                   rho_atom_set(iatom)%vrho_rad_s(ispin)%r_coef(1:nr,1:max_iso_not0), &
                   STAT=istat)
-         CPPrecondition(istat==0,cp_failure_level,routineP,error,failure)
+         CPASSERT(istat==0)
 
          rho_atom_set(iatom)%rho_rad_h(ispin)%r_coef=0.0_dp
          rho_atom_set(iatom)%rho_rad_s(ispin)%r_coef=0.0_dp
@@ -1165,7 +1114,7 @@ MODULE qs_rho_atom_methods
          ALLOCATE(rho_atom_set(iatom)%drho_rad_h(ispin)%r_coef(nr,max_iso_not0),&
                   rho_atom_set(iatom)%drho_rad_s(ispin)%r_coef(nr,max_iso_not0),&
                   STAT=istat)
-         CPPrecondition(istat==0,cp_failure_level,routineP,error,failure)
+         CPASSERT(istat==0)
          rho_atom_set(iatom)%drho_rad_h(ispin)%r_coef = 0.0_dp
          rho_atom_set(iatom)%drho_rad_s(ispin)%r_coef = 0.0_dp
 
@@ -1173,7 +1122,7 @@ MODULE qs_rho_atom_methods
            ALLOCATE(rho_atom_set(iatom)%trho_rad_h(j,ispin)%r_coef(nr,max_iso_not0),&
                     rho_atom_set(iatom)%trho_rad_s(j,ispin)%r_coef(nr,max_iso_not0),&
                     STAT=istat)
-           CPPrecondition(istat==0,cp_failure_level,routineP,error,failure)
+           CPASSERT(istat==0)
            rho_atom_set(iatom)%trho_rad_h(j,ispin)%r_coef = 0.0_dp
            rho_atom_set(iatom)%trho_rad_s(j,ispin)%r_coef = 0.0_dp
          END DO
@@ -1184,7 +1133,7 @@ MODULE qs_rho_atom_methods
             ALLOCATE(rho_atom_set(iatom)%rho_rad_h_d(j,ispin)%r_coef(nr,max_iso_not0), &
                      rho_atom_set(iatom)%rho_rad_s_d(j,ispin)%r_coef(nr,max_iso_not0), &
                      STAT=istat)
-            CPPrecondition(istat==0,cp_failure_level,routineP,error,failure)
+            CPASSERT(istat==0)
             rho_atom_set(iatom)%rho_rad_h_d(j,ispin)%r_coef = 0.0_dp
             rho_atom_set(iatom)%rho_rad_s_d(j,ispin)%r_coef = 0.0_dp
          END DO
@@ -1198,23 +1147,18 @@ MODULE qs_rho_atom_methods
 !> \param rho_atom_set ...
 !> \param iatom ...
 !> \param ispin ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE set2zero_rho_atom_rad(rho_atom_set,iatom,ispin,error)
+  SUBROUTINE set2zero_rho_atom_rad(rho_atom_set,iatom,ispin)
 
 !    TYPE(rho_atom_type), POINTER             :: rho_atom
     TYPE(rho_atom_type), DIMENSION(:), &
       POINTER                                :: rho_atom_set
     INTEGER, INTENT(IN)                      :: iatom, ispin
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'set2zero_rho_atom_rad', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: j
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
 
       rho_atom_set(iatom)%rho_rad_h(ispin)%r_coef = 0.0_dp
       rho_atom_set(iatom)%rho_rad_s(ispin)%r_coef = 0.0_dp

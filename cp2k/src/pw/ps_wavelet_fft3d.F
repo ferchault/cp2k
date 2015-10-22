@@ -9,6 +9,7 @@ MODULE ps_wavelet_fft3d
   
   USE kinds,                           ONLY: dp
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
  IMPLICIT NONE
   PRIVATE
@@ -60,7 +61,7 @@ CONTAINS
        END IF
     END DO loop_data
     WRITE(unit=*,fmt=*) "fourier_dim: ",n," is bigger than ",idata(ndata1024)
-    STOP
+    CPABORT("")
   END SUBROUTINE fourier_dim
 
 !  Copyright (C) Stefan Goedecker, CEA Grenoble, 2002
@@ -206,7 +207,7 @@ CONTAINS
             PRINT*,'VALUE OF',n,'NOT ALLOWED FOR FFT, ALLOWED VALUES ARE:'
   37        FORMAT(15(i5))
             WRITE(*,37) (idata(1,j),j=1,149)
-            STOP
+            CPABORT("")
           ENDIF
           IF (n.eq.idata(1,i)) THEN
             ic=0
@@ -1727,7 +1728,7 @@ CONTAINS
         zout(2,j,nout6)=ui3-vi3
         ENDDO ; ENDDO
      ELSE
-        STOP 'error fftstp'
+        CPABORT("error fftstp")
      ENDIF
 
    END SUBROUTINE fftstp

@@ -18,8 +18,8 @@ MODULE periodic_table
 
   USE kinds,                           ONLY: dp
   USE string_utilities,                ONLY: uppercase
-  USE termination,                     ONLY: stop_program
 #include "cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -100,8 +100,7 @@ CONTAINS
       found = (ielem_found > 0)
     ELSE
       IF (ielem_found < 0) THEN
-        CALL stop_program(routineN,moduleN,__LINE__,&
-                          "Unknown element symbol <"//TRIM(symbol)//"> found.")
+        CPABORT("Unknown element symbol <"//TRIM(symbol)//"> found.")
       END IF
     END IF
 
@@ -1326,7 +1325,7 @@ CONTAINS
 ! *****************************************************************************
 !> \brief ...
 ! *****************************************************************************
-  SUBROUTINE init_eheat
+  SUBROUTINE init_eheat()
     ! All values in kcal/mol
     ! Dummy
     ptable(0) % heat_of_formation = z
@@ -1509,7 +1508,7 @@ CONTAINS
 ! *****************************************************************************
 !> \brief ...
 ! *****************************************************************************
-  SUBROUTINE init_gratio
+  SUBROUTINE init_gratio()
     ! D. M. Granty and R. K. Harris, Encyclopedia of Nuclear
     ! Magnetic Resonance vol. 5 (Wiley, Chichester UK, 1996)
     !

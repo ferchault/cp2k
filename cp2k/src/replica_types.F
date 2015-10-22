@@ -19,9 +19,7 @@
 MODULE replica_types
   USE cp_output_handling,              ONLY: cp_rm_iter_level
   USE cp_para_env,                     ONLY: cp_cart_release,&
-                                             cp_cart_write,&
-                                             cp_para_env_release,&
-                                             cp_para_env_write
+                                             cp_para_env_release
   USE cp_para_types,                   ONLY: cp_para_cart_type,&
                                              cp_para_env_type
   USE cp_result_methods,               ONLY: cp_results_mp_bcast
@@ -31,15 +29,13 @@ MODULE replica_types
                                              f_env_add_defaults,&
                                              f_env_rm_defaults,&
                                              f_env_type
-  USE iso_c_binding
   USE kinds,                           ONLY: default_path_length,&
                                              dp
   USE message_passing,                 ONLY: mp_sum
   USE qs_wf_history_types,             ONLY: qs_wf_history_p_type,&
                                              wfi_release
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -130,77 +126,62 @@ CONTAINS
 ! *****************************************************************************
 !> \brief releases the given replica environment
 !> \param rep_env the replica environment to release
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author fawzi
 !> \note
 !>      here and not in replica_types to allow the use of replica_env_type
 !>      in a force_env (call to destroy_force_env gives circular dep)
 ! *****************************************************************************
-  SUBROUTINE rep_env_release(rep_env,error)
+  SUBROUTINE rep_env_release(rep_env)
     TYPE(replica_env_type), POINTER          :: rep_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'rep_env_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: handle, i, ierr, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: handle, i, ierr
 
-    failure=.FALSE.
     CALL timeset(routineN,handle)
     IF (ASSOCIATED(rep_env)) THEN
-       CPPrecondition(rep_env%ref_count>0,cp_failure_level,routineP,error,failure)
+       CPASSERT(rep_env%ref_count>0)
        rep_env%ref_count=rep_env%ref_count-1
        IF (rep_env%ref_count==0) THEN
           CALL rep_env_destroy_low(rep_env%id_nr,ierr)
           IF (rep_env%f_env_id>0) THEN
              CALL destroy_force_env(rep_env%f_env_id,ierr)
-             CPPostcondition(ierr==0,cp_failure_level,routineP,error,failure)
+             CPASSERT(ierr==0)
           END IF
           IF (ASSOCIATED(rep_env%r)) THEN
-             DEALLOCATE(rep_env%r,stat=stat)
-             CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+             DEALLOCATE(rep_env%r)
           END IF
           IF (ASSOCIATED(rep_env%v)) THEN
-             DEALLOCATE(rep_env%v,stat=stat)
-             CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+             DEALLOCATE(rep_env%v)
           END IF
           IF (ASSOCIATED(rep_env%f)) THEN
-             DEALLOCATE(rep_env%f,stat=stat)
-             CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+             DEALLOCATE(rep_env%f)
           END IF
           IF (ASSOCIATED(rep_env%wf_history)) THEN
              DO i=1,SIZE(rep_env%wf_history)
-                CALL wfi_release(rep_env%wf_history(i)%wf_history,error=error)
+                CALL wfi_release(rep_env%wf_history(i)%wf_history)
              END DO
-             DEALLOCATE(rep_env%wf_history,stat=stat)
-             CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+             DEALLOCATE(rep_env%wf_history)
           END IF
           IF (ASSOCIATED(rep_env%results)) THEN
              DO i=1,SIZE(rep_env%results)
-                CALL cp_result_release(rep_env%results(i)%results,error=error)
+                CALL cp_result_release(rep_env%results(i)%results)
              END DO
-             DEALLOCATE(rep_env%results,stat=stat)
-             CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+             DEALLOCATE(rep_env%results)
           END IF
-          DEALLOCATE(rep_env%local_rep_indices,stat=stat)
-          CPPostcondition(stat==0,cp_warning_level,routineP,error,failure)
-          DEALLOCATE(rep_env%rep_is_local,stat=stat)
-          CPPostcondition(stat==0,cp_warning_level,routineP,error,failure)
+          DEALLOCATE(rep_env%local_rep_indices)
+          DEALLOCATE(rep_env%rep_is_local)
           IF (ASSOCIATED(rep_env%replica_owner)) THEN
-             DEALLOCATE(rep_env%replica_owner,stat=stat)
-             CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+             DEALLOCATE(rep_env%replica_owner)
           END IF
-          DEALLOCATE(rep_env%inter_rep_rank,rep_env%force_rank,stat=stat)
-          CPPostcondition(stat==0,cp_warning_level,routineP,error,failure)
-          CALL cp_cart_release(rep_env%cart,error=error)
-          CALL cp_para_env_release(rep_env%para_env,error=error)
-          CALL cp_para_env_release(rep_env%para_env_f,error=error)
-          CALL cp_para_env_release(rep_env%para_env_inter_rep,error=error)
-          CALL rep_envs_rm_rep_env(rep_env,error=error)
-          DEALLOCATE(rep_env,stat=stat)
-          CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+          DEALLOCATE(rep_env%inter_rep_rank,rep_env%force_rank)
+          CALL cp_cart_release(rep_env%cart)
+          CALL cp_para_env_release(rep_env%para_env)
+          CALL cp_para_env_release(rep_env%para_env_f)
+          CALL cp_para_env_release(rep_env%para_env_inter_rep)
+          CALL rep_envs_rm_rep_env(rep_env)
+          DEALLOCATE(rep_env)
        END IF
     END IF
     NULLIFY(rep_env)
@@ -222,156 +203,52 @@ CONTAINS
 
     INTEGER                                  :: stat
     LOGICAL                                  :: failure
-    TYPE(cp_error_type)                      :: error
     TYPE(cp_logger_type), POINTER            :: logger
     TYPE(f_env_type), POINTER                :: f_env
     TYPE(replica_env_type), POINTER          :: rep_env
 
-    failure=.FALSE.
+    failure = .FALSE.
     rep_env => rep_envs_get_rep_env(rep_env_id,ierr=stat)
-    CALL cp_assert(ASSOCIATED(rep_env),cp_failure_level,cp_assertion_failed,&
-         routineP,"could not find rep_env with id_nr"//cp_to_string(rep_env_id),&
+    IF(.NOT.ASSOCIATED(rep_env))&
+       CPABORT("could not find rep_env with id_nr"//cp_to_string(rep_env_id))
+    CALL f_env_add_defaults(f_env_id=rep_env%f_env_id,f_env=f_env,&
          failure=failure)
-    IF (.NOT. failure) THEN
-       CALL f_env_add_defaults(f_env_id=rep_env%f_env_id,f_env=f_env,&
-            new_error=error, failure=failure)
-       IF (.NOT.failure) THEN
-          logger => cp_error_get_logger(error)
-          CALL cp_rm_iter_level(iteration_info=logger%iter_info,&
-               level_name="REPLICA_EVAL",error=error)
-       END IF
-       CALL f_env_rm_defaults(f_env,error,ierr)
-       CPAssert(ierr==0,cp_failure_level,routineP,error,failure)
-    END IF
+    logger => cp_get_default_logger()
+    CALL cp_rm_iter_level(iteration_info=logger%iter_info,&
+         level_name="REPLICA_EVAL")
+    CALL f_env_rm_defaults(f_env,ierr)
+    CPASSERT(ierr==0)
   END SUBROUTINE rep_env_destroy_low
-
-! *****************************************************************************
-!> \brief retains the given replica environment
-!> \param rep_env the replica environment to retain
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
-!> \author fawzi
-! *****************************************************************************
-  SUBROUTINE rep_env_retain(rep_env,error)
-    TYPE(replica_env_type), POINTER          :: rep_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
-
-    CHARACTER(len=*), PARAMETER :: routineN = 'rep_env_retain', &
-      routineP = moduleN//':'//routineN
-
-    INTEGER                                  :: handle
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
-    CALL timeset(routineN,handle)
-    CPPrecondition(ASSOCIATED(rep_env),cp_failure_level,routineP,error,failure)
-    IF (.NOT. failure) THEN
-       CPPrecondition(rep_env%ref_count>0,cp_failure_level,routineP,error,failure)
-       rep_env%ref_count=rep_env%ref_count+1
-    END IF
-    CALL timestop(handle)
-  END SUBROUTINE rep_env_retain
-
-! *****************************************************************************
-!> \brief writes out information about the rep_env
-!> \param rep_env the replica env to describe
-!> \param unit_nr the unit to write to
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
-!> \author fawzi
-! *****************************************************************************
-  SUBROUTINE rep_env_write(rep_env, unit_nr, error)
-    TYPE(replica_env_type), POINTER          :: rep_env
-    INTEGER, INTENT(in)                      :: unit_nr
-    TYPE(cp_error_type), INTENT(inout)       :: error
-
-    CHARACTER(len=*), PARAMETER :: routineN = 'rep_env_write', &
-      routineP = moduleN//':'//routineN
-
-    INTEGER                                  :: handle
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
-
-    CALL timeset(routineN,handle)
-    IF (ASSOCIATED(rep_env)) THEN
-       WRITE(unit_nr,"('<replica_env, id_nr=',i6,' ref_count=',i6,'> sync_v=',l1,',')")&
-            rep_env%id_nr,rep_env%ref_count, rep_env%sync_v
-       WRITE (unit_nr,"(' f_env_id=',i6,', nrep=',i6,', nparticle=',i8,', ndim=',i8,',')")&
-            rep_env%f_env_id, rep_env%nrep,rep_env%nparticle, rep_env%ndim
-       WRITE (unit_nr,"(' replica_owner=')", advance="no")
-       WRITE (unit_nr,"(10i6)") rep_env%replica_owner
-       WRITE (unit_nr,"(' cart=')", advance="no")
-       CALL cp_cart_write(rep_env%cart,unit_nr,error=error)
-       WRITE (unit_nr,"(' para_env=')", advance="no")
-       CALL cp_para_env_write(rep_env%para_env,unit_nr,error=error)
-       WRITE (unit_nr,"(' para_env_f=')", advance="no")
-       CALL cp_para_env_write(rep_env%para_env_f,unit_nr,error=error)
-       WRITE (unit_nr,"(' para_env_inter_rep=')", advance="no")
-       CALL cp_para_env_write(rep_env%para_env_inter_rep,unit_nr,error=error)
-       WRITE (unit_nr,"(' force_rank=(')", advance="no")
-       WRITE (unit_nr,"(10i6)") rep_env%force_rank
-       WRITE (unit_nr,"(')')")
-       WRITE (unit_nr,"(' inter_rep_rank=(')", advance="no")
-       WRITE (unit_nr,"(10i6)") rep_env%inter_rep_rank
-       WRITE (unit_nr,"(')')")
-       WRITE (unit_nr,"(' force_dim=(')", advance="no")
-       WRITE (unit_nr,"(10i6)") rep_env%force_dim
-       WRITE (unit_nr,"(')')")
-       WRITE (unit_nr,"(' r=(')", advance="no")
-       WRITE (unit_nr,"(3es12.5)") rep_env%r
-       WRITE (unit_nr,"(')')")
-       WRITE (unit_nr,"(' v=(')", advance="no")
-       WRITE (unit_nr,"(3es12.5)") rep_env%v
-       WRITE (unit_nr,"(')')")
-       WRITE (unit_nr,"(' v=(')", advance="no")
-       WRITE (unit_nr,"(3es12.5)") rep_env%f
-       WRITE (unit_nr,"(')')")
-       WRITE (unit_nr,"(' keep_wf_history=',l1,', associated(wf_history)=',l1,',')")&
-            rep_env%keep_wf_history,ASSOCIATED(rep_env%wf_history)
-       WRITE (unit_nr,"('</replica_env>')")
-    ELSE
-       WRITE(unit_nr,"('<replica_env=*null*/>')")
-    END IF
-    CALL timestop(handle)
-  END SUBROUTINE rep_env_write
 
 ! *****************************************************************************
 !> \brief sends the data from each replica to all the other
 !>      on replica j/=i data from replica i overwrites val(:,i)
 !> \param rep_env replica environment
 !> \param vals the values to synchronize (second index runs over replicas)
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author fawzi
 !> \note
 !>      could be optimized: bcast in inter_rep, all2all or shift vs sum
 ! *****************************************************************************
-  SUBROUTINE rep_env_sync(rep_env,vals,error)
+  SUBROUTINE rep_env_sync(rep_env,vals)
     TYPE(replica_env_type), POINTER          :: rep_env
     REAL(kind=dp), DIMENSION(:, :), &
       INTENT(inout)                          :: vals
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'rep_env_sync', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, irep
-    LOGICAL                                  :: failure
 
-    failure=.FALSE.
     CALL timeset(routineN,handle)
-    CPPrecondition(ASSOCIATED(rep_env),cp_failure_level,routineP,error,failure)
-    CPPrecondition(rep_env%ref_count>0,cp_failure_level,routineP,error,failure)
-    CPPrecondition(SIZE(vals,2)==rep_env%nrep,cp_failure_level,routineP,error,failure)
-    IF (.NOT. failure) THEN
-       DO irep=1,rep_env%nrep
-          IF (.NOT.rep_env%rep_is_local(irep)) THEN
-             vals(:,irep)=0._dp
-          END IF
-       END DO
-       CALL mp_sum(vals,rep_env%para_env_inter_rep%group)
-    END IF
+    CPASSERT(ASSOCIATED(rep_env))
+    CPASSERT(rep_env%ref_count>0)
+    CPASSERT(SIZE(vals,2)==rep_env%nrep)
+    DO irep=1,rep_env%nrep
+       IF (.NOT.rep_env%rep_is_local(irep)) THEN
+          vals(:,irep)=0._dp
+       END IF
+    END DO
+    CALL mp_sum(vals,rep_env%para_env_inter_rep%group)
     CALL timestop(handle)
   END SUBROUTINE rep_env_sync
 
@@ -380,38 +257,31 @@ CONTAINS
 !>      in this case the result type is passed
 !> \param rep_env replica environment
 !> \param results is an array of result_types
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author fschiff
 ! *****************************************************************************
-  SUBROUTINE rep_env_sync_results(rep_env,results,error)
+  SUBROUTINE rep_env_sync_results(rep_env,results)
     TYPE(replica_env_type), POINTER          :: rep_env
     TYPE(cp_result_p_type), DIMENSION(:), &
       POINTER                                :: results
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'rep_env_sync_results', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, irep, nrep, source
-    LOGICAL                                  :: failure
 
-    failure=.FALSE.
     CALL timeset(routineN,handle)
     nrep=rep_env%nrep
-    CPPrecondition(ASSOCIATED(rep_env),cp_failure_level,routineP,error,failure)
-    CPPrecondition(rep_env%ref_count>0,cp_failure_level,routineP,error,failure)
-    CPPrecondition(SIZE(results)==rep_env%nrep,cp_failure_level,routineP,error,failure)
-    IF (.NOT. failure) THEN
-       DO irep=1, nrep
+    CPASSERT(ASSOCIATED(rep_env))
+    CPASSERT(rep_env%ref_count>0)
+    CPASSERT(SIZE(results)==rep_env%nrep)
+    DO irep=1, nrep
 !         source = 0
 !         IF (rep_env%rep_is_local(irep)) source = rep_env%para_env_inter_rep%mepos
 !         CALL mp_sum(source, rep_env%para_env_inter_rep%group)
 ! above three lines should be the same as just:
-          source = rep_env%inter_rep_rank(rep_env%replica_owner(irep))
-          CALL cp_results_mp_bcast(results(irep)%results, source, rep_env%para_env_inter_rep, error)
-       END DO
-    END IF
+       source = rep_env%inter_rep_rank(rep_env%replica_owner(irep))
+       CALL cp_results_mp_bcast(results(irep)%results, source, rep_env%para_env_inter_rep)
+    END DO
     CALL timestop(handle)
   END SUBROUTINE rep_env_sync_results
 
@@ -451,45 +321,35 @@ CONTAINS
 ! *****************************************************************************
 !> \brief adds the given rep_env to the list of controlled rep_envs.
 !> \param rep_env the rep_env to add
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author fawzi
 ! *****************************************************************************
-  SUBROUTINE rep_envs_add_rep_env(rep_env,error)
+  SUBROUTINE rep_envs_add_rep_env(rep_env)
     TYPE(replica_env_type), POINTER          :: rep_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'rep_envs_add_rep_env', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: i, stat
-    LOGICAL                                  :: failure
     TYPE(replica_env_p_type), DIMENSION(:), &
       POINTER                                :: new_rep_envs
     TYPE(replica_env_type), POINTER          :: rep_env2
-
-    failure=.FALSE.
 
     IF (ASSOCIATED(rep_env)) THEN
        rep_env2 => rep_envs_get_rep_env(rep_env%id_nr,ierr=stat)
        IF (.NOT.ASSOCIATED(rep_env2)) THEN
           IF (module_initialized) THEN
              IF (.NOT.ASSOCIATED(rep_envs)) THEN
-                ALLOCATE(rep_envs(1),stat=stat)
-                CPPostcondition(stat==0,cp_warning_level,routineP,error,failure)
+                ALLOCATE(rep_envs(1))
              ELSE
-                ALLOCATE(new_rep_envs(SIZE(rep_envs)+1),stat=stat)
-                CPPostcondition(stat==0,cp_fatal_level,routineP,error,failure)
+                ALLOCATE(new_rep_envs(SIZE(rep_envs)+1))
                 DO i=1,SIZE(rep_envs)
                    new_rep_envs(i)%rep_env => rep_envs(i)%rep_env
                 END DO
-                DEALLOCATE(rep_envs,stat=stat)
-                CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+                DEALLOCATE(rep_envs)
                 rep_envs => new_rep_envs
              END IF
           ELSE
-             ALLOCATE(rep_envs(1),stat=stat)
-             CPPostcondition(stat==0,cp_warning_level,routineP,error,failure)
+             ALLOCATE(rep_envs(1))
           END IF
           rep_envs(SIZE(rep_envs))%rep_env => rep_env
           module_initialized=.TRUE.
@@ -500,28 +360,21 @@ CONTAINS
 ! *****************************************************************************
 !> \brief removes the given rep_env to the list of controlled rep_envs.
 !> \param rep_env the rep_env to remove
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author fawzi
 ! *****************************************************************************
-  SUBROUTINE rep_envs_rm_rep_env(rep_env,error)
+  SUBROUTINE rep_envs_rm_rep_env(rep_env)
     TYPE(replica_env_type), POINTER          :: rep_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'rep_envs_rm_rep_env', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, ii, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: i, ii
     TYPE(replica_env_p_type), DIMENSION(:), &
       POINTER                                :: new_rep_envs
 
-    failure=.FALSE.
-
     IF (ASSOCIATED(rep_env)) THEN
-       CPPrecondition(module_initialized,cp_failure_level,routineP,error,failure)
-       ALLOCATE(new_rep_envs(SIZE(rep_envs)-1),stat=stat)
-       CPPostcondition(stat==0,cp_fatal_level,routineP,error,failure)
+       CPASSERT(module_initialized)
+       ALLOCATE(new_rep_envs(SIZE(rep_envs)-1))
        ii=0
        DO i=1,SIZE(rep_envs)
           IF (rep_envs(i)%rep_env%id_nr/=rep_env%id_nr) THEN
@@ -529,56 +382,13 @@ CONTAINS
              new_rep_envs(ii)%rep_env => rep_envs(i)%rep_env
           END IF
        END DO
-       CPPostcondition(ii==SIZE(new_rep_envs),cp_failure_level,routineP,error,failure)
-       DEALLOCATE(rep_envs,stat=stat)
-       CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+       CPASSERT(ii==SIZE(new_rep_envs))
+       DEALLOCATE(rep_envs)
        rep_envs => new_rep_envs
        IF (SIZE(rep_envs)==0) THEN
-          DEALLOCATE(rep_envs,stat=stat)
-          CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+          DEALLOCATE(rep_envs)
        END IF
     END IF
   END SUBROUTINE rep_envs_rm_rep_env
-
-! *****************************************************************************
-!> \brief returns the local index of the replica (-1 if it is not a local replica)
-!> \param rep_env the replica env
-!> \param global_index the global replica index
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
-!> \retval res ...
-!> \author fawzi
-! *****************************************************************************
-  FUNCTION rep_env_local_index(rep_env,global_index,error) RESULT(res)
-    TYPE(replica_env_type), POINTER          :: rep_env
-    INTEGER, INTENT(in)                      :: global_index
-    TYPE(cp_error_type), INTENT(inout)       :: error
-    INTEGER                                  :: res
-
-    CHARACTER(len=*), PARAMETER :: routineN = 'rep_env_local_index', &
-      routineP = moduleN//':'//routineN
-
-    INTEGER                                  :: handle, i
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
-
-    CALL timeset(routineN,handle)
-    CPPrecondition(ASSOCIATED(rep_env),cp_failure_level,routineP,error,failure)
-    CPPrecondition(rep_env%ref_count>0,cp_failure_level,routineP,error,failure)
-    IF (.NOT.failure) THEN
-       res=-1
-       DO i=1,SIZE(rep_env%local_rep_indices)
-          IF (rep_env%local_rep_indices(i)==global_index) THEN
-             res=i
-             EXIT
-          END IF
-       END DO
-       IF (res==-1) THEN
-          PRINT *,routineP," ",global_index," not in ",rep_env%local_rep_indices
-       END IF
-    END IF
-    CALL timestop(handle)
-  END FUNCTION rep_env_local_index
 
 END MODULE replica_types

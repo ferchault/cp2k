@@ -36,8 +36,6 @@ MODULE tmc_types
                                              default_string_length,&
                                              dp
   USE parallel_rng_types,              ONLY: rng_stream_type
-  USE timings,                         ONLY: timeset,&
-                                             timestop
   USE tmc_move_types,                  ONLY: tmc_move_type
   USE tmc_stati,                       ONLY: task_type_MC
   USE tmc_tree_types,                  ONLY: clean_list,&
@@ -45,6 +43,7 @@ MODULE tmc_types
                                              elem_list_type,&
                                              global_tree_type
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -173,31 +172,23 @@ CONTAINS
 ! *****************************************************************************
 !> \brief creates a new structure environment for TMC
 !> \param tmc_env structure with parameters for TMC
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 11.2012
 ! *****************************************************************************
-  SUBROUTINE tmc_env_create(tmc_env,error)
+  SUBROUTINE tmc_env_create(tmc_env)
     TYPE(tmc_env_type), POINTER              :: tmc_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'tmc_env_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: handle, stat
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
+    INTEGER                                  :: handle
 
     CALL timeset(routineN,handle)
 
-    CPPrecondition(.NOT.ASSOCIATED(tmc_env),cp_failure_level,routineP,error,failure)
+    CPASSERT(.NOT.ASSOCIATED(tmc_env))
 
-    ALLOCATE(tmc_env,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(tmc_env)
 
-    ALLOCATE(tmc_env%tmc_comp_set,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(tmc_env%tmc_comp_set)
 
     tmc_env%tmc_comp_set%group_ener_size = 0 
     tmc_env%tmc_comp_set%group_ener_nr   = 0
@@ -216,8 +207,7 @@ CONTAINS
     NULLIFY(tmc_env%m_env, tmc_env%w_env)
 
     ! initialize the parameter section
-    ALLOCATE(tmc_env%params,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(tmc_env%params)
 
     tmc_env%params%task_type = task_type_MC
     ! dim_per_elem can be variable somewhen, 
@@ -249,26 +239,20 @@ CONTAINS
 ! *****************************************************************************
 !> \brief releases the structure environment for TMC
 !> \param tmc_env structure with parameters for TMC
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 11.2012
 ! *****************************************************************************
-  SUBROUTINE tmc_env_release(tmc_env,error)
+  SUBROUTINE tmc_env_release(tmc_env)
     TYPE(tmc_env_type), POINTER              :: tmc_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'tmc_env_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: handle, stat
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
+    INTEGER                                  :: handle
 
     CALL timeset(routineN,handle)
 
-    CPPostcondition(ASSOCIATED(tmc_env),cp_failure_level,routineP,error,failure)
-    CPPostcondition(ASSOCIATED(tmc_env%params),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(tmc_env))
+    CPASSERT(ASSOCIATED(tmc_env%params))
 
     DEALLOCATE(tmc_env%params%sub_box_size)
     IF(ASSOCIATED(tmc_env%params%Temp)) &
@@ -276,24 +260,21 @@ CONTAINS
     IF(ASSOCIATED(tmc_env%params%cell)) &
       DEALLOCATE(tmc_env%params%cell)
     IF(ASSOCIATED(tmc_env%params%atoms)) &
-      CALL deallocate_tmc_atom_type(tmc_env%params%atoms, error)
-    DEALLOCATE(tmc_env%params,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      CALL deallocate_tmc_atom_type(tmc_env%params%atoms)
+    DEALLOCATE(tmc_env%params)
 
-    CALL cp_para_env_release(tmc_env%tmc_comp_set%para_env_sub_group,error)
-    CALL cp_para_env_release(tmc_env%tmc_comp_set%para_env_m_w,error)
+    CALL cp_para_env_release(tmc_env%tmc_comp_set%para_env_sub_group)
+    CALL cp_para_env_release(tmc_env%tmc_comp_set%para_env_m_w)
     IF(ASSOCIATED(tmc_env%tmc_comp_set%para_env_m_first_w))&
-      CALL cp_para_env_release(tmc_env%tmc_comp_set%para_env_m_first_w,error)
+      CALL cp_para_env_release(tmc_env%tmc_comp_set%para_env_m_first_w)
     IF(ASSOCIATED(tmc_env%tmc_comp_set%para_env_m_ana))&
-    CALL cp_para_env_release(tmc_env%tmc_comp_set%para_env_m_ana,error)
+    CALL cp_para_env_release(tmc_env%tmc_comp_set%para_env_m_ana)
     IF(ASSOCIATED(tmc_env%tmc_comp_set%para_env_m_only))&
-    CALL cp_para_env_release(tmc_env%tmc_comp_set%para_env_m_only,error)
+    CALL cp_para_env_release(tmc_env%tmc_comp_set%para_env_m_only)
 
-    DEALLOCATE(tmc_env%tmc_comp_set,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(tmc_env%tmc_comp_set)
 
-    DEALLOCATE(tmc_env,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(tmc_env)
 
     CALL timestop(handle)
 
@@ -302,29 +283,23 @@ CONTAINS
 ! *****************************************************************************
 !> \brief creates a new structure environment for TMC master
 !> \param tmc_env structure with parameters for TMC
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 11.2012
 ! *****************************************************************************
-  SUBROUTINE tmc_master_env_create(tmc_env,error)
+  SUBROUTINE tmc_master_env_create(tmc_env)
     TYPE(tmc_env_type), POINTER              :: tmc_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'tmc_master_env_create', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, i
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
 
     CALL timeset(routineN,handle)
 
-    CPPostcondition(ASSOCIATED(tmc_env),cp_failure_level,routineP,error,failure)
-    CPPostcondition(ASSOCIATED(tmc_env%params),cp_failure_level,routineP,error,failure)
-    CPPostcondition(tmc_env%params%nr_temp.GT.0,cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(tmc_env))
+    CPASSERT(ASSOCIATED(tmc_env%params))
+    CPASSERT(tmc_env%params%nr_temp.GT.0)
     
-    CPPostcondition(.NOT.ASSOCIATED(tmc_env%m_env),cp_failure_level,routineP,error,failure)
+    CPASSERT(.NOT.ASSOCIATED(tmc_env%m_env))
 
     ALLOCATE(tmc_env%m_env)
     NULLIFY(tmc_env%m_env%gt_head, tmc_env%m_env%gt_act, tmc_env%m_env%tree_node_count, &
@@ -368,29 +343,23 @@ CONTAINS
 ! *****************************************************************************
 !> \brief releases the structure environment for TMC master
 !> \param tmc_env structure with parameters for TMC
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 11.2012
 ! *****************************************************************************
-  SUBROUTINE tmc_master_env_release(tmc_env,error)
+  SUBROUTINE tmc_master_env_release(tmc_env)
     TYPE(tmc_env_type), POINTER              :: tmc_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'tmc_master_env_release', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
 
     CALL timeset(routineN,handle)
 
-    CPPrecondition(ASSOCIATED(tmc_env),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(tmc_env%m_env),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(tmc_env))
+    CPASSERT(ASSOCIATED(tmc_env%m_env))
 
-    CALL clean_list(tmc_env%m_env%analysis_list, error)
-    CALL clean_list(tmc_env%m_env%cancelation_list, error)
+    CALL clean_list(tmc_env%m_env%analysis_list)
+    CALL clean_list(tmc_env%m_env%cancelation_list)
 
     DEALLOCATE(tmc_env%m_env%tree_node_count)
     DEALLOCATE(tmc_env%m_env%result_count)
@@ -408,26 +377,20 @@ CONTAINS
 ! *****************************************************************************
 !> \brief creates a new structure environment for TMC master
 !> \param tmc_env structure with parameters for TMC
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 11.2012
 ! *****************************************************************************
-  SUBROUTINE tmc_worker_env_create(tmc_env,error)
+  SUBROUTINE tmc_worker_env_create(tmc_env)
     TYPE(tmc_env_type), POINTER              :: tmc_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'tmc_worker_env_create', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
 
     CALL timeset(routineN,handle)
 
-    CPPrecondition(ASSOCIATED(tmc_env),cp_failure_level,routineP,error,failure)
-    CPPrecondition(.NOT.ASSOCIATED(tmc_env%w_env),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(tmc_env))
+    CPASSERT(.NOT.ASSOCIATED(tmc_env%w_env))
 
     ALLOCATE(tmc_env%w_env)
 
@@ -443,26 +406,20 @@ CONTAINS
 ! *****************************************************************************
 !> \brief releases the structure environment for TMC master
 !> \param tmc_env structure with parameters for TMC
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 11.2012
 ! *****************************************************************************
-  SUBROUTINE tmc_worker_env_release(tmc_env,error)
+  SUBROUTINE tmc_worker_env_release(tmc_env)
     TYPE(tmc_env_type), POINTER              :: tmc_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'tmc_worker_env_release', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
 
     CALL timeset(routineN,handle)
 
-    CPPrecondition(ASSOCIATED(tmc_env),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(tmc_env%w_env),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(tmc_env))
+    CPASSERT(ASSOCIATED(tmc_env%w_env))
 
     DEALLOCATE(tmc_env%w_env)
 
@@ -474,54 +431,44 @@ CONTAINS
 !> \brief creates a structure for storing the atom informations
 !> \param atoms pointer to a list of tmc_atoms_type
 !> \param nr_atoms the amount of atoms
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 01.2013
 ! *****************************************************************************
-  SUBROUTINE allocate_tmc_atom_type(atoms, nr_atoms, error)
+  SUBROUTINE allocate_tmc_atom_type(atoms, nr_atoms)
     TYPE(tmc_atom_type), DIMENSION(:), &
       POINTER                                :: atoms
     INTEGER, INTENT(IN)                      :: nr_atoms
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'allocate_tmc_atom_type', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    CPPrecondition(.NOT.ASSOCIATED(atoms),cp_failure_level,routineP,error,failure)
-    CPPrecondition(nr_atoms.GT.0,cp_failure_level,routineP,error,failure)
+    CPASSERT(.NOT.ASSOCIATED(atoms))
+    CPASSERT(nr_atoms.GT.0)
 
     ALLOCATE(atoms(nr_atoms))
     atoms%name = ""
     atoms%mass = 0.0_dp
 
-    CPPostcondition(ASSOCIATED(atoms),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(atoms))
     
   END SUBROUTINE allocate_tmc_atom_type
 
 ! *****************************************************************************
 !> \brief releases the structure for storing the atom informations
 !> \param atoms pointer to a list of tmc_atoms_type
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 01.2013
 ! *****************************************************************************
-  SUBROUTINE deallocate_tmc_atom_type(atoms, error)
+  SUBROUTINE deallocate_tmc_atom_type(atoms)
     TYPE(tmc_atom_type), DIMENSION(:), &
       POINTER                                :: atoms
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'deallocate_tmc_atom_type', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    CPPrecondition(ASSOCIATED(atoms),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(atoms))
 
     DEALLOCATE(atoms)
 
-    CPPostcondition(.NOT.ASSOCIATED(atoms),cp_failure_level,routineP,error,failure)
+    CPASSERT(.NOT.ASSOCIATED(atoms))
   END SUBROUTINE deallocate_tmc_atom_type
 
 END MODULE tmc_types

@@ -30,9 +30,8 @@ MODULE hfx_screening_methods
                                              qs_environment_type
   USE qs_kind_types,                   ONLY: get_qs_kind,&
                                              qs_kind_type
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -121,7 +120,6 @@ MODULE hfx_screening_methods
 !> \param pmax_atom ...
 !> \param full_density_alpha ...
 !> \param full_density_beta ...
-!> \param image ...
 !> \param natom ...
 !> \param kind_of ...
 !> \param basis_parameter ...
@@ -134,7 +132,7 @@ MODULE hfx_screening_methods
 !>      - updates for each pair of shells the maximum absolute value of p
 ! *****************************************************************************
   SUBROUTINE update_pmax_mat(pmax_set, map_atom_to_kind_atom, set_offset, atomic_block_offset, &
-                             pmax_atom, full_density_alpha, full_density_beta, image, natom, &
+                             pmax_atom, full_density_alpha, full_density_beta, natom, &
                              kind_of,basis_parameter, &
                              nkind, is_assoc_atomic_block)
 
@@ -145,7 +143,7 @@ MODULE hfx_screening_methods
     REAL(dp), DIMENSION(:, :), POINTER       :: pmax_atom, &
                                                 full_density_alpha, &
                                                 full_density_beta
-    INTEGER, INTENT(IN)                      :: image, natom
+    INTEGER, INTENT(IN)                      :: natom
     INTEGER                                  :: kind_of(*)
     TYPE(hfx_basis_type), DIMENSION(:), &
       POINTER                                :: basis_parameter
@@ -155,19 +153,21 @@ MODULE hfx_screening_methods
     CHARACTER(LEN=*), PARAMETER :: routineN = 'update_pmax_mat', &
       routineP = moduleN//':'//routineN
 
-    INTEGER :: act_atomic_block_offset, act_set_offset, handle, i, jatom, &
-      jkind, jset, katom, kind_kind_idx, kkind, kset, mb, mc, nsetb, nsetc
+    INTEGER :: act_atomic_block_offset, act_set_offset, handle, i, img, &
+      jatom, jkind, jset, katom, kind_kind_idx, kkind, kset, mb, mc, nimg, &
+      nsetb, nsetc
     INTEGER, DIMENSION(:), POINTER           :: nsgfb, nsgfc
     REAL(dp)                                 :: pmax_tmp
 
     CALL timeset(routineN,handle)
-
 
     DO i = 1,SIZE(pmax_set)
       pmax_set(i)%p_kind = 0.0_dp
     END DO
 
     pmax_atom = log_zero
+
+    nimg = SIZE(full_density_alpha,2)
 
     DO jatom=1,natom
       jkind = kind_of(jatom)
@@ -186,14 +186,16 @@ MODULE hfx_screening_methods
             IF( katom >= jatom ) THEN
               pmax_tmp = 0.0_dp
               act_set_offset = set_offset(kset,jset,kkind,jkind)
-              i = act_set_offset + act_atomic_block_offset - 1
-              DO mc = 1,nsgfc(kset)
-                DO mb = 1,nsgfb(jset)
-                  pmax_tmp=MAX(pmax_tmp,ABS(full_density_alpha(i,image)))
-                  IF( ASSOCIATED(full_density_beta) ) THEN
-                    pmax_tmp=MAX(pmax_tmp,ABS(full_density_beta(i,image)))
-                  END IF
-                  i=i+1
+              DO img=1,nimg
+                i = act_set_offset + act_atomic_block_offset - 1
+                DO mc = 1,nsgfc(kset)
+                  DO mb = 1,nsgfb(jset)
+                    pmax_tmp=MAX(pmax_tmp,ABS(full_density_alpha(i,img)))
+                    IF( ASSOCIATED(full_density_beta) ) THEN
+                      pmax_tmp=MAX(pmax_tmp,ABS(full_density_beta(i,img)))
+                    END IF
+                    i=i+1
+                  ENDDO
                 ENDDO
               ENDDO
               IF(pmax_tmp == 0.0_dp) THEN
@@ -209,14 +211,16 @@ MODULE hfx_screening_methods
             ELSE
               pmax_tmp = 0.0_dp
               act_set_offset = set_offset(jset,kset,jkind,kkind)
-              DO mc = 1,nsgfc(kset)
-                i = act_set_offset + act_atomic_block_offset -1 + mc -1
-                DO mb = 1,nsgfb(jset)
-                  pmax_tmp=MAX(pmax_tmp,ABS(full_density_alpha(i,image)))
-                  IF( ASSOCIATED(full_density_beta) ) THEN
-                    pmax_tmp=MAX(pmax_tmp,ABS(full_density_beta(i,image)))
-                  END IF
-                  i= i + nsgfc(kset)
+              DO img=1,nimg
+                DO mc = 1,nsgfc(kset)
+                  i = act_set_offset + act_atomic_block_offset -1 + mc -1
+                  DO mb = 1,nsgfb(jset)
+                    pmax_tmp=MAX(pmax_tmp,ABS(full_density_alpha(i,img)))
+                    IF( ASSOCIATED(full_density_beta) ) THEN
+                      pmax_tmp=MAX(pmax_tmp,ABS(full_density_beta(i,img)))
+                    END IF
+                    i= i + nsgfc(kset)
+                  ENDDO
                 ENDDO
               ENDDO
               IF(pmax_tmp == 0.0_dp) THEN
@@ -278,7 +282,6 @@ MODULE hfx_screening_methods
 !> \param n_threads ...
 !> \param i_thread Thread ID of current task
 !> \param p_work ...
-!> \param error ...
 !> \par History
 !>     02.2009 created [Manuel Guidon]
 !> \author Manuel Guidon
@@ -302,7 +305,7 @@ MODULE hfx_screening_methods
   SUBROUTINE calc_screening_functions(qs_env, basis_parameter, lib, potential_parameter, &
                                       coeffs_set, coeffs_kind, coeffs_pgf, radii_pgf,&
                                       max_set, max_pgf, n_threads, i_thread,&
-                                      p_work, error)
+                                      p_work)
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(hfx_basis_type), DIMENSION(:), &
       POINTER                                :: basis_parameter
@@ -317,7 +320,6 @@ MODULE hfx_screening_methods
     INTEGER, INTENT(IN)                      :: max_set, max_pgf, n_threads, &
                                                 i_thread
     REAL(dp), DIMENSION(:), POINTER          :: p_work
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'calc_screening_functions', &
       routineP = moduleN//':'//routineN
@@ -325,12 +327,11 @@ MODULE hfx_screening_methods
     INTEGER                                  :: handle, i, ikind, ipgf, iset, &
                                                 jkind, jpgf, jset, la, lb, &
                                                 ncoa, ncob, nkind, nseta, &
-                                                nsetb, sgfa, sgfb, stat
+                                                nsetb, sgfa, sgfb
     INTEGER, DIMENSION(:), POINTER           :: la_max, la_min, lb_max, &
                                                 lb_min, npgfa, npgfb, nsgfa, &
                                                 nsgfb
     INTEGER, DIMENSION(:, :), POINTER        :: first_sgfa, first_sgfb
-    LOGICAL                                  :: failure
     REAL(dp) :: kind_radius_a, kind_radius_b, max_contraction_a, &
       max_contraction_b, max_val, max_val_temp, R1, ra(3), radius, rb(3), x(2)
     REAL(dp), DIMENSION(:), POINTER          :: set_radius_a, set_radius_b
@@ -344,21 +345,17 @@ MODULE hfx_screening_methods
       POINTER                                :: qs_kind_set
     TYPE(qs_kind_type), POINTER              :: qs_kind
 
-    failure = .FALSE.
-
 !$OMP MASTER
     CALL timeset(routineN,handle)
 !$OMP END MASTER
 
     CALL get_qs_env(qs_env=qs_env,&
-                    qs_kind_set=qs_kind_set,&
-                    error=error)
+                    qs_kind_set=qs_kind_set)
 
     nkind = SIZE(qs_kind_set,1)
 
 !$OMP MASTER
-    ALLOCATE(coeffs_pgf(max_pgf,max_pgf,max_set,max_set,nkind,nkind),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(coeffs_pgf(max_pgf,max_pgf,max_set,max_set,nkind,nkind))
 
     DO ikind = 1,nkind
       DO jkind = 1,nkind
@@ -381,7 +378,7 @@ MODULE hfx_screening_methods
     DO ikind=1,nkind
       NULLIFY(qs_kind,orb_basis)
       qs_kind => qs_kind_set(ikind)
-      CALL get_qs_kind(qs_kind=qs_kind,orb_basis_set=orb_basis)
+      CALL get_qs_kind(qs_kind=qs_kind,basis_set=orb_basis)
       NULLIFY(la_max,la_min,npgfa,zeta)
 
       la_max => basis_parameter(ikind)%lmax
@@ -398,7 +395,7 @@ MODULE hfx_screening_methods
       DO jkind = 1,nkind
         NULLIFY(qs_kind,orb_basis)
         qs_kind => qs_kind_set(jkind)
-        CALL get_qs_kind(qs_kind=qs_kind,orb_basis_set=orb_basis)
+        CALL get_qs_kind(qs_kind=qs_kind,basis_set=orb_basis)
         NULLIFY(lb_max,lb_min,npgfb,zetb)
 
         lb_max => basis_parameter(jkind)%lmax
@@ -464,8 +461,7 @@ MODULE hfx_screening_methods
     END DO
 
 !$OMP MASTER
-    ALLOCATE(coeffs_set(max_set,max_set,nkind,nkind),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(coeffs_set(max_set,max_set,nkind,nkind))
 
     DO ikind = 1,nkind
       DO jkind = 1,nkind
@@ -483,7 +479,7 @@ MODULE hfx_screening_methods
     DO ikind=1,nkind
       NULLIFY(qs_kind,orb_basis)
       qs_kind => qs_kind_set(ikind)
-      CALL get_qs_kind(qs_kind=qs_kind,orb_basis_set=orb_basis)
+      CALL get_qs_kind(qs_kind=qs_kind,basis_set=orb_basis)
       NULLIFY(la_max,la_min,npgfa,zeta)
 !      CALL get_gto_basis_set(gto_basis_set=orb_basis,&
 !                             lmax=la_max,&
@@ -508,7 +504,7 @@ MODULE hfx_screening_methods
       DO jkind = 1,nkind
         NULLIFY(qs_kind,orb_basis)
         qs_kind => qs_kind_set(jkind)
-        CALL get_qs_kind(qs_kind=qs_kind,orb_basis_set=orb_basis)
+        CALL get_qs_kind(qs_kind=qs_kind,basis_set=orb_basis)
         NULLIFY(lb_max,lb_min,npgfb,zetb)
 
         lb_max => basis_parameter(jkind)%lmax
@@ -562,8 +558,7 @@ MODULE hfx_screening_methods
 
     ! ** now kinds
 !$OMP MASTER
-    ALLOCATE(coeffs_kind(nkind,nkind),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(coeffs_kind(nkind,nkind))
 
     DO ikind = 1,nkind
       DO jkind = 1,nkind
@@ -576,7 +571,7 @@ MODULE hfx_screening_methods
     DO ikind=1,nkind
       NULLIFY(qs_kind,orb_basis)
       qs_kind => qs_kind_set(ikind)
-      CALL get_qs_kind(qs_kind=qs_kind,orb_basis_set=orb_basis)
+      CALL get_qs_kind(qs_kind=qs_kind,basis_set=orb_basis)
       NULLIFY(la_max,la_min,npgfa,zeta)
 
       la_max => basis_parameter(ikind)%lmax
@@ -592,7 +587,7 @@ MODULE hfx_screening_methods
       DO jkind = 1,nkind
         NULLIFY(qs_kind,orb_basis)
         qs_kind => qs_kind_set(jkind)
-        CALL get_qs_kind(qs_kind=qs_kind,orb_basis_set=orb_basis)
+        CALL get_qs_kind(qs_kind=qs_kind,basis_set=orb_basis)
         NULLIFY(lb_max,lb_min,npgfb,zetb)
 
         lb_max => basis_parameter(jkind)%lmax
@@ -660,7 +655,6 @@ MODULE hfx_screening_methods
 !> \param eps_schwarz ...
 !> \param n_threads ...
 !> \param i_thread Thread ID of current task
-!> \param error ...
 !> \par History
 !>     02.2009 created [Manuel Guidon]
 !> \author Manuel Guidon
@@ -675,7 +669,7 @@ MODULE hfx_screening_methods
 
   SUBROUTINE calc_pair_dist_radii(qs_env, basis_parameter, &
                                   radii_pgf, max_set, max_pgf, eps_schwarz, &
-                                  n_threads, i_thread, error)
+                                  n_threads, i_thread)
 
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(hfx_basis_type), DIMENSION(:), &
@@ -685,7 +679,6 @@ MODULE hfx_screening_methods
     INTEGER, INTENT(IN)                      :: max_set, max_pgf
     REAL(dp)                                 :: eps_schwarz
     INTEGER, INTENT(IN)                      :: n_threads, i_thread
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'calc_pair_dist_radii', &
       routineP = moduleN//':'//routineN
@@ -693,12 +686,11 @@ MODULE hfx_screening_methods
     INTEGER                                  :: handle, i, ikind, ipgf, iset, &
                                                 jkind, jpgf, jset, la, lb, &
                                                 ncoa, ncob, nkind, nseta, &
-                                                nsetb, sgfa, sgfb, stat
+                                                nsetb, sgfa, sgfb
     INTEGER, DIMENSION(:), POINTER           :: la_max, la_min, lb_max, &
                                                 lb_min, npgfa, npgfb, nsgfa, &
                                                 nsgfb
     INTEGER, DIMENSION(:, :), POINTER        :: first_sgfa, first_sgfb
-    LOGICAL                                  :: failure
     REAL(dp) :: cutoff, ff, max_contraction_a, max_contraction_b, prefactor, &
       R1, R_max, ra(3), rab(3), rab2, radius, rap(3), rb(3), rp(3), x(2), zetp
     REAL(dp), DIMENSION(:, :), POINTER       :: rpgfa, rpgfb, sphi_a, sphi_b, &
@@ -709,22 +701,17 @@ MODULE hfx_screening_methods
       POINTER                                :: qs_kind_set
     TYPE(qs_kind_type), POINTER              :: qs_kind
 
-    failure = .FALSE.
-
-
 !$OMP MASTER
     CALL timeset(routineN,handle)
 !$OMP END MASTER
     CALL get_qs_env(qs_env=qs_env,&
-                    qs_kind_set=qs_kind_set,&
-                    error=error)
+                    qs_kind_set=qs_kind_set)
 
     nkind = SIZE(qs_kind_set,1)
     ra = 0.0_dp
     rb = 0.0_dp
 !$OMP MASTER
-    ALLOCATE(radii_pgf(max_pgf,max_pgf,max_set,max_set,nkind,nkind),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(radii_pgf(max_pgf,max_pgf,max_set,max_set,nkind,nkind))
     DO ikind = 1,nkind
       DO jkind = 1,nkind
         DO iset=1,max_set
@@ -746,7 +733,7 @@ MODULE hfx_screening_methods
     DO ikind=1,nkind
       NULLIFY(qs_kind,orb_basis)
       qs_kind => qs_kind_set(ikind)
-      CALL get_qs_kind(qs_kind=qs_kind,orb_basis_set=orb_basis)
+      CALL get_qs_kind(qs_kind=qs_kind,basis_set=orb_basis)
       NULLIFY(la_max,la_min,npgfa,zeta)
 
       la_max => basis_parameter(ikind)%lmax
@@ -763,7 +750,7 @@ MODULE hfx_screening_methods
       DO jkind = 1,nkind
         NULLIFY(qs_kind,orb_basis)
         qs_kind => qs_kind_set(jkind)
-        CALL get_qs_kind(qs_kind=qs_kind,orb_basis_set=orb_basis)
+        CALL get_qs_kind(qs_kind=qs_kind,basis_set=orb_basis)
         NULLIFY(lb_max,lb_min,npgfb,zetb)
 
         lb_max => basis_parameter(jkind)%lmax

@@ -11,9 +11,8 @@
 ! *****************************************************************************
  MODULE minimax_rpa
   USE kinds,                           ONLY: dp
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "./common/cp_common_uses.f90" 
+#include "./base/base_uses.f90" 
 
    IMPLICIT NONE
 
@@ -34,15 +33,13 @@
 !> \param E_range ...
 !> \param aw ...
 !> \param ierr ...
-!> \param error ...
 !> \author Mauro Del Ben 
 ! *****************************************************************************
-   SUBROUTINE get_rpa_minimax_coeff(k,E_range,aw,ierr,error)
+   SUBROUTINE get_rpa_minimax_coeff(k,E_range,aw,ierr)
     INTEGER                                  :: k
     REAL(KIND=dp)                            :: E_range
     REAL(KIND=dp), ALLOCATABLE, DIMENSION(:) :: aw
     INTEGER                                  :: ierr
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'get_rpa_minimax_coeff', &
       routineP = moduleN//':'//routineN
@@ -50,12 +47,10 @@
     CHARACTER(LEN=512)                       :: error_msg
     CHARACTER(LEN=64)                        :: Rc_cha
     INTEGER                                  :: handle, icoef, kkk
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: L_b, R_transf, Rc, U_b
     REAL(KIND=dp), DIMENSION(13, 2*k)        :: fit_coef
 
      CALL timeset(routineN,handle)
-     failure=.FALSE.
      Rc = E_range
      fit_coef = 0.0_dp
      ierr = 0
@@ -113,21 +108,18 @@
        WRITE(error_msg,'(A,A)') " The range for the Minimax approximation is smaller than the lower bound "//& 
                   "for the required number of quadrature points. The Minimax parameters "//& 
                   "have been optimized for the lower bound of: ",TRIM(Rc_cha) 
-       CALL cp_assert(.FALSE.,cp_warning_level,cp_assertion_failed,routineP,&
-                      error_msg,error,only_ionode=.TRUE.)
+       CPWARN(error_msg)
      END IF
      IF( E_range > Rc ) THEN
        WRITE(error_msg,'(A,A)') " The range for the Minimax approximation exceeds the upper bound "//& 
                   "for the required number of quadrature points. The Minimax parameters "//& 
                   "have been optimized for the upper bound of: ",TRIM(Rc_cha) 
-       CALL cp_assert(.FALSE.,cp_warning_level,cp_assertion_failed,routineP,&
-                      error_msg,error,only_ionode=.TRUE.)
+       CPWARN(error_msg)
      END IF
      IF( ierr < 0 ) THEN
-       CALL cp_assert(.FALSE.,cp_warning_level,cp_assertion_failed,routineP,&
-            "The required number of quadrature point exceeds the maximum available. "//& 
-            "The number of quadrature point has been reset to 20.", & 
-            error,only_ionode=.TRUE.)
+       error_msg = "The required number of quadrature point exceeds the maximum available. "//&
+                   "The number of quadrature point has been reset to 20."
+       CPWARN(error_msg)
      END IF
 
      R_transf=SQRT(L_b/Rc)

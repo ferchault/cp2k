@@ -13,11 +13,10 @@
 ! *****************************************************************************
 MODULE cp_files
 
-  
   USE kinds,                           ONLY: default_path_length
   USE machine,                         ONLY: default_input_unit,&
                                              default_output_unit
-  USE termination,                     ONLY: stop_program
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -64,13 +63,11 @@ CONTAINS
     INTEGER                                  :: ic, islot, nc
 
     IF ((unit_number < 1).OR.(unit_number > max_unit_number)) THEN
-       CALL stop_program(routineN,moduleN,__LINE__,&
-                         "An invalid logical unit number was specified.")
+       CPABORT("An invalid logical unit number was specified.")
     END IF
 
     IF (LEN_TRIM(file_name) == 0) THEN
-       CALL stop_program(routineN,moduleN,__LINE__,&
-                         "No valid file name was specified")
+       CPABORT("No valid file name was specified")
     END IF
 
     nc = SIZE(preconnected)
@@ -83,9 +80,9 @@ CONTAINS
              RETURN
           ELSE
              CALL print_preconnection_list()
-             CALL stop_program(routineN,moduleN,__LINE__,&
-                               "Attempt to connect the already connected file <"//&
-                               TRIM(ADJUSTL(file_name))//"> to another unit")
+             CALL cp_abort(__LOCATION__,&
+                           "Attempt to connect the already connected file <"//&
+                           TRIM(ADJUSTL(file_name))//"> to another unit")
           END IF
        END IF
     END DO
@@ -101,8 +98,7 @@ CONTAINS
 
     IF (islot == -1) THEN
        CALL print_preconnection_list()
-       CALL stop_program(routineN,moduleN,__LINE__,&
-                         "No free slot found in the list of preconnected units")
+       CPABORT("No free slot found in the list of preconnected units")
     END IF
 
     preconnected(islot)%file_name = TRIM(ADJUSTL(file_name))
@@ -143,12 +139,12 @@ CONTAINS
        WRITE (UNIT=message,FMT="(A,I0,A,I0,A)")&
          "An error occurred inquiring the unit with the number ",unit_number,&
          " (IOSTAT = ",istat,")"
-       CALL stop_program(routineN,moduleN,__LINE__,TRIM(message))
+       CPABORT(TRIM(message))
     ELSE IF (.NOT.exists) THEN
        WRITE (UNIT=message,FMT="(A,I0,A)")&
          "The specified unit number ",unit_number,&
          " cannot be closed, because it does not exist."
-       CALL stop_program(routineN,moduleN,__LINE__,TRIM(message))
+       CPABORT(TRIM(message))
     END IF
 
     ! Close the specified file
@@ -158,12 +154,12 @@ CONTAINS
        IF (unit_number == default_input_unit) THEN
           WRITE (UNIT=message,FMT="(A,I0)")&
             "Attempt to close the default input unit number ",unit_number
-          CALL stop_program(routineN,moduleN,__LINE__,TRIM(message))
+          CPABORT(TRIM(message))
        END IF
        IF (unit_number == default_output_unit) THEN
           WRITE (UNIT=message,FMT="(A,I0)")&
             "Attempt to close the default output unit number ",unit_number
-          CALL stop_program(routineN,moduleN,__LINE__,TRIM(message))
+          CPABORT(TRIM(message))
        END IF
        ! Define status after closing the file
        IF (PRESENT(file_status)) THEN
@@ -177,7 +173,7 @@ CONTAINS
           WRITE (UNIT=message,FMT="(A,I0,A,I0,A)")&
             "An error occurred inquiring the unit with the number ",unit_number,&
             " (IOSTAT = ",istat,")"
-          CALL stop_program(routineN,moduleN,__LINE__,TRIM(message))
+          CPABORT(TRIM(message))
        END IF
        ! Manage preconnections
        IF (keep_file_connection) THEN
@@ -189,7 +185,7 @@ CONTAINS
              WRITE (UNIT=message,FMT="(A,I0,A,I0,A)")&
                "An error occurred closing the file with the logical unit number ",&
                unit_number," (IOSTAT = ",istat,")"
-             CALL stop_program(routineN,moduleN,__LINE__,TRIM(message))
+             CPABORT(TRIM(message))
           END IF
        END IF
     END IF
@@ -225,10 +221,10 @@ CONTAINS
              EXIT
           ELSE
              CALL print_preconnection_list()
-             CALL stop_program(routineN,moduleN,__LINE__,&
-                               "Attempt to disconnect the file <"//&
-                               TRIM(ADJUSTL(file_name))//&
-                               "> from an unlisted unit")
+             CALL cp_abort(__LOCATION__,&
+                           "Attempt to disconnect the file <"//&
+                           TRIM(ADJUSTL(file_name))//&
+                           "> from an unlisted unit")
           END IF
        END IF
     END DO
@@ -356,7 +352,7 @@ CONTAINS
        IF (form_string=="UNFORMATTED") THEN
           WRITE (UNIT=message,FMT="(A)")&
             "The PAD specifier is not allowed for an UNFORMATTED file"
-          CALL stop_program(routineN,moduleN,__LINE__,TRIM(message))
+          CPABORT(TRIM(message))
        END IF
     ELSE
        pad_string = "YES"
@@ -391,14 +387,14 @@ CONTAINS
        WRITE (UNIT=message,FMT="(A,I0,A)")&
          "An error occurred inquiring the file <"//TRIM(real_file_name)//&
          "> (IOSTAT = ",istat,")"
-       CALL stop_program(routineN,moduleN,__LINE__,TRIM(message))
+       CPABORT(TRIM(message))
     ELSE IF (status_string == "OLD") THEN
        IF (.NOT.exists) THEN
           WRITE (UNIT=message,FMT="(A)")&
             "The specified OLD file <"//TRIM(ADJUSTL(real_file_name))//&
             "> cannot be opened. It does not exist. "//&
             "Data directory path: "//TRIM(get_data_dir())
-          CALL stop_program(routineN,moduleN,__LINE__,TRIM(message))
+          CPABORT(TRIM(message))
        END IF
     END IF
 
@@ -408,22 +404,22 @@ CONTAINS
                 ACTION=current_action,FORM=current_form)
        IF (TRIM(position_string) == "REWIND") REWIND (UNIT=unit_number)
        IF (TRIM(status_string) == "NEW") THEN
-          CALL stop_program(routineN,moduleN,__LINE__,&
-                            "Attempt to re-open the existing OLD file <"//&
-                            TRIM(real_file_name)//"> with status attribute NEW.")
+          CALL cp_abort(__LOCATION__,&
+                        "Attempt to re-open the existing OLD file <"//&
+                        TRIM(real_file_name)//"> with status attribute NEW.")
        END IF
        IF (TRIM(current_form) /= TRIM(form_string)) THEN
-          CALL stop_program(routineN,moduleN,__LINE__,&
-                            "Attempt to re-open the existing "//&
-                            TRIM(current_form)//" file <"//TRIM(real_file_name)//&
-                            "> as "//TRIM(form_string)//" file.")
+          CALL cp_abort(__LOCATION__,&
+                        "Attempt to re-open the existing "//&
+                        TRIM(current_form)//" file <"//TRIM(real_file_name)//&
+                        "> as "//TRIM(form_string)//" file.")
        END IF
        IF (TRIM(current_action) /= TRIM(action_string)) THEN
-          CALL stop_program(routineN,moduleN,__LINE__,&
-                            "Attempt to re-open the existing file <"//&
-                            TRIM(real_file_name)//"> with the modified ACTION attribute "//&
-                            TRIM(action_string)//". The current ACTION attribute is "//&
-                            TRIM(current_action)//".")
+          CALL cp_abort(__LOCATION__,&
+                        "Attempt to re-open the existing file <"//&
+                        TRIM(real_file_name)//"> with the modified ACTION attribute "//&
+                        TRIM(action_string)//". The current ACTION attribute is "//&
+                        TRIM(current_action)//".")
        END IF
     ELSE
        ! Find an unused unit number
@@ -436,7 +432,7 @@ CONTAINS
           WRITE (UNIT=message,FMT="(A)")&
             "Cannot open the file <"//TRIM(ADJUSTL(real_file_name))//&
             ">, because no unused logical unit number could be obtained."
-          CALL stop_program(routineN,moduleN,__LINE__,TRIM(message))
+          CPABORT(TRIM(message))
        END IF
        IF (TRIM(form_string)== "FORMATTED") THEN
           OPEN (UNIT=unit_number,&
@@ -462,7 +458,7 @@ CONTAINS
           WRITE (UNIT=message,FMT="(A,I0,A,I0,A)")&
             "An error occurred opening the file <"//TRIM(ADJUSTL(real_file_name))//&
             "> with the unit number ",unit_number," (IOSTAT = ",istat,")"
-          CALL stop_program(routineN,moduleN,__LINE__,TRIM(message))
+          CPABORT(TRIM(message))
        END IF
     END IF
 
@@ -479,7 +475,7 @@ CONTAINS
        WRITE (UNIT=debug_unit,FMT="(T3,A)") "FORM    : "//TRIM(ADJUSTL(form_string))
        WRITE (UNIT=debug_unit,FMT="(T3,A)") "ACTION  : "//TRIM(ADJUSTL(action_string))
        WRITE (UNIT=debug_unit,FMT="(T2,A)") "END DEBUG "//TRIM(ADJUSTL(routineN))
-       CALL print_preconnection_list()
+       CALL print_preconnection_list(debug_unit)
     END IF
 
   END SUBROUTINE open_file
@@ -585,33 +581,43 @@ CONTAINS
 
 ! *****************************************************************************
 !> \brief Print the list of preconnected units
+!> \param output_unit which unit to print to (optional)
 !> \par History
 !>      - Creation (22.02.2011,MK)
 !> \author Matthias Krack (MK)
 ! *****************************************************************************
-  SUBROUTINE print_preconnection_list()
+  SUBROUTINE print_preconnection_list(output_unit)
+    INTEGER, INTENT(IN), OPTIONAL            :: output_unit
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'print_preconnection_list', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: ic, nc
+    INTEGER                                  :: ic, nc, unit
+
+    IF (PRESENT(output_unit)) THEN
+      unit = output_unit
+    ELSE
+      unit = default_output_unit
+    ENDIF
 
     nc = SIZE(preconnected)
 
-    WRITE (UNIT=default_output_unit,FMT="(A,/,A)")&
-      " LIST OF PRECONNECTED LOGICAL UNITS",&
-      "  Slot   Unit number   File name"
-    DO ic=1,nc
-       IF (preconnected(ic)%unit_number > 0) THEN
-          WRITE (UNIT=default_output_unit,FMT="(I6,3X,I6,8X,A)")&
-            ic,preconnected(ic)%unit_number,&
-            TRIM(ADJUSTL(preconnected(ic)%file_name))
-       ELSE
-          WRITE (UNIT=default_output_unit,FMT="(I6,17X,A)")&
-            ic,"UNUSED"
-       END IF
-    END DO
+    IF (output_unit > 0) THEN
 
+       WRITE (UNIT=output_unit,FMT="(A,/,A)")&
+         " LIST OF PRECONNECTED LOGICAL UNITS",&
+         "  Slot   Unit number   File name"
+       DO ic=1,nc
+          IF (preconnected(ic)%unit_number > 0) THEN
+             WRITE (UNIT=output_unit,FMT="(I6,3X,I6,8X,A)")&
+               ic,preconnected(ic)%unit_number,&
+               TRIM(ADJUSTL(preconnected(ic)%file_name))
+          ELSE
+             WRITE (UNIT=output_unit,FMT="(I6,17X,A)")&
+               ic,"UNUSED"
+          END IF
+       END DO
+    END IF
   END SUBROUTINE print_preconnection_list
 
 END MODULE cp_files

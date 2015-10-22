@@ -73,11 +73,10 @@ MODULE topology_pdb
   USE string_table,                    ONLY: id2str,&
                                              s2s,&
                                              str2id
-  USE timings,                         ONLY: timeset,&
-                                             timestop
   USE topology_types,                  ONLY: atom_info_type,&
                                              topology_parameters_type
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -93,15 +92,13 @@ CONTAINS
 !> \param topology ...
 !> \param para_env ...
 !> \param subsys_section ...
-!> \param error ...
 !> \par History
 !>      TLAINO 05.2004 - Added the TER option to use different non-bonded molecules
 ! *****************************************************************************
-  SUBROUTINE read_coordinate_pdb (topology,para_env,subsys_section,error)
+  SUBROUTINE read_coordinate_pdb (topology,para_env,subsys_section)
     TYPE(topology_parameters_type)           :: topology
     TYPE(cp_para_env_type), POINTER          :: para_env
     TYPE(section_vals_type), POINTER         :: subsys_section
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'read_coordinate_pdb', &
       routineP = moduleN//':'//routineN
@@ -118,12 +115,12 @@ CONTAINS
     TYPE(cp_parser_type), POINTER            :: parser
 
     NULLIFY(parser, logger)
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
     iw = cp_print_key_unit_nr(logger,subsys_section,"PRINT%TOPOLOGY_INFO/PDB_INFO",&
-         extension=".subsysLog",error=error)
+         extension=".subsysLog")
     CALL timeset(routineN,handle)
 
-    pfactor = section_get_rval(subsys_section,"TOPOLOGY%MEMORY_PROGRESSION_FACTOR",error)
+    pfactor = section_get_rval(subsys_section,"TOPOLOGY%MEMORY_PROGRESSION_FACTOR")
     atom_info => topology%atom_info
     CALL reallocate(atom_info%id_molname,1,nblock)
     CALL reallocate(atom_info%id_resname,1,nblock)
@@ -144,14 +141,14 @@ CONTAINS
     id0 = str2id(s2s(""))
     topology%molname_generated = .FALSE.
 
-    CALL parser_create(parser,topology%coord_file_name,para_env=para_env,error=error)
+    CALL parser_create(parser,topology%coord_file_name,para_env=para_env)
 
     natom         = 0
     inum_mol      = 1
     WRITE (UNIT=root_mol_name,FMT='(A3,I0)') "MOL",inum_mol
     DO
        line = ""
-       CALL parser_get_next_line(parser,1,at_end=my_end,error=error)
+       CALL parser_get_next_line(parser,1,at_end=my_end)
        IF(my_end) EXIT
        line   = parser%input_line(1:default_path_length)
        record = line(1:6)
@@ -230,9 +227,9 @@ CONTAINS
                ADJUSTL(TRIM(id2str(atom_info%id_molname(natom)))),&
                ADJUSTR(TRIM(id2str(atom_info%id_element(natom))))
           END IF
-          atom_info%r(1,natom) = cp_unit_to_cp2k(atom_info%r(1,natom),"angstrom",error=error)
-          atom_info%r(2,natom) = cp_unit_to_cp2k(atom_info%r(2,natom),"angstrom",error=error)
-          atom_info%r(3,natom) = cp_unit_to_cp2k(atom_info%r(3,natom),"angstrom",error=error)
+          atom_info%r(1,natom) = cp_unit_to_cp2k(atom_info%r(1,natom),"angstrom")
+          atom_info%r(2,natom) = cp_unit_to_cp2k(atom_info%r(2,natom),"angstrom")
+          atom_info%r(3,natom) = cp_unit_to_cp2k(atom_info%r(3,natom),"angstrom")
        CASE ("TER")
           inum_mol = inum_mol + 1
           WRITE (UNIT=root_mol_name,FMT='(A3,I0)') "MOL",inum_mol
@@ -243,7 +240,7 @@ CONTAINS
        CASE DEFAULT
        END SELECT
     END DO
-    CALL parser_release(parser,error=error)
+    CALL parser_release(parser)
 
     CALL reallocate(atom_info%id_molname,1,natom)
     CALL reallocate(atom_info%id_resname,1,natom)
@@ -267,7 +264,7 @@ CONTAINS
 
     topology%natoms = natom
     CALL cp_print_key_finished_output(iw,logger,subsys_section,&
-         "PRINT%TOPOLOGY_INFO/PDB_INFO",error=error)
+         "PRINT%TOPOLOGY_INFO/PDB_INFO")
     CALL timestop(handle)
 
   END SUBROUTINE read_coordinate_pdb
@@ -277,14 +274,12 @@ CONTAINS
 !> \param file_unit ...
 !> \param topology ...
 !> \param subsys_section ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE write_coordinate_pdb (file_unit,topology,subsys_section,error)
+  SUBROUTINE write_coordinate_pdb (file_unit,topology,subsys_section)
 
     INTEGER, INTENT(IN)                      :: file_unit
     TYPE(topology_parameters_type)           :: topology
     TYPE(section_vals_type), POINTER         :: subsys_section
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'write_coordinate_pdb', &
       routineP = moduleN//':'//routineN
@@ -304,26 +299,23 @@ CONTAINS
     TYPE(section_vals_type), POINTER         :: print_key
 
     NULLIFY (logger)
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
     iw = cp_print_key_unit_nr(logger,subsys_section,"PRINT%TOPOLOGY_INFO/PDB_INFO",&
-         extension=".subsysLog",error=error)
-    print_key => section_vals_get_subs_vals(subsys_section,"TOPOLOGY%DUMP_PDB",error=error)
+         extension=".subsysLog")
+    print_key => section_vals_get_subs_vals(subsys_section,"TOPOLOGY%DUMP_PDB")
     CALL timeset(routineN,handle)
 
-    CALL section_vals_val_get(print_key,"CHARGE_OCCUP",l_val=charge_occup,error=error)
-    CALL section_vals_val_get(print_key,"CHARGE_BETA",l_val=charge_beta,error=error)
-    CALL section_vals_val_get(print_key,"CHARGE_EXTENDED",l_val=charge_extended,error=error)
+    CALL section_vals_val_get(print_key,"CHARGE_OCCUP",l_val=charge_occup)
+    CALL section_vals_val_get(print_key,"CHARGE_BETA",l_val=charge_beta)
+    CALL section_vals_val_get(print_key,"CHARGE_EXTENDED",l_val=charge_extended)
     i = COUNT((/charge_occup,charge_beta,charge_extended/))
-    CALL cp_assert((i <= 1),cp_failure_level,cp_assertion_failed,routineP,&
-                   "Either only CHARGE_OCCUP, CHARGE_BETA, or CHARGE_EXTENDED can be selected, "//&
-CPSourceFileRef,&
-                   only_ionode=.TRUE.)
+    IF(i>1)&
+      CPABORT("Either only CHARGE_OCCUP, CHARGE_BETA, or CHARGE_EXTENDED can be selected")
 
     atom_info => topology%atom_info
     record = cp_print_key_generate_filename(logger,print_key,&
                                             extension=".pdb",&
-                                            my_local=.FALSE.,&
-                                            error=error)
+                                            my_local=.FALSE.)
 
     IF (iw > 0) WRITE (UNIT=iw,FMT=*) "    Writing out PDB file ",TRIM(record)
 
@@ -376,12 +368,9 @@ CPSourceFileRef,&
            WRITE (UNIT=line(61:66),FMT="(F6.2)") 0.0_dp
        END IF
        IF (ASSOCIATED(atom_info%atm_charge)) THEN
-          CALL cp_assert(.NOT.(ANY((/charge_occup,charge_beta,charge_extended/)).AND.&
-                         (atom_info%atm_charge(i) == -HUGE(0.0_dp))),&
-                         cp_failure_level,cp_assertion_failed,routineP,&
-                         "No atomic charges found yet (after the topology setup), "//&
-CPSourceFileRef,&
-                         only_ionode=.TRUE.)
+          IF(ANY((/charge_occup,charge_beta,charge_extended/)).AND.&
+            (atom_info%atm_charge(i) == -HUGE(0.0_dp)))&
+               CPABORT("No atomic charges found yet (after the topology setup)")
           IF (charge_occup) THEN
              WRITE (UNIT=line(55:60),FMT="(F6.2)") atom_info%atm_charge(i)
           ELSE IF (charge_beta) THEN
@@ -401,7 +390,7 @@ CPSourceFileRef,&
     IF (iw > 0) WRITE (UNIT=iw,FMT=*) "  Exiting "//routineN
 
     CALL cp_print_key_finished_output(iw,logger,subsys_section,&
-         "PRINT%TOPOLOGY_INFO/PDB_INFO",error=error)
+         "PRINT%TOPOLOGY_INFO/PDB_INFO")
 
     CALL timestop(handle)
 

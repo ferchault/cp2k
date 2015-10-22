@@ -35,7 +35,6 @@ MODULE mp2_direct_method
        hfx_screen_coeff_type, hfx_screening_type, hfx_type, log_zero, &
        pair_set_list_type
   USE input_constants,                 ONLY: do_mp2_potential_TShPSC
-  USE input_section_types,             ONLY: section_vals_type
   USE kinds,                           ONLY: dp,&
                                              int_8
   USE mathconstants,                   ONLY: zero
@@ -54,9 +53,8 @@ MODULE mp2_direct_method
                                              qs_rho_type
   USE t_sh_p_s_c,                      ONLY: free_C0,&
                                              init
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -77,7 +75,6 @@ MODULE mp2_direct_method
 !> \param mp2_env ...
 !> \param qs_env ...
 !> \param rho density matrix
-!> \param hfx_section input_section HFX
 !> \param para_env ...
 !> \param mp2_biel ...
 !> \param dimen ...
@@ -94,22 +91,19 @@ MODULE mp2_direct_method
 !> \param C_beta ...
 !> \param Auto_beta ...
 !> \param Integ_MP2 ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      06.2011 created [Mauro Del Ben]
 !> \author Mauro Del Ben
 ! *****************************************************************************
-  SUBROUTINE mp2_canonical_direct_single_batch(Emp2,Emp2_Cou,Emp2_ex,mp2_env,qs_env,rho,hfx_section,para_env,&
+  SUBROUTINE mp2_canonical_direct_single_batch(Emp2,Emp2_Cou,Emp2_ex,mp2_env,qs_env,rho,para_env,&
                                                mp2_biel,dimen,C,Auto,i_batch_start,Ni_occupied,&
                                                occupied,elements_ij_proc, ij_list_proc,Nj_occupied,j_batch_start,&
-                                               occupied_beta,C_beta,Auto_beta,Integ_MP2,error)
+                                               occupied_beta,C_beta,Auto_beta,Integ_MP2)
 
     REAL(KIND=dp)                            :: Emp2, Emp2_Cou, Emp2_ex
     TYPE(mp2_type), POINTER                  :: mp2_env
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(qs_rho_type), POINTER               :: rho
-    TYPE(section_vals_type), POINTER         :: hfx_section
     TYPE(cp_para_env_type), POINTER          :: para_env
     TYPE(mp2_biel_type)                      :: mp2_biel
     INTEGER                                  :: dimen
@@ -126,7 +120,6 @@ MODULE mp2_direct_method
       OPTIONAL                               :: Auto_beta
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :, :, :), OPTIONAL        :: Integ_MP2
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: &
       routineN = 'mp2_canonical_direct_single_batch', &
@@ -147,7 +140,7 @@ MODULE mp2_direct_method
       proc_num, proc_receive, proc_send, R_offset_rec, Rsize_rec, &
       S_offset_rec, same_size_kl_index, sgfb, sphi_a_u1, sphi_a_u2, &
       sphi_a_u3, sphi_b_u1, sphi_b_u2, sphi_b_u3, sphi_c_u1, sphi_c_u2, &
-      sphi_c_u3, sphi_d_u1, sphi_d_u2, sphi_d_u3, Ssize_rec, stat, step_size, &
+      sphi_c_u3, sphi_d_u1, sphi_d_u2, sphi_d_u3, Ssize_rec, step_size, &
       total_num_RS_task, unit_id
     INTEGER(int_8) :: estimate_to_store_int, max_val_memory, mem_eris, &
       mem_eris_disk, mem_max_val, n_processes, ncpu, neris_disk, &
@@ -174,7 +167,7 @@ MODULE mp2_direct_method
     INTEGER, SAVE                            :: shm_number_of_p_entries
     LOGICAL                                  :: alpha_beta_case, &
                                                 copy_integrals, do_periodic, &
-                                                failure, treat_lsd_in_core
+                                                treat_lsd_in_core
     LOGICAL, DIMENSION(:, :), POINTER        :: shm_atomic_pair_list
     REAL(KIND=dp) :: cartesian_estimate, coeffs_kind_max0, &
       compression_factor, compression_factor_disk, cost_tmp, eps_schwarz, &
@@ -256,15 +249,14 @@ MODULE mp2_direct_method
 
     irep=1
 
-    CALL qs_rho_get(rho, rho_ao=rho_ao, error=error)
+    CALL qs_rho_get(rho, rho_ao=rho_ao)
 
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
 
     CALL get_qs_env(qs_env,&
                     atomic_kind_set=atomic_kind_set,&
                     cell=cell,&
-                    dft_control=dft_control,&
-                    error=error)
+                    dft_control=dft_control)
 
     !! Calculate l_max used in fgamma , because init_md_ftable is definitely not thread safe
     nkind = SIZE(atomic_kind_set,1)
@@ -317,8 +309,7 @@ MODULE mp2_direct_method
       ! ** Rebuild neighbor lists in case the cell has changed (i.e. NPT MD)
       actual_x_data%periodic_parameter%number_of_shells = actual_x_data%periodic_parameter%mode
       CALL hfx_create_neighbor_cells(actual_x_data, actual_x_data%periodic_parameter%number_of_shells_from_input,&
-                                     cell, i_thread, &
-                                     error)
+                                     cell, i_thread)
     END IF
 
 
@@ -361,13 +352,11 @@ MODULE mp2_direct_method
     max_set = basis_info%max_set
     CALL get_qs_env(qs_env=qs_env,&
                     atomic_kind_set=atomic_kind_set,&
-                    particle_set=particle_set,&
-                    error=error)
+                    particle_set=particle_set)
 
     natom = SIZE(particle_set,1)
 
-    ALLOCATE(kind_of(natom),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(kind_of(natom))
 
     CALL get_atomic_kind_set(atomic_kind_set=atomic_kind_set,&
                              kind_of=kind_of)
@@ -387,25 +376,18 @@ MODULE mp2_direct_method
       ENDDO
     ENDDO
     !! Allocate the arrays for the integrals.
-    ALLOCATE(primitive_integrals(nsgf_max**4),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(primitive_integrals(nsgf_max**4))
     primitive_integrals = 0.0_dp
 
-    ALLOCATE(ee_work(ncos_max**4),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(ee_work2(ncos_max**4),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(ee_buffer1(ncos_max**4),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(ee_buffer2(ncos_max**4),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(ee_primitives_tmp(nsgf_max**4),STAT=stat) ! XXXXX could be wrong
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(ee_work(ncos_max**4))
+    ALLOCATE(ee_work2(ncos_max**4))
+    ALLOCATE(ee_buffer1(ncos_max**4))
+    ALLOCATE(ee_buffer2(ncos_max**4))
+    ALLOCATE(ee_primitives_tmp(nsgf_max**4))
 
     nspins = dft_control%nspins
 
-    ALLOCATE(max_contraction(max_set,natom),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(max_contraction(max_set,natom))
 
     max_contraction=0.0_dp
     max_pgf = 0
@@ -430,20 +412,14 @@ MODULE mp2_direct_method
 
     ! ** Allocate buffers for pgf_lists
     nneighbors = SIZE(actual_x_data%neighbor_cells)
-    ALLOCATE(pgf_list_ij(max_pgf**2), STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(pgf_list_kl(max_pgf**2), STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(pgf_product_list(nneighbors**3), STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(nimages(max_pgf**2),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(pgf_list_ij(max_pgf**2))
+    ALLOCATE(pgf_list_kl(max_pgf**2))
+    ALLOCATE(pgf_product_list(nneighbors**3))
+    ALLOCATE(nimages(max_pgf**2))
 
     DO i=1,max_pgf**2
-      ALLOCATE(pgf_list_ij(i)%image_list(nneighbors), STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-      ALLOCATE(pgf_list_kl(i)%image_list(nneighbors), STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(pgf_list_ij(i)%image_list(nneighbors))
+      ALLOCATE(pgf_list_kl(i)%image_list(nneighbors))
     END DO
 
     ! ** Set pointers
@@ -473,14 +449,13 @@ MODULE mp2_direct_method
     !! Parameters related to the potential 1/r, erf(wr)/r, erfc(wr/r)
     potential_parameter = actual_x_data%potential_parameter
 
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
 
 
     private_lib = actual_x_data%lib
 
     !! Helper array to map local basis function indeces to global ones
-    ALLOCATE(last_sgf_global(0:natom),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(last_sgf_global(0:natom))
     last_sgf_global(0)=0
     DO iatom=1,natom
       ikind = kind_of(iatom)
@@ -499,13 +474,13 @@ MODULE mp2_direct_method
     IF( .NOT. shm_master_x_data%screen_funct_is_initialized ) THEN
       CALL calc_pair_dist_radii(qs_env, basis_parameter,&
                                 shm_master_x_data%pair_dist_radii_pgf, max_set, max_pgf, eps_schwarz,&
-                                n_threads, i_thread, error)
+                                n_threads, i_thread)
       CALL calc_screening_functions(qs_env, basis_parameter, private_lib, shm_master_x_data%potential_parameter,&
                                     shm_master_x_data%screen_funct_coeffs_set,&
                                     shm_master_x_data%screen_funct_coeffs_kind, &
                                     shm_master_x_data%screen_funct_coeffs_pgf, &
                                     shm_master_x_data%pair_dist_radii_pgf,&
-                                    max_set, max_pgf, n_threads, i_thread, p_work, error)
+                                    max_set, max_pgf, n_threads, i_thread, p_work)
 
       shm_master_x_data%screen_funct_is_initialized = .TRUE.
    END IF
@@ -516,17 +491,13 @@ MODULE mp2_direct_method
     radii_pgf           => shm_master_x_data%pair_dist_radii_pgf
 
 !!!!!!!!!
-    ALLOCATE(list_ij%elements(natom**2),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(list_kl%elements(natom**2),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(list_ij%elements(natom**2))
+    ALLOCATE(list_kl%elements(natom**2))
 !!!!!!!!!
 
     coeffs_kind_max0=MAXVAL(screen_coeffs_kind(:,:)%x(2))
-    ALLOCATE(set_list_ij((max_set*natom)**2),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(set_list_kl((max_set*natom)**2),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(set_list_ij((max_set*natom)**2))
+    ALLOCATE(set_list_kl((max_set*natom)**2))
 
     !! precalculate maximum density matrix elements in blocks
     actual_x_data%pmax_block = 0.0_dp
@@ -595,8 +566,7 @@ MODULE mp2_direct_method
      ! proc_num_task contains the numer of time second occupied
      ! orbital transformation is called for each processor, needs for balancing
      ! the point to point send
-     ALLOCATE(proc_num_task(0:para_env%num_pe-1),STAT=stat)
-     CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+     ALLOCATE(proc_num_task(0:para_env%num_pe-1))
 
      proc_num_task=0
 
@@ -637,8 +607,7 @@ MODULE mp2_direct_method
      ! max_num_call_sec_transf=MAXVAL(proc_num_task)
 
      ! distribute the RS pair over all processor
-     ALLOCATE(kl_list_proc(proc_num_task(para_env%mepos),3),STAT=stat)
-     CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+     ALLOCATE(kl_list_proc(proc_num_task(para_env%mepos),3))
 
      kl_list_proc=0
 
@@ -686,11 +655,9 @@ MODULE mp2_direct_method
      !!!! END DO
 
      total_num_RS_task=SUM(proc_num_task)
-     ALLOCATE(task_counter_RS(total_num_RS_task,4),STAT=stat)
-     CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+     ALLOCATE(task_counter_RS(total_num_RS_task,4))
 
-     ALLOCATE(cost_RS(total_num_RS_task),STAT=stat)
-     CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+     ALLOCATE(cost_RS(total_num_RS_task))
 
      task_counter_RS=0
      cost_RS=0.0_dp
@@ -759,8 +726,7 @@ MODULE mp2_direct_method
                 END IF
 
                 IF(ALLOCATED(BI1)) DEALLOCATE(BI1)
-                ALLOCATE(BI1(dimen,Ni_occupied,nsgfb(jset),nsgfa(iset)),STAT=stat)
-                CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+                ALLOCATE(BI1(dimen,Ni_occupied,nsgfb(jset),nsgfa(iset)))
 
                 BI1=0.D+00
 
@@ -838,8 +804,7 @@ MODULE mp2_direct_method
 
                   IF(case_index==2) THEN
                     IF(ALLOCATED(MNRS)) DEALLOCATE(MNRS)
-                    ALLOCATE(MNRS(nsgfd(lset),nsgfc(kset),nsgfb(jset),nsgfa(iset)),STAT=stat)
-                    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+                    ALLOCATE(MNRS(nsgfd(lset),nsgfc(kset),nsgfb(jset),nsgfa(iset)))
 
                     MNRS=0.D+00
 
@@ -877,7 +842,7 @@ MODULE mp2_direct_method
                                     sphi_c_ext_set,&
                                     sphi_d_ext_set,&
                                     ee_work,ee_work2,ee_buffer1,ee_buffer2, ee_primitives_tmp,&
-                                    nimages,do_periodic, p_work)
+                                    nimages,do_periodic, p_work) 
                   !END IF
 
                     nints = nsgfa(iset)*nsgfb(jset)*nsgfc(kset)*nsgfd(lset)
@@ -908,7 +873,7 @@ MODULE mp2_direct_method
                                                  iset,jset,kset,lset,&
                                                  nsgfa(iset),nsgfb(jset),nsgfc(kset),nsgfd(lset),&
                                                  i_batch_start,Ni_occupied,&
-                                                 MNRS,C_T,mp2_biel,BI1,error)
+                                                 MNRS,C_T,mp2_biel,BI1)
                    ELSE
                       task_counter_RS(global_counter,4)=task_counter_RS(global_counter,4)+1
 
@@ -929,26 +894,26 @@ MODULE mp2_direct_method
                 IF(.NOT.alpha_beta_case) THEN
                   IF(.NOT. mp2_env%direct_canonical%big_send) THEN
                     CALL transform_occupied_orbitals_second(dimen,iatom,jatom,iset,jset,&
-                                                     nsgfa(iset),nsgfb(jset),i_batch_start,Ni_occupied,Nj_occupied,j_batch_start,&
-                                                     BI1,C_T,mp2_biel,para_env,elements_ij_proc,ij_list_proc,&
-                                                     multiple,proc_map,BIb,error)
+                                                     nsgfa(iset),nsgfb(jset),Ni_occupied,Nj_occupied,j_batch_start,&
+                                                     BI1,C_T,mp2_biel,para_env,elements_ij_proc,&
+                                                     multiple,proc_map,BIb)
                   ELSE
                     CALL transform_occupied_orbitals_second_big(dimen,iatom,jatom,iset,jset,&
-                                                     nsgfa(iset),nsgfb(jset),i_batch_start,Ni_occupied,Nj_occupied,j_batch_start,&
-                                                     ij_elem_max,BI1,C_T,mp2_biel,para_env,elements_ij_proc,ij_list_proc,&
-                                                     multiple,proc_map,BIb,error)
+                                                     nsgfa(iset),nsgfb(jset),Ni_occupied,Nj_occupied,j_batch_start,&
+                                                     ij_elem_max,BI1,C_T,mp2_biel,para_env,elements_ij_proc,&
+                                                     proc_map,BIb)
                   END IF
                 ELSE
                   IF(.NOT. mp2_env%direct_canonical%big_send) THEN
                     CALL transform_occupied_orbitals_second(dimen,iatom,jatom,iset,jset,&
-                                                     nsgfa(iset),nsgfb(jset),i_batch_start,Ni_occupied,Nj_occupied,j_batch_start,&
-                                                     BI1,C_beta_T,mp2_biel,para_env,elements_ij_proc,ij_list_proc,&
-                                                     multiple,proc_map,BIb,error)
+                                                     nsgfa(iset),nsgfb(jset),Ni_occupied,Nj_occupied,j_batch_start,&
+                                                     BI1,C_beta_T,mp2_biel,para_env,elements_ij_proc,&
+                                                     multiple,proc_map,BIb)
                   ELSE
                     CALL transform_occupied_orbitals_second_big(dimen,iatom,jatom,iset,jset,&
-                                                     nsgfa(iset),nsgfb(jset),i_batch_start,Ni_occupied,Nj_occupied,j_batch_start,&
-                                                     ij_elem_max,BI1,C_beta_T,mp2_biel,para_env,elements_ij_proc,ij_list_proc,&
-                                                     multiple,proc_map,BIb,error)
+                                                     nsgfa(iset),nsgfb(jset),Ni_occupied,Nj_occupied,j_batch_start,&
+                                                     ij_elem_max,BI1,C_beta_T,mp2_biel,para_env,elements_ij_proc,&
+                                                     proc_map,BIb)
                   END IF
                 END IF
               END IF
@@ -959,15 +924,12 @@ MODULE mp2_direct_method
           IF(case_index==1) THEN
             CALL mp_sum(task_counter_RS,para_env%group)
             CALL mp_sum(cost_RS,para_env%group)
-            ALLOCATE(task_counter_RS_temp(total_num_RS_task,4),STAT=stat)
-            CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+            ALLOCATE(task_counter_RS_temp(total_num_RS_task,4))
 
-            ALLOCATE(cost_RS_temp(total_num_RS_task),STAT=stat)
-            CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+            ALLOCATE(cost_RS_temp(total_num_RS_task))
 
             step_size=1
-            ALLOCATE(same_size_kl_elements_counter((nsgf_max**2+1)/step_size+1),STAT=stat)
-            CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+            ALLOCATE(same_size_kl_elements_counter((nsgf_max**2+1)/step_size+1))
 
             same_size_kl_elements_counter=0
 
@@ -1016,8 +978,7 @@ MODULE mp2_direct_method
             max_num_call_sec_transf=MAXVAL(proc_num_task)
 
             DEALLOCATE(kl_list_proc)
-            ALLOCATE(kl_list_proc(proc_num_task(para_env%mepos),2),STAT=stat)
-            CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+            ALLOCATE(kl_list_proc(proc_num_task(para_env%mepos),2))
 
             kl_list_proc=0
 
@@ -1043,8 +1004,7 @@ MODULE mp2_direct_method
         size_parameter_send(5)=elements_ij_proc
 
         IF(mp2_env%direct_canonical%big_send) THEN
-          ALLOCATE(zero_mat_big(dimen,2,ij_elem_max),STAT=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          ALLOCATE(zero_mat_big(dimen,2,ij_elem_max))
 
         END IF
 
@@ -1069,11 +1029,9 @@ MODULE mp2_direct_method
               S_offset_rec=size_parameter_rec(4)
               elements_ij_proc_rec=size_parameter_rec(5)
               IF(.NOT. mp2_env%direct_canonical%big_send) THEN
-                ALLOCATE(BIb_RS_mat_rec(dimen,Rsize_rec+Ssize_rec),STAT=stat)
-                CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+                ALLOCATE(BIb_RS_mat_rec(dimen,Rsize_rec+Ssize_rec))
               ELSE
-                ALLOCATE(BIb_RS_mat_rec_big(dimen,Rsize_rec+Ssize_rec,ij_elem_max),STAT=stat)
-                CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+                ALLOCATE(BIb_RS_mat_rec_big(dimen,Rsize_rec+Ssize_rec,ij_elem_max))
               END IF
             ELSE
               elements_ij_proc_rec=elements_ij_proc
@@ -1112,7 +1070,7 @@ MODULE mp2_direct_method
 
                     END IF
                   CASE DEFAULT
-                    CPPostcondition(.FALSE.,cp_failure_level,routineP,error,failure)
+                    CPABORT("")
                 END SELECT
 
               END DO
@@ -1141,7 +1099,7 @@ MODULE mp2_direct_method
                     BIb_RS_mat_rec_big(1:dimen,Rsize_rec+1:Rsize_rec+Ssize_rec,1:elements_ij_proc)
 
                 CASE DEFAULT
-                  CPPostcondition(.FALSE.,cp_failure_level,routineP,error,failure)
+                  CPABORT("")
               END SELECT
             END IF
 
@@ -1160,27 +1118,25 @@ MODULE mp2_direct_method
           DEALLOCATE(zero_mat_big)
         END IF
 
-        logger => cp_error_get_logger(error)
+        logger => cp_get_default_logger()
 
-    DEALLOCATE(primitive_integrals,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(primitive_integrals)
 
     IF(.NOT.alpha_beta_case) THEN
-      CALL transform_virtual_orbitals_and_accumulate(dimen,occupied,dimen-occupied,i_batch_start,Ni_occupied,&
-                                                     Nj_occupied,j_batch_start,BIb,C,Auto,para_env,elements_ij_proc,ij_list_proc,&
-                                                     nspins,Emp2,Emp2_Cou,Emp2_ex,error=error)
+      CALL transform_virtual_orbitals_and_accumulate(dimen,occupied,dimen-occupied,i_batch_start,&
+                                                     j_batch_start,BIb,C,Auto,elements_ij_proc,ij_list_proc,&
+                                                     nspins,Emp2,Emp2_Cou,Emp2_ex)
     ELSE
       CALL transform_virtual_orbitals_and_accumulate_ABcase(dimen,occupied,occupied_beta,dimen-occupied,dimen-occupied_beta,&
-                                                     i_batch_start,Ni_occupied,Nj_occupied,j_batch_start,&
+                                                     i_batch_start,j_batch_start,&
                                                      BIb,C,C_beta,Auto,Auto_beta,&
-                                                     para_env,elements_ij_proc,ij_list_proc,Emp2,Emp2_Cou,Emp2_ex,error=error)
+                                                     elements_ij_proc,ij_list_proc,Emp2,Emp2_Cou)
       DEALLOCATE(C_beta_T)
     END IF
 
     IF(copy_integrals) THEN
       IF(.NOT.alpha_beta_case) THEN
-        ALLOCATE(Integ_MP2(dimen-occupied,dimen-occupied,occupied,occupied),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(Integ_MP2(dimen-occupied,dimen-occupied,occupied,occupied))
         Integ_MP2=0.0_dp
         DO i=1, elements_ij_proc
           iiB=ij_list_proc(i,1)
@@ -1188,8 +1144,7 @@ MODULE mp2_direct_method
           Integ_MP2(:,:,iiB+i_batch_start,jjB+j_batch_start)=BIb(1:dimen-occupied,1:dimen-occupied,i)
         END DO
       ELSE
-        ALLOCATE(Integ_MP2(dimen-occupied,dimen-occupied_beta,occupied,occupied_beta),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(Integ_MP2(dimen-occupied,dimen-occupied_beta,occupied,occupied_beta))
         Integ_MP2=0.0_dp
         DO i=1, elements_ij_proc
           iiB=ij_list_proc(i,1)
@@ -1200,31 +1155,22 @@ MODULE mp2_direct_method
     END IF
     DEALLOCATE(BIb)
 
-    DEALLOCATE(set_list_ij, set_list_kl, STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(set_list_ij, set_list_kl)
 
     DO i=1,max_pgf**2
-      DEALLOCATE(pgf_list_ij(i)%image_list, STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-      DEALLOCATE(pgf_list_kl(i)%image_list, STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      DEALLOCATE(pgf_list_ij(i)%image_list)
+      DEALLOCATE(pgf_list_kl(i)%image_list)
     END DO
 
-    DEALLOCATE(pgf_list_ij, STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    DEALLOCATE(pgf_list_kl, STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    DEALLOCATE(pgf_product_list, STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(pgf_list_ij)
+    DEALLOCATE(pgf_list_kl)
+    DEALLOCATE(pgf_product_list)
 
-    DEALLOCATE(max_contraction, kind_of, STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(max_contraction, kind_of)
 
-    DEALLOCATE(ee_work, ee_work2, ee_buffer1, ee_buffer2, ee_primitives_tmp, STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(ee_work, ee_work2, ee_buffer1, ee_buffer2, ee_primitives_tmp)
 
-    DEALLOCATE(nimages, STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(nimages)
 
     IF(mp2_env%potential_parameter%potential_type == do_mp2_potential_TShPSC) THEN
       init_TShPSC_lmax = -1
@@ -1256,13 +1202,12 @@ MODULE mp2_direct_method
 !> \param C_T ...
 !> \param mp2_biel ...
 !> \param BI1 ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE transform_occupied_orbitals_first(dimen,latom,katom,jatom,iatom,&
                                              lset,kset,jset,iset,&
                                              Ssize,Rsize,Nsize,Msize,&
                                              i_batch_start,Ni_occupied,&
-                                             MNRS,C_T,mp2_biel,BI1,error)
+                                             MNRS,C_T,mp2_biel,BI1)
 
     INTEGER :: dimen, latom, katom, jatom, iatom, lset, kset, jset, iset, &
       Ssize, Rsize, Nsize, Msize, i_batch_start, Ni_occupied
@@ -1272,7 +1217,6 @@ MODULE mp2_direct_method
     TYPE(mp2_biel_type)                      :: mp2_biel
     REAL(KIND=dp), DIMENSION(dimen, &
       Ni_occupied, Rsize, Ssize)             :: BI1
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: &
       routineN = 'transform_occupied_orbitals_first', &
@@ -1334,7 +1278,6 @@ MODULE mp2_direct_method
 !> \param kset ...
 !> \param Ssize ...
 !> \param Rsize ...
-!> \param i_batch_start ...
 !> \param Ni_occupied ...
 !> \param Nj_occupied ...
 !> \param j_batch_start ...
@@ -1343,33 +1286,30 @@ MODULE mp2_direct_method
 !> \param mp2_biel ...
 !> \param para_env ...
 !> \param elements_ij_proc ...
-!> \param ij_list_proc ...
 !> \param multiple ...
 !> \param proc_map ...
 !> \param BIb ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE transform_occupied_orbitals_second(dimen,latom,katom,lset,kset,&
-                                             Ssize,Rsize,i_batch_start,Ni_occupied,Nj_occupied,j_batch_start,&
+                                             Ssize,Rsize,Ni_occupied,Nj_occupied,j_batch_start,&
                                              BI1,C_T,mp2_biel,para_env,&
-                                             elements_ij_proc,ij_list_proc,&
-                                             multiple,proc_map,BIb,error)
+                                             elements_ij_proc,&
+                                             multiple,proc_map,BIb)
 
-    INTEGER :: dimen, latom, katom, lset, kset, Ssize, Rsize, i_batch_start, &
-      Ni_occupied, Nj_occupied, j_batch_start
+    INTEGER                                  :: dimen, latom, katom, lset, &
+                                                kset, Ssize, Rsize, &
+                                                Ni_occupied, Nj_occupied, &
+                                                j_batch_start
     REAL(KIND=dp), DIMENSION(dimen, &
       Ni_occupied, Rsize, Ssize)             :: BI1
     REAL(KIND=dp), DIMENSION(dimen, dimen)   :: C_T
     TYPE(mp2_biel_type)                      :: mp2_biel
     TYPE(cp_para_env_type), POINTER          :: para_env
-    INTEGER                                  :: elements_ij_proc
-    INTEGER, DIMENSION(elements_ij_proc, 2)  :: ij_list_proc
-    INTEGER                                  :: multiple
+    INTEGER                                  :: elements_ij_proc, multiple
     INTEGER, DIMENSION((-para_env%num_pe):(2&
       *para_env%num_pe-1))                   :: proc_map
     REAL(KIND=dp), DIMENSION(dimen, dimen, &
       elements_ij_proc)                      :: BIb
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: &
       routineN = 'transform_occupied_orbitals_second', &
@@ -1378,18 +1318,16 @@ MODULE mp2_direct_method
     INTEGER :: case_send_receive, elements_ij_proc_rec, handle, i, &
       index_ij_rec, index_ij_send, index_proc_ij, index_proc_shift, j, n, &
       proc_receive, proc_send, r, R_global, R_offset, R_offset_rec, R_start, &
-      Rsize_rec, s, S_global, S_offset, S_offset_rec, Ssize_rec, stat
+      Rsize_rec, s, S_global, S_offset, S_offset_rec, Ssize_rec
     REAL(KIND=dp), &
       DIMENSION(dimen, Rsize+Ssize)          :: BIb_RS_mat
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :)                        :: BIb_RS_mat_rec
     REAL(KIND=dp)                            :: C_T_R, C_T_S
-    LOGICAL                                  :: failure
     INTEGER, DIMENSION(5)                    :: size_parameter_rec, &
                                                 size_parameter_send
 
     CALL timeset(routineN,handle)
-    failure=.FALSE.
 
     S_offset=mp2_biel%index_table(latom,lset)-1
     R_offset=mp2_biel%index_table(katom,kset)-1
@@ -1415,8 +1353,7 @@ MODULE mp2_direct_method
         R_offset_rec=size_parameter_rec(3)
         S_offset_rec=size_parameter_rec(4)
         elements_ij_proc_rec=size_parameter_rec(5)
-        ALLOCATE(BIb_RS_mat_rec(dimen,Rsize_rec+Ssize_rec),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(BIb_RS_mat_rec(dimen,Rsize_rec+Ssize_rec))
 
       ELSE
         elements_ij_proc_rec=elements_ij_proc
@@ -1498,7 +1435,7 @@ MODULE mp2_direct_method
 
              END IF
            CASE DEFAULT
-             CPPostcondition(.FALSE.,cp_failure_level,routineP,error,failure)
+             CPABORT("")
          END SELECT
 
       END DO ! loop over the ij of the processor
@@ -1522,7 +1459,6 @@ MODULE mp2_direct_method
 !> \param kset ...
 !> \param Ssize ...
 !> \param Rsize ...
-!> \param i_batch_start ...
 !> \param Ni_occupied ...
 !> \param Nj_occupied ...
 !> \param j_batch_start ...
@@ -1532,33 +1468,27 @@ MODULE mp2_direct_method
 !> \param mp2_biel ...
 !> \param para_env ...
 !> \param elements_ij_proc ...
-!> \param ij_list_proc ...
-!> \param multiple ...
 !> \param proc_map ...
 !> \param BIb ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE transform_occupied_orbitals_second_big(dimen,latom,katom,lset,kset,&
-                                             Ssize,Rsize,i_batch_start,Ni_occupied,Nj_occupied,j_batch_start,&
+                                             Ssize,Rsize,Ni_occupied,Nj_occupied,j_batch_start,&
                                              ij_elem_max,BI1,C_T,mp2_biel,para_env,&
-                                             elements_ij_proc,ij_list_proc,&
-                                             multiple,proc_map,BIb,error)
+                                             elements_ij_proc,&
+                                             proc_map,BIb)
 
-    INTEGER :: dimen, latom, katom, lset, kset, Ssize, Rsize, i_batch_start, &
-      Ni_occupied, Nj_occupied, j_batch_start, ij_elem_max
+    INTEGER :: dimen, latom, katom, lset, kset, Ssize, Rsize, Ni_occupied, &
+      Nj_occupied, j_batch_start, ij_elem_max
     REAL(KIND=dp), DIMENSION(dimen, &
       Ni_occupied, Rsize, Ssize)             :: BI1
     REAL(KIND=dp), DIMENSION(dimen, dimen)   :: C_T
     TYPE(mp2_biel_type)                      :: mp2_biel
     TYPE(cp_para_env_type), POINTER          :: para_env
     INTEGER                                  :: elements_ij_proc
-    INTEGER, DIMENSION(elements_ij_proc, 2)  :: ij_list_proc
-    INTEGER                                  :: multiple
     INTEGER, DIMENSION((-para_env%num_pe):(2&
       *para_env%num_pe-1))                   :: proc_map
     REAL(KIND=dp), DIMENSION(dimen, dimen, &
       elements_ij_proc)                      :: BIb
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: &
       routineN = 'transform_occupied_orbitals_second_big', &
@@ -1567,18 +1497,16 @@ MODULE mp2_direct_method
     INTEGER :: case_send_receive, elements_ij_proc_rec, handle, i, &
       index_ij_rec, index_ij_send, index_proc_ij, index_proc_shift, j, n, &
       proc_receive, proc_send, r, R_global, R_offset, R_offset_rec, R_start, &
-      Rsize_rec, s, S_global, S_offset, S_offset_rec, Ssize_rec, stat
+      Rsize_rec, s, S_global, S_offset, S_offset_rec, Ssize_rec
     REAL(KIND=dp), DIMENSION(dimen, &
       Rsize+Ssize, ij_elem_max)              :: BIb_RS_mat
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :, :)                     :: BIb_RS_mat_rec
     REAL(KIND=dp)                            :: C_T_R, C_T_S
-    LOGICAL                                  :: failure
     INTEGER, DIMENSION(5)                    :: size_parameter_rec, &
                                                 size_parameter_send
 
     CALL timeset(routineN,handle)
-    failure=.FALSE.
 
     S_offset=mp2_biel%index_table(latom,lset)-1
     R_offset=mp2_biel%index_table(katom,kset)-1
@@ -1604,8 +1532,7 @@ MODULE mp2_direct_method
         R_offset_rec=size_parameter_rec(3)
         S_offset_rec=size_parameter_rec(4)
         elements_ij_proc_rec=size_parameter_rec(5)
-        ALLOCATE(BIb_RS_mat_rec(dimen,Rsize_rec+Ssize_rec,ij_elem_max),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(BIb_RS_mat_rec(dimen,Rsize_rec+Ssize_rec,ij_elem_max))
       ELSE
         elements_ij_proc_rec=elements_ij_proc
       END IF
@@ -1681,7 +1608,7 @@ MODULE mp2_direct_method
           BIb_RS_mat_rec(1:dimen,Rsize_rec+1:Rsize_rec+Ssize_rec,1:elements_ij_proc)
 
       CASE DEFAULT
-        CPPostcondition(.FALSE.,cp_failure_level,routineP,error,failure)
+        CPABORT("")
       END SELECT
 
       IF(proc_send/=para_env%mepos) THEN
@@ -1700,38 +1627,31 @@ MODULE mp2_direct_method
 !> \param occupied ...
 !> \param virtual ...
 !> \param i_batch_start ...
-!> \param Ni_occupied ...
-!> \param Nj_occupied ...
 !> \param j_batch_start ...
 !> \param BIb ...
 !> \param C ...
 !> \param Auto ...
-!> \param para_env ...
 !> \param elements_ij_proc ...
 !> \param ij_list_proc ...
 !> \param nspins ...
 !> \param Emp2 ...
 !> \param Emp2_Cou ...
 !> \param Emp2_ex ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE transform_virtual_orbitals_and_accumulate(dimen,occupied,virtual,i_batch_start,Ni_occupied,&
-                                                   Nj_occupied,j_batch_start,BIb,C,Auto,para_env,elements_ij_proc,&
-                                                   ij_list_proc,nspins,Emp2,Emp2_Cou,Emp2_ex,error)
+  SUBROUTINE transform_virtual_orbitals_and_accumulate(dimen,occupied,virtual,i_batch_start,&
+                                                   j_batch_start,BIb,C,Auto,elements_ij_proc,&
+                                                   ij_list_proc,nspins,Emp2,Emp2_Cou,Emp2_ex)
 
     INTEGER                                  :: dimen, occupied, virtual, &
-                                                i_batch_start, Ni_occupied, &
-                                                Nj_occupied, j_batch_start
+                                                i_batch_start, j_batch_start
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :, :)                     :: BIb
     REAL(KIND=dp), DIMENSION(dimen, dimen)   :: C
     REAL(KIND=dp), DIMENSION(dimen)          :: Auto
-    TYPE(cp_para_env_type), POINTER          :: para_env
     INTEGER                                  :: elements_ij_proc
     INTEGER, DIMENSION(elements_ij_proc, 2)  :: ij_list_proc
     INTEGER                                  :: nspins
     REAL(KIND=dp)                            :: Emp2, Emp2_Cou, Emp2_ex
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: &
       routineN = 'transform_virtual_orbitals_and_accumulate', &
@@ -1740,17 +1660,14 @@ MODULE mp2_direct_method
 
     INTEGER                                  :: a, a_global, b, b_global, &
                                                 handle, i, i_global, &
-                                                index_ij, j, j_global, stat
-    LOGICAL                                  :: failure
+                                                index_ij, j, j_global
     REAL(KIND=dp)                            :: iajb, ibja, parz, two
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :)                        :: BIa
 
     CALL timeset(routineN,handle)
-    failure=.FALSE.
 
-    ALLOCATE(BIa(dimen,virtual),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(BIa(dimen,virtual))
 
     BIa=zero
     DO index_ij=1, elements_ij_proc
@@ -1761,8 +1678,7 @@ MODULE mp2_direct_method
     END DO
 
     DEALLOCATE(BIa)
-    ALLOCATE(BIa(virtual,virtual),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(BIa(virtual,virtual))
 
     BIa=zero
     DO index_ij=1, elements_ij_proc
@@ -1811,39 +1727,31 @@ MODULE mp2_direct_method
 !> \param virt_i ...
 !> \param virt_j ...
 !> \param i_batch_start ...
-!> \param Ni_occupied ...
-!> \param Nj_occupied ...
 !> \param j_batch_start ...
 !> \param BIb ...
 !> \param C_i ...
 !> \param C_j ...
 !> \param Auto_i ...
 !> \param Auto_j ...
-!> \param para_env ...
 !> \param elements_ij_proc ...
 !> \param ij_list_proc ...
 !> \param Emp2 ...
 !> \param Emp2_Cou ...
-!> \param Emp2_ex ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE transform_virtual_orbitals_and_accumulate_ABcase(dimen,occ_i,occ_j,virt_i,virt_j,i_batch_start,Ni_occupied,&
-                                                   Nj_occupied,j_batch_start,BIb,C_i,C_j,Auto_i,Auto_j,para_env,elements_ij_proc,&
-                                                   ij_list_proc,Emp2,Emp2_Cou,Emp2_ex,error)
+  SUBROUTINE transform_virtual_orbitals_and_accumulate_ABcase(dimen,occ_i,occ_j,virt_i,virt_j,i_batch_start,&
+                                                   j_batch_start,BIb,C_i,C_j,Auto_i,Auto_j,elements_ij_proc,&
+                                                   ij_list_proc,Emp2,Emp2_Cou)
 
     INTEGER                                  :: dimen, occ_i, occ_j, virt_i, &
                                                 virt_j, i_batch_start, &
-                                                Ni_occupied, Nj_occupied, &
                                                 j_batch_start
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :, :)                     :: BIb
     REAL(KIND=dp), DIMENSION(dimen, dimen)   :: C_i, C_j
     REAL(KIND=dp), DIMENSION(dimen)          :: Auto_i, Auto_j
-    TYPE(cp_para_env_type), POINTER          :: para_env
     INTEGER                                  :: elements_ij_proc
     INTEGER, DIMENSION(elements_ij_proc, 2)  :: ij_list_proc
-    REAL(KIND=dp)                            :: Emp2, Emp2_Cou, Emp2_ex
-    TYPE(cp_error_type), INTENT(inout)       :: error
+    REAL(KIND=dp)                            :: Emp2, Emp2_Cou
 
     CHARACTER(LEN=*), PARAMETER :: &
       routineN = 'transform_virtual_orbitals_and_accumulate_ABcase', &
@@ -1852,18 +1760,14 @@ MODULE mp2_direct_method
 
     INTEGER                                  :: a, a_global, b, b_global, &
                                                 handle, i, i_global, &
-                                                index_ij, j, j_global, n, s, &
-                                                stat
-    LOGICAL                                  :: failure
+                                                index_ij, j, j_global, n, s
     REAL(KIND=dp)                            :: iajb, parz
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :)                        :: BIa
 
     CALL timeset(routineN,handle)
-    failure=.FALSE.
 
-    ALLOCATE(BIa(dimen,virt_i),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(BIa(dimen,virt_i))
 
     DO index_ij=1, elements_ij_proc
 
@@ -1883,8 +1787,7 @@ MODULE mp2_direct_method
     END DO
 
     DEALLOCATE(BIa)
-    ALLOCATE(BIa(virt_i,virt_j),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(BIa(virt_i,virt_j))
 
     DO index_ij=1, elements_ij_proc
 

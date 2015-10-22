@@ -14,6 +14,7 @@ MODULE cp_realspace_grid_cube
   USE pw_types,                        ONLY: pw_type
   USE realspace_grid_cube,             ONLY: pw_to_cube
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -33,16 +34,14 @@ CONTAINS
 !> \param particles ...
 !> \param stride ...
 !> \param zero_tails ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE cp_pw_to_cube ( pw, unit_nr, title, particles, stride, zero_tails, error )
+  SUBROUTINE cp_pw_to_cube ( pw, unit_nr, title, particles, stride, zero_tails)
     TYPE(pw_type), POINTER                   :: pw
     INTEGER, INTENT(IN)                      :: unit_nr
     CHARACTER(*), INTENT(IN), OPTIONAL       :: title
     TYPE(particle_list_type), POINTER        :: particles
     INTEGER, DIMENSION(:), OPTIONAL, POINTER :: stride
     LOGICAL, INTENT(IN), OPTIONAL            :: zero_tails
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cp_pw_to_cube', &
       routineP = moduleN//':'//routineN
@@ -66,10 +65,10 @@ CONTAINS
 
        CALL pw_to_cube(pw=pw, unit_nr=unit_nr, title=title, &
           particles_z=particles_z, particles_r=particles_r,&
-          stride=stride, zero_tails=zero_tails, error=error)
+          stride=stride, zero_tails=zero_tails)
     ELSE
        CALL pw_to_cube(pw=pw, unit_nr=unit_nr, title=title, &
-         stride=stride, zero_tails=zero_tails, error=error)
+         stride=stride, zero_tails=zero_tails)
     END IF
 
   END SUBROUTINE cp_pw_to_cube

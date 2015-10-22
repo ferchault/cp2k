@@ -48,21 +48,18 @@ MODULE cp_log_handling
                                              default_string_length,&
                                              dp
   USE machine,                         ONLY: default_output_unit,&
-                                             m_datum,&
-                                             m_flush,&
                                              m_getpid,&
                                              m_hostnm
   USE message_passing,                 ONLY: mp_abort,&
                                              mp_comm_free
   USE string_utilities,                ONLY: compress
-  USE termination,                     ONLY: print_message
   USE timings,                         ONLY: print_stack
 
   IMPLICIT NONE
   PRIVATE
 
   !API types
-  PUBLIC :: cp_logger_type
+  PUBLIC :: cp_logger_type, cp_logger_p_type
   !API parameter vars
   PUBLIC :: cp_note_level, cp_warning_level, cp_failure_level, cp_fatal_level
   !API default loggers
@@ -73,7 +70,7 @@ MODULE cp_log_handling
             cp_logger_would_log, cp_logger_set, cp_logger_get_default_unit_nr,&
             cp_logger_get_default_io_unit, cp_logger_get_unit_nr, &
             cp_logger_set_log_level, cp_logger_generate_filename, &
-            cp_to_string, cp_log
+            cp_to_string
 
   CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'cp_log_handling'
   LOGICAL, PRIVATE, PARAMETER :: debug_this_module=.FALSE.
@@ -90,10 +87,6 @@ MODULE cp_log_handling
   !! a generic function to trasform different types to strings
   INTERFACE cp_to_string
      MODULE PROCEDURE cp_int_to_string, cp_real_dp_to_string, cp_logical_to_string
-  END INTERFACE
-
-  INTERFACE cp_log
-     MODULE PROCEDURE cp_logger_log
   END INTERFACE
 
 ! *****************************************************************************
@@ -154,6 +147,10 @@ MODULE cp_log_handling
      TYPE(cp_para_env_type), POINTER       :: para_env
      TYPE(cp_iteration_info_type), POINTER :: iter_info
   END TYPE cp_logger_type
+
+  TYPE cp_logger_p_type
+     TYPE(cp_logger_type), POINTER :: p => Null()
+  END TYPE cp_logger_p_type
 
 ! *****************************************************************************
   TYPE default_logger_stack_type
@@ -423,10 +420,6 @@ CONTAINS
     CHARACTER(len=*), PARAMETER :: routineN = 'cp_logger_retain', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
-
     IF (.NOT.ASSOCIATED(logger)) CALL mp_abort(routineP//&
          " logger not associated")
     IF (logger%ref_count<1) CALL mp_abort(routineP//&
@@ -447,8 +440,6 @@ CONTAINS
     CHARACTER(len=*), PARAMETER :: routineN = 'cp_logger_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-
     IF (ASSOCIATED(logger)) THEN
        IF (logger%ref_count<1) CALL mp_abort(routineP//" logger%ref_count<1")
        logger%ref_count=logger%ref_count-1
@@ -467,8 +458,7 @@ CONTAINS
           END IF
           CALL my_cp_para_env_release(logger%para_env)
           CALL cp_iteration_info_release(logger%iter_info)
-          DEALLOCATE(logger,stat=stat)
-          IF (stat/=0) PRINT *, routineP," WARNING logger dealloc stat=",stat
+          DEALLOCATE(logger)
        END IF
     END IF
     NULLIFY(logger)
@@ -537,76 +527,20 @@ CONTAINS
 !> \author Teodoro Laino
 ! *****************************************************************************
   FUNCTION cp_logger_get_default_io_unit(logger) RESULT(res)
-    TYPE(cp_logger_type), POINTER            :: logger
+    TYPE(cp_logger_type), OPTIONAL, POINTER  :: logger
     INTEGER                                  :: res
 
-    res=cp_logger_get_default_unit_nr(logger,local=.FALSE.,skip_not_ionode=.TRUE.)
+    TYPE(cp_logger_type), POINTER            :: local_logger
+
+    IF (PRESENT(logger)) THEN
+       local_logger => logger
+    ELSE
+       local_logger => cp_get_default_logger()
+    ENDIF
+
+    res=cp_logger_get_default_unit_nr(local_logger,local=.FALSE.,skip_not_ionode=.TRUE.)
   END FUNCTION cp_logger_get_default_io_unit
 
-! *****************************************************************************
-!> \brief Logs in a standard format
-!> \param logger is a type that describes where the logging must go.
-!> \param level describes the of the message: cp_fatal_level(3),
-!>     cp_failure_level(2), cp_warning_level(1), cp_note_level(0).
-!> \param fromWhere is a string of the form module:function or file:lineNr
-!>     that says where the error happend
-!> \param message is the message to print
-!> \param local if true this goes to the local logger, otherwise (the default)
-!>     it goes to the global logger (and only the master process writes it)
-!> \par History
-!>      4.2002 revised [fawzi]
-!> \author Fawzi Mohamed
-!> \note
-!>      In multithreaded situations it should be modified to print also
-!>      the thread (and maybe the processor), and proper locking should be
-!>      performed.
-!>      At the moment it just goes to the default unit of the logger
-! *****************************************************************************
-  SUBROUTINE cp_logger_log(logger, level, fromWhere , message, local)
-    TYPE(cp_logger_type), POINTER            :: logger
-    INTEGER, INTENT(in)                      :: level
-    CHARACTER(len=*), INTENT(in)             :: fromWhere, message
-    LOGICAL, INTENT(in), OPTIONAL            :: local
-
-    CHARACTER(len=*), PARAMETER :: routineN = 'cp_logger_log', &
-      routineP = moduleN//':'//routineN
-
-    CHARACTER(7)                             :: label
-    CHARACTER(LEN=26)                        :: datx
-    INTEGER                                  :: unitNr
-    LOGICAL                                  :: loc
-    TYPE(cp_logger_type), POINTER            :: lggr
-
-    lggr => logger
-    IF (.NOT.ASSOCIATED(lggr)) lggr => cp_get_default_logger()
-    IF (lggr%ref_count<1) CALL mp_abort(routineP//&
-         " logger%ref_count<1")
-
-    loc=.TRUE.
-    IF (PRESENT(local)) loc=local
-    IF (cp_logger_would_log(lggr,level)) THEN
-       SELECT CASE (level)
-       CASE (cp_fatal_level)
-          label = 'ERRORL3'
-       CASE (cp_failure_level)
-          label = 'ERRORL2'
-       CASE (cp_warning_level)
-          label = 'WARNING'
-       CASE (cp_note_level)
-          label = 'NOTE'
-       CASE default
-          label = 'L'//ADJUSTL(cp_int_to_string(level))
-       END SELECT
-       IF (loc .OR. lggr%para_env%mepos==lggr%para_env%source) THEN
-          unitNr = cp_logger_get_unit_nr(lggr,local=loc)
-          CALL m_datum(datx)
-          CALL print_message(datx(12:19)//' '//TRIM(ADJUSTL(label))//' in '//&
-                             fromWhere//' :: '//TRIM(ADJUSTL(message)),&
-                             unitNr,level,1,1)
-          CALL m_flush(unitNr)
-       END IF
-    END IF
-  END SUBROUTINE cp_logger_log
 
 ! *************************** cp_logger_type settings ***************************
 
@@ -632,31 +566,6 @@ CONTAINS
          " logger%ref_count<1")
     logger%print_level=level
   END SUBROUTINE cp_logger_set_log_level
-
-! *****************************************************************************
-!> \brief returns the logging level of the given logger.
-!> \param logger the logger you want info from
-!> \retval res ...
-!> \par History
-!>      4.2002 revised [fawzi]
-!> \author Fawzi Mohamed
-! *****************************************************************************
-  FUNCTION cp_logger_get_log_level(logger) RESULT(res)
-    TYPE(cp_logger_type), POINTER            :: logger
-    INTEGER                                  :: res
-
-    CHARACTER(len=*), PARAMETER :: routineN = 'cp_logger_get_log_level', &
-      routineP = moduleN//':'//routineN
-
-    TYPE(cp_logger_type), POINTER            :: lggr
-
-    lggr => logger
-    IF (.NOT.ASSOCIATED(lggr)) lggr => cp_get_default_logger()
-    IF (lggr%ref_count<1) CALL mp_abort(routineP//&
-         " logger%ref_count<1")
-
-    res=lggr%print_level
-  END FUNCTION cp_logger_get_log_level
 
 ! *****************************************************************************
 !> \brief asks the default unit number of the given logger.
@@ -781,8 +690,6 @@ CONTAINS
     CHARACTER(len=*), PARAMETER :: routineN = 'my_cp_para_env_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-
     IF (ASSOCIATED(para_env)) THEN
        IF (para_env%ref_count<1) THEN
           CALL mp_abort(routineP//" para_env%ref_count<1")
@@ -792,8 +699,7 @@ CONTAINS
           IF (para_env%owns_group) THEN
              CALL mp_comm_free(para_env%group)
           END IF
-          DEALLOCATE(para_env,stat=stat)
-          IF(stat/=0)PRINT *,routineP," WARNING para_env DEALLOCATE stat=",stat
+          DEALLOCATE(para_env)
        END IF
     END IF
     NULLIFY(para_env)
@@ -826,10 +732,9 @@ CONTAINS
     CHARACTER(len=*), PARAMETER :: routineN = 'cp_logger_generate_filename', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure, loc
+    LOGICAL                                  :: loc
     TYPE(cp_logger_type), POINTER            :: lggr
 
-    failure=.FALSE.
     loc=.FALSE.
     res=' '
     lggr => logger

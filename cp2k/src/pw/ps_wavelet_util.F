@@ -17,9 +17,8 @@ MODULE ps_wavelet_util
                                              s_poissonsolver
   USE ps_wavelet_fft3d,                ONLY: fourier_dim
   USE pw_grid_types,                   ONLY: pw_grid_type
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -73,7 +72,6 @@ CONTAINS
 !>                 dimensions that are related to the output of the PS_dim4allocation routine
 !>                 it MUST be created by following the same geocode as the Poisson Solver.
 !> \param pw_grid ...
-!> \param error ...
 !> \date February 2007
 !> \author Luigi Genovese
 !> \note The dimensions of the arrays must be compatible with geocode, nproc, 
@@ -81,7 +79,7 @@ CONTAINS
 !>     is IMPERATIVE to use the PS_dim4allocation routine for calculation arrays sizes. 
 ! *****************************************************************************
   SUBROUTINE PSolver(geocode,iproc,nproc,n01,n02,n03,hx,hy,hz,&
-       rhopot,karray,pw_grid,error)
+       rhopot,karray,pw_grid)
     CHARACTER(len=1), INTENT(in)             :: geocode
     INTEGER, INTENT(in)                      :: iproc, nproc, n01, n02, n03
     REAL(KIND=dp), INTENT(in)                :: hx, hy, hz
@@ -89,11 +87,9 @@ CONTAINS
       INTENT(inout)                          :: rhopot
     REAL(KIND=dp), DIMENSION(*), INTENT(in)  :: karray
     TYPE(pw_grid_type), POINTER              :: pw_grid
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
-    INTEGER :: i1, i2, i3, i_all, i_stat, iend, istart, j2, m1, m2, m3, md1, &
-      md2, md3, n1, n2, n3, nd1, nd2, nd3, nlim, nwb, nwbl, nwbr, nxc, nxcl, &
-      nxcr, nxt
+    INTEGER :: i1, i2, i3, iend, istart, j2, m1, m2, m3, md1, md2, md3, n1, &
+      n2, n3, nd1, nd2, nd3, nlim, nwb, nwbl, nwbr, nxc, nxcl, nxcr, nxt
     REAL(KIND=dp)                            :: factor, hgrid, red_fact, scal
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :, :)                     :: zf
@@ -108,17 +104,11 @@ CONTAINS
     ELSE IF (geocode == 'F') THEN
        CALL F_FFT_dimensions(n01,n02,n03,m1,m2,m3,n1,n2,n3,md1,md2,md3,nd1,nd2,nd3,nproc)
     ELSE
-       STOP 'PSolver: geometry code not admitted'
+       CPABORT("PSolver: geometry code not admitted")
     END IF
     !array allocations
-    i_all=0
-    ALLOCATE(zf(md1,md3,md2/nproc),stat=i_stat)
-    i_all=i_all+i_stat
+    ALLOCATE(zf(md1,md3,md2/nproc))
 
-    IF (i_all /= 0) THEN
-       PRINT *,"PSolver: Problem of memory allocation"
-       STOP
-    END IF
     !  CALL timing(iproc,'Exchangecorr  ','ON')
     !dimension for exchange-correlation (different in the global or distributed case)
     !let us calculate the dimension of the portion of the rhopot array to be passed
@@ -177,17 +167,17 @@ CONTAINS
        !no powers of hgrid because they are incorporated in the plane wave treatment
        scal=1._dp/REAL(n1*n2*n3,KIND=dp)
        CALL P_PoissonSolver(n1,n2,n3,nd1,nd2,nd3,md1,md2,md3,nproc,iproc,zf,&
-            scal,hx,hy,hz,pw_grid%para%rs_group,error)
+            scal,hx,hy,hz,pw_grid%para%rs_group)
     ELSE IF (geocode == 'S') THEN
        !only one power of hgrid
        scal=hy/REAL(n1*n2*n3,KIND=dp)
        CALL S_PoissonSolver(n1,n2,n3,nd1,nd2,nd3,md1,md2,md3,nproc,iproc,karray,zf,&
-            scal,pw_grid%para%rs_group,error)
+            scal,pw_grid%para%rs_group)
     ELSE IF (geocode == 'F') THEN
        hgrid=MAX(hx,hy,hz)
        scal=hgrid**3/REAL(n1*n2*n3,KIND=dp)
        CALL F_PoissonSolver(n1,n2,n3,nd1,nd2,nd3,md1,md2,md3,nproc,iproc,karray,zf,&
-            scal,pw_grid%para%rs_group,error)
+            scal,pw_grid%para%rs_group)
        factor=0.5_dp*hgrid**3
     END IF
 
@@ -202,11 +192,7 @@ CONTAINS
 
     CALL scale_and_distribute(m1,m3,md1,md2,md3,nxc,zf,rhopot,nproc,red_fact)
 
-    DEALLOCATE(zf,stat=i_all)
-    IF (i_all+i_stat /= 0) THEN
-       WRITE(*,*)' psolver: problem of memory deallocation'
-       STOP
-    END IF
+    DEALLOCATE(zf)
 
   END SUBROUTINE PSolver
 
@@ -271,7 +257,7 @@ CONTAINS
     ELSE
        PRINT *,'the FFT in the x direction is not allowed'
        PRINT *,'n01 dimension',n01
-       STOP
+       CPABORT("")
     END IF
     l1=l1+1
     CALL fourier_dim(l2,n2)
@@ -279,14 +265,14 @@ CONTAINS
     ELSE
        PRINT *,'the FFT in the z direction is not allowed'
        PRINT *,'n03 dimension',n03
-       STOP
+       CPABORT("")
     END IF
     CALL fourier_dim(l3,n3)
     IF (n3 == m3) THEN
     ELSE
        PRINT *,'the FFT in the y direction is not allowed'
        PRINT *,'n02 dimension',n02
-       STOP
+       CPABORT("")
     END IF
 
     !dimensions that contain the unpadded real space,
@@ -371,7 +357,7 @@ CONTAINS
     ELSE
        PRINT *,'the FFT in the x direction is not allowed'
        PRINT *,'n01 dimension',n01
-       STOP
+       CPABORT("")
     END IF
     l1=l1+1
     CALL fourier_dim(l2,n2)
@@ -379,7 +365,7 @@ CONTAINS
     ELSE
        PRINT *,'the FFT in the z direction is not allowed'
        PRINT *,'n03 dimension',n03
-       STOP
+       CPABORT("")
     END IF
     DO
        CALL fourier_dim(l3,n3)

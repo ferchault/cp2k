@@ -18,6 +18,7 @@ MODULE bessel_lib
   USE mathconstants,                   ONLY: fac,&
                                              pi
 #include "cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -291,7 +292,7 @@ CONTAINS
         bessel0=bessel0+fact
         IF (ABS(fact) < tol) EXIT
       ENDDO
-      IF (ABS(fact) > tol) STOP "BESSEL0 NOT CONVERGED"
+      IF (ABS(fact) > tol) CPABORT("BESSEL0 NOT CONVERGED")
     END IF
 
   END FUNCTION bessel0

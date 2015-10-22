@@ -24,6 +24,7 @@ MODULE swarm_worker
                                              swarm_message_haskey,&
                                              swarm_message_type
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
  IMPLICIT NONE
  PRIVATE
@@ -38,7 +39,6 @@ MODULE swarm_worker
    PRIVATE
    INTEGER                                  :: id = -1
    INTEGER                                  :: iw = -1
-   TYPE(cp_error_type)                      :: error
    INTEGER                                  :: behavior = -1
    TYPE(glbopt_worker_type), POINTER        :: glbopt => Null()
    !possbily more behaviors...
@@ -56,38 +56,38 @@ MODULE swarm_worker
 !> \param root_section ...
 !> \param input_path ...
 !> \param worker_id ...
-!> \param error ...
 !> \author Ole Schuett
 ! *****************************************************************************
    SUBROUTINE swarm_worker_init(worker, para_env, input_declaration, root_section,&
-                 input_path, worker_id, error)
+                 input_path, worker_id)
     TYPE(swarm_worker_type), INTENT(INOUT)   :: worker
     TYPE(cp_para_env_type), POINTER          :: para_env
     TYPE(section_type), POINTER              :: input_declaration
     TYPE(section_vals_type), POINTER         :: root_section
     CHARACTER(LEN=*), INTENT(IN)             :: input_path
     INTEGER, INTENT(in)                      :: worker_id
-    TYPE(cp_error_type), INTENT(inout)       :: error
+
+    CHARACTER(len=*), PARAMETER :: routineN = 'swarm_worker_init', &
+      routineP = moduleN//':'//routineN
 
     TYPE(cp_logger_type), POINTER            :: logger
 
-    worker%error = error
     worker%id = worker_id
 
     ! getting an output unit for logging
-    logger => cp_error_get_logger(worker%error)
+    logger => cp_get_default_logger()
     worker%iw = cp_print_key_unit_nr(logger,root_section,&
-          "SWARM%PRINT%WORKER_RUN_INFO",extension=".workerLog", error=worker%error)
+          "SWARM%PRINT%WORKER_RUN_INFO",extension=".workerLog")
 
-    CALL section_vals_val_get(root_section,"SWARM%BEHAVIOR", i_val=worker%behavior, error=error)
+    CALL section_vals_val_get(root_section,"SWARM%BEHAVIOR", i_val=worker%behavior)
 
     SELECT CASE(worker%behavior)
       CASE(swarm_do_glbopt)
          ALLOCATE(worker%glbopt)
          CALL glbopt_worker_init(worker%glbopt, input_declaration, para_env,&
-                      root_section, input_path, worker_id, worker%iw, error)
+                      root_section, input_path, worker_id, worker%iw)
       CASE DEFAULT
-         STOP "swarm_worker_init: got unknown behavior"
+         CPABORT("got unknown behavior")
     END SELECT
 
   END SUBROUTINE swarm_worker_init
@@ -107,6 +107,9 @@ MODULE swarm_worker
     TYPE(swarm_message_type), INTENT(OUT)    :: report
     LOGICAL, INTENT(INOUT)                   :: should_stop
 
+    CHARACTER(len=*), PARAMETER :: routineN = 'swarm_worker_execute', &
+      routineP = moduleN//':'//routineN
+
     CHARACTER(LEN=default_string_length)     :: command
 
      CALL swarm_message_get(cmd, "command", command)
@@ -122,7 +125,7 @@ MODULE swarm_worker
            CASE(swarm_do_glbopt)
              CALL glbopt_worker_execute(worker%glbopt, cmd, report)
            CASE DEFAULT
-              STOP "swarm_worker_execute: got unknown behavior"
+              CPABORT("got unknown behavior")
         END SELECT
      ENDIF
 
@@ -140,12 +143,15 @@ MODULE swarm_worker
    SUBROUTINE swarm_worker_finalize(worker)
     TYPE(swarm_worker_type), INTENT(INOUT)   :: worker
 
+    CHARACTER(len=*), PARAMETER :: routineN = 'swarm_worker_finalize', &
+      routineP = moduleN//':'//routineN
+
      SELECT CASE(worker%behavior)
       CASE(swarm_do_glbopt)
          CALL glbopt_worker_finalize(worker%glbopt)
          DEALLOCATE(worker%glbopt)
       CASE DEFAULT
-         STOP "swarm_worker_finalize: got unknown behavior"
+         CPABORT("got unknown behavior")
     END SELECT
 
    END SUBROUTINE swarm_worker_finalize

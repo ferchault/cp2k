@@ -13,6 +13,7 @@ MODULE qs_dftb_types
   USE kinds,                           ONLY: default_string_length,&
                                              dp
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -77,12 +78,10 @@ CONTAINS
 ! *****************************************************************************
 !> \brief ...
 !> \param pairpot ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE qs_dftb_pairpot_init(pairpot,error)
+  SUBROUTINE qs_dftb_pairpot_init(pairpot)
     TYPE(qs_dftb_pairpot_type), &
       DIMENSION(:, :), POINTER               :: pairpot
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'qs_dftb_pairpot_init', &
       routineP = moduleN//':'//routineN
@@ -106,55 +105,42 @@ CONTAINS
 !> \param ngrd ...
 !> \param llm ...
 !> \param spdim ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE qs_dftb_pairpot_create(pairpot,ngrd,llm,spdim,error)
+  SUBROUTINE qs_dftb_pairpot_create(pairpot,ngrd,llm,spdim)
     TYPE(qs_dftb_pairpot_type)               :: pairpot
     INTEGER, INTENT(IN)                      :: ngrd, llm, spdim
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'qs_dftb_pairpot_create', &
       routineP = moduleN//':'//routineN
-
-    INTEGER                                  :: stat
 
     pairpot%ngrd = ngrd
     pairpot%spdim = spdim
     pairpot%llm = llm
 
     IF ( spdim > 0 ) THEN
-      ALLOCATE(pairpot%spxr(spdim,2),stat=stat)
-      CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+      ALLOCATE(pairpot%spxr(spdim,2))
 
-      ALLOCATE(pairpot%scoeff(spdim,4),stat=stat)
-      CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+      ALLOCATE(pairpot%scoeff(spdim,4))
     END IF
 
-    ALLOCATE(pairpot%fmat(ngrd,llm),stat=stat)
-    CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+    ALLOCATE(pairpot%fmat(ngrd,llm))
 
-    ALLOCATE(pairpot%smat(ngrd,llm),stat=stat)
-    CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+    ALLOCATE(pairpot%smat(ngrd,llm))
 
   END SUBROUTINE qs_dftb_pairpot_create
 
 ! *****************************************************************************
 !> \brief ...
 !> \param pairpot ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE qs_dftb_pairpot_release(pairpot,error)
+  SUBROUTINE qs_dftb_pairpot_release(pairpot)
     TYPE(qs_dftb_pairpot_type), &
       DIMENSION(:, :), POINTER               :: pairpot
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'qs_dftb_pairpot_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, j, n1, n2, stat
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
+    INTEGER                                  :: i, j, n1, n2
 
     IF (ASSOCIATED(pairpot)) THEN
       n1 = SIZE(pairpot,1)
@@ -162,25 +148,20 @@ CONTAINS
       DO i=1,n1
         DO j=1,n2
           IF (ASSOCIATED(pairpot(i,j)%spxr)) THEN
-            DEALLOCATE(pairpot(i,j)%spxr,stat=stat)
-            CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+            DEALLOCATE(pairpot(i,j)%spxr)
           END IF
           IF (ASSOCIATED(pairpot(i,j)%scoeff)) THEN
-            DEALLOCATE(pairpot(i,j)%scoeff,stat=stat)
-            CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+            DEALLOCATE(pairpot(i,j)%scoeff)
           END IF
           IF (ASSOCIATED(pairpot(i,j)%smat)) THEN
-            DEALLOCATE(pairpot(i,j)%smat,stat=stat)
-            CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+            DEALLOCATE(pairpot(i,j)%smat)
           END IF
           IF (ASSOCIATED(pairpot(i,j)%fmat)) THEN
-            DEALLOCATE(pairpot(i,j)%fmat,stat=stat)
-            CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+            DEALLOCATE(pairpot(i,j)%fmat)
           END IF
         END DO
       END DO
-      DEALLOCATE(pairpot,stat=stat)
-      CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+      DEALLOCATE(pairpot)
     END IF
 
   END SUBROUTINE qs_dftb_pairpot_release

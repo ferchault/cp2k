@@ -39,10 +39,11 @@ MODULE qmmm_per_elpot
                                              do_ewald_spme
   USE qmmm_gaussian_types,             ONLY: qmmm_gaussian_p_type,&
                                              qmmm_gaussian_type
-  USE qmmm_types,                      ONLY: qmmm_per_pot_p_type,&
+  USE qmmm_types_low,                  ONLY: qmmm_per_pot_p_type,&
                                              qmmm_per_pot_type,&
                                              qmmm_pot_p_type
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -70,15 +71,13 @@ CONTAINS
 !> \param maxchrg ...
 !> \param ncp ...
 !> \param ncpl ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      09.2004 created [tlaino]
 !> \author Teodoro Laino
 ! *****************************************************************************
   SUBROUTINE qmmm_per_potential_init(qmmm_coupl_type, per_potentials, potentials,&
     pgfs, qm_cell_small, mm_cell, para_env, compatibility, qmmm_periodic, print_section,&
-    eps_mm_rspace, maxchrg, ncp, ncpl, error)
+    eps_mm_rspace, maxchrg, ncp, ncpl)
     INTEGER, INTENT(IN)                      :: qmmm_coupl_type
     TYPE(qmmm_per_pot_p_type), &
       DIMENSION(:), POINTER                  :: per_potentials
@@ -92,16 +91,13 @@ CONTAINS
     TYPE(section_vals_type), POINTER         :: qmmm_periodic, print_section
     REAL(KIND=dp), INTENT(IN)                :: eps_mm_rspace, maxchrg
     INTEGER, INTENT(IN)                      :: ncp(3), ncpl(3)
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'qmmm_per_potential_init', &
       routineP = moduleN//':'//routineN
 
     INTEGER :: I, idim, ig, ig_start, iw, ix, iy, iz, K, Kmax(3), &
-      n_rep_real(3), n_rep_real_val, ncoarsel, ncoarset, Ndim, output_unit, &
-      stat
+      n_rep_real(3), n_rep_real_val, ncoarsel, ncoarset, Ndim, output_unit
     INTEGER, DIMENSION(:), POINTER           :: mm_atom_index
-    LOGICAL                                  :: failure
     REAL(KIND=dp) :: Ak, alpha, box(3), Fac(3), fs, g, g2, Gk, Gmax, &
       mymaxradius, npl, npt, Prefactor, rc, rc2, Rmax, tmp, vec(3), vol
     REAL(KIND=dp), DIMENSION(:), POINTER     :: gx, gy, gz, Lg
@@ -111,13 +107,13 @@ CONTAINS
     NULLIFY(Lg, gx, gy, gz)
     ncoarset = PRODUCT(ncp)
     ncoarsel = PRODUCT(ncpl)
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
     output_unit= cp_logger_get_default_io_unit(logger)
     Rmax = SQRT(mm_cell%hmat(1,1)**2+&
                 mm_cell%hmat(2,2)**2+&
                 mm_cell%hmat(3,3)**2 )
-    CALL section_vals_val_get(qmmm_periodic,"GMAX",r_val=Gmax,error=error)
-    CALL section_vals_val_get(qmmm_periodic,"REPLICA",i_val=n_rep_real_val,error=error)
+    CALL section_vals_val_get(qmmm_periodic,"GMAX",r_val=Gmax)
+    CALL section_vals_val_get(qmmm_periodic,"REPLICA",i_val=n_rep_real_val)
     fac = 2.0e0_dp*Pi/(/mm_cell%hmat(1,1),mm_cell%hmat(2,2),mm_cell%hmat(3,3)/)
     Kmax    = CEILING(Gmax/Fac)
     Vol     = mm_cell%hmat(1,1)*&
@@ -128,28 +124,22 @@ CONTAINS
     n_rep_real = n_rep_real_val
     IF (compatibility.AND.(qmmm_coupl_type==do_qmmm_gauss)) ig_start = 2
 
-    CPPrecondition(.NOT.ASSOCIATED(per_potentials),cp_failure_level,routineP,error,failure)
-    ALLOCATE(per_potentials(SIZE(pgfs)),stat=stat)
-    CPPostcondition(stat==0,cp_fatal_level,routineP,error,failure)
-    CPPrecondition(SIZE(pgfs)==SIZE(potentials),cp_failure_level,routineP,error,failure)
+    CPASSERT(.NOT.ASSOCIATED(per_potentials))
+    ALLOCATE(per_potentials(SIZE(pgfs)))
+    CPASSERT(SIZE(pgfs)==SIZE(potentials))
     Potential_Type: DO K = 1, SIZE(pgfs)
 
        rc = pgfs(K)%pgf%Elp_Radius
-       ALLOCATE(per_potentials(K)%Pot, stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       ALLOCATE(per_potentials(K)%Pot)
        SELECT CASE(qmmm_coupl_type)
        CASE(do_qmmm_coulomb,do_qmmm_pcharge)
           ! Not yet implemented for this case
-          CPPostcondition(.FALSE.,cp_failure_level,routineP,error,failure)
+          CPABORT("")
        CASE(do_qmmm_gauss,do_qmmm_swave)
-          ALLOCATE(Lg(Ndim), stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-          ALLOCATE(gx(Ndim), stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-          ALLOCATE(gy(Ndim), stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-          ALLOCATE(gz(Ndim), stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          ALLOCATE(Lg(Ndim))
+          ALLOCATE(gx(Ndim))
+          ALLOCATE(gy(Ndim))
+          ALLOCATE(gz(Ndim))
        END SELECT
 
        LG = 0.0_dp
@@ -160,7 +150,7 @@ CONTAINS
        SELECT CASE(qmmm_coupl_type)
        CASE(do_qmmm_coulomb,do_qmmm_pcharge)
           ! Not yet implemented for this case
-          CPPostcondition(.FALSE.,cp_failure_level,routineP,error,failure)
+          CPABORT("")
        CASE(do_qmmm_gauss,do_qmmm_swave)
           pgf => pgfs(K)%pgf
           idim = 0
@@ -214,7 +204,7 @@ CONTAINS
              box (2) = (qm_cell_small%hmat(2,2) - mm_cell%hmat(2,2))/2.0_dp
              box (3) = (qm_cell_small%hmat(3,3) - mm_cell%hmat(3,3))/2.0_dp
              IF (ANY(box > 0.0_dp)) THEN
-                CPPostcondition(.FALSE.,cp_fatal_level,routineP,error,failure)
+                CPABORT("")
              END IF
              n_rep_real(1) = CEILING(( box(1) + mymaxradius ) / mm_cell%hmat(1,1))
              n_rep_real(2) = CEILING(( box(2) + mymaxradius ) / mm_cell%hmat(2,2))
@@ -223,15 +213,12 @@ CONTAINS
 
        CASE DEFAULT
           DEALLOCATE(per_potentials(K)%Pot)
-          CPPostcondition(stat==0,cp_fatal_level,routineP,error,failure)
-          NULLIFY(per_potentials(K)%Pot)
           IF (output_unit>0) WRITE(output_unit,'(A)')" QMMM Periodic Potential - not Initialized!"
           CYCLE Potential_Type
        END SELECT
 
        NULLIFY(mm_atom_index)
-       ALLOCATE(mm_atom_index(SIZE(potentials(K)%pot%mm_atom_index)),stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,Failure)
+       ALLOCATE(mm_atom_index(SIZE(potentials(K)%pot%mm_atom_index)))
        mm_atom_index = potentials(K)%pot%mm_atom_index
 
        NULLIFY(per_potentials(K)%Pot%LG, per_potentials(K)%Pot%mm_atom_index,&
@@ -240,11 +227,10 @@ CONTAINS
                                      Gmax=Gmax, Kmax=Kmax, n_rep_real=n_rep_real,&
                                      Fac=Fac, mm_atom_index=mm_atom_index, &
                                      mm_cell=mm_cell, para_env=para_env,&
-                                     qmmm_per_section=qmmm_periodic, print_section=print_section,&
-                                     error=error)
+                                     qmmm_per_section=qmmm_periodic, print_section=print_section)
 
        iw=cp_print_key_unit_nr(logger,print_section,"PERIODIC_INFO",&
-                                         extension=".log",error=error)
+                                         extension=".log")
        IF ( iw > 0) THEN
              npt = REAL(ncoarset,KIND=dp)*REAL(ndim,KIND=dp)*REAL(SIZE(mm_atom_index),KIND=dp)
              npl = REAL(ncoarsel,KIND=dp)*REAL(ndim,KIND=dp)*REAL(SIZE(mm_atom_index),KIND=dp)
@@ -261,7 +247,7 @@ CONTAINS
              WRITE (UNIT=iw,FMT="(T2,A)") REPEAT("-",79)
        END IF
        CALL cp_print_key_finished_output(iw,logger,print_section,&
-               "PERIODIC_INFO", error=error)
+               "PERIODIC_INFO")
 
     END DO Potential_Type
 
@@ -283,15 +269,12 @@ CONTAINS
 !> \param para_env ...
 !> \param qmmm_per_section ...
 !> \param print_section ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      09.2004 created [tlaino]
 !> \author Teodoro Laino
 ! *****************************************************************************
   SUBROUTINE qmmm_per_pot_type_create(Pot, LG, gx, gy, gz, GMax, Kmax, n_rep_real,&
-       Fac, mm_atom_index, mm_cell, para_env, qmmm_per_section, print_section,&
-       error)
+       Fac, mm_atom_index, mm_cell, para_env, qmmm_per_section, print_section)
     TYPE(qmmm_per_pot_type), POINTER         :: Pot
     REAL(KIND=dp), DIMENSION(:), POINTER     :: LG, gx, gy, gz
     REAL(KIND=dp), INTENT(IN)                :: Gmax
@@ -302,44 +285,39 @@ CONTAINS
     TYPE(cp_para_env_type), POINTER          :: para_env
     TYPE(section_vals_type), POINTER         :: qmmm_per_section, &
                                                 print_section
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'qmmm_per_pot_type_create', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: npts(3)
     INTEGER, DIMENSION(:), POINTER           :: ngrids
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: hmat(3,3)
     TYPE(section_vals_type), POINTER         :: grid_print_section
 
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       Pot%LG            => LG
-       Pot%gx            => gx
-       Pot%gy            => gy
-       Pot%gz            => gz
-       Pot%mm_atom_index => mm_atom_index
-       Pot%Gmax          =  Gmax
-       Pot%Kmax          =  Kmax
-       Pot%n_rep_real    =  n_rep_real
-       Pot%Fac           =  Fac
-       !
-       ! Setting Up Fit Procedure
-       !
-       NULLIFY(Pot%pw_grid)
-       NULLIFY(Pot%pw_pool)
-       NULLIFY(Pot%TabLR, ngrids)
-       CALL section_vals_val_get(qmmm_per_section,"ngrids", i_vals=ngrids, error=error)
-       npts =  ngrids
-       hmat =  mm_cell%hmat
+    Pot%LG            => LG
+    Pot%gx            => gx
+    Pot%gy            => gy
+    Pot%gz            => gz
+    Pot%mm_atom_index => mm_atom_index
+    Pot%Gmax          =  Gmax
+    Pot%Kmax          =  Kmax
+    Pot%n_rep_real    =  n_rep_real
+    Pot%Fac           =  Fac
+    !
+    ! Setting Up Fit Procedure
+    !
+    NULLIFY(Pot%pw_grid)
+    NULLIFY(Pot%pw_pool)
+    NULLIFY(Pot%TabLR, ngrids)
+    CALL section_vals_val_get(qmmm_per_section,"ngrids", i_vals=ngrids)
+    npts =  ngrids
+    hmat =  mm_cell%hmat
 
-       grid_print_section=> section_vals_get_subs_vals(print_section,"GRID_INFORMATION",error=error)
-       CALL Setup_Ewald_Spline(pw_grid=Pot%pw_grid, pw_pool=Pot%pw_pool, coeff=Pot%TabLR,&
-            LG=LG, gx=gx, gy=gy, gz=gz, hmat=hmat, npts=npts, param_section=qmmm_per_section,&
-            tag="qmmm",para_env=para_env, print_section=grid_print_section,error=error)
+    grid_print_section=> section_vals_get_subs_vals(print_section,"GRID_INFORMATION")
+    CALL Setup_Ewald_Spline(pw_grid=Pot%pw_grid, pw_pool=Pot%pw_pool, coeff=Pot%TabLR,&
+         LG=LG, gx=gx, gy=gy, gz=gz, hmat=hmat, npts=npts, param_section=qmmm_per_section,&
+         tag="qmmm",para_env=para_env, print_section=grid_print_section)
 
-    END IF
 
   END SUBROUTINE qmmm_per_pot_type_create
 
@@ -353,71 +331,62 @@ CONTAINS
 !> \param para_env ...
 !> \param qmmm_periodic ...
 !> \param print_section ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      10.2014 created [JGH]
 !> \author JGH
 ! *****************************************************************************
   SUBROUTINE qmmm_ewald_potential_init(ewald_env,ewald_pw,qmmm_coupl_type, mm_cell, para_env,&
-                                       qmmm_periodic, print_section, error)
+                                       qmmm_periodic, print_section)
     TYPE(ewald_environment_type), POINTER    :: ewald_env
     TYPE(ewald_pw_type), POINTER             :: ewald_pw
     INTEGER, INTENT(IN)                      :: qmmm_coupl_type
     TYPE(cell_type), POINTER                 :: mm_cell
     TYPE(cp_para_env_type), POINTER          :: para_env
     TYPE(section_vals_type), POINTER         :: qmmm_periodic, print_section
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'qmmm_ewald_potential_init', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: ewald_type, gmax(3), iw, &
                                                 o_spline, ounit
-    LOGICAL                                  :: do_multipoles, failure
+    LOGICAL                                  :: do_multipoles
     REAL(KIND=dp)                            :: alpha, rcut
     TYPE(cp_logger_type), POINTER            :: logger
     TYPE(section_vals_type), POINTER         :: ewald_print_section, &
                                                 ewald_section, poisson_section
 
-    failure = .FALSE.
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
     ounit = cp_logger_get_default_io_unit(logger)
-    CPPrecondition(.NOT.ASSOCIATED(ewald_env),cp_failure_level,routineP,error,failure) 
-    CPPrecondition(.NOT.ASSOCIATED(ewald_pw),cp_failure_level,routineP,error,failure) 
+    CPASSERT(.NOT.ASSOCIATED(ewald_env))
+    CPASSERT(.NOT.ASSOCIATED(ewald_pw))
 
     ! Create Ewald environments
-    poisson_section => section_vals_get_subs_vals(qmmm_periodic,"POISSON",error=error)
-    CALL ewald_env_create(ewald_env,para_env,error=error)
-    CALL ewald_env_set(ewald_env,poisson_section=poisson_section,error=error)
-    ewald_section => section_vals_get_subs_vals(poisson_section,"EWALD",error=error)
-    CALL read_ewald_section(ewald_env,ewald_section,error=error)
-    ewald_print_section => section_vals_get_subs_vals(print_section,"GRID_INFORMATION",error=error)
-    CALL ewald_pw_create(ewald_pw,ewald_env,mm_cell,mm_cell,print_section=ewald_print_section,error=error)
+    poisson_section => section_vals_get_subs_vals(qmmm_periodic,"POISSON")
+    CALL ewald_env_create(ewald_env,para_env)
+    CALL ewald_env_set(ewald_env,poisson_section=poisson_section)
+    ewald_section => section_vals_get_subs_vals(poisson_section,"EWALD")
+    CALL read_ewald_section(ewald_env,ewald_section)
+    ewald_print_section => section_vals_get_subs_vals(print_section,"GRID_INFORMATION")
+    CALL ewald_pw_create(ewald_pw,ewald_env,mm_cell,mm_cell,print_section=ewald_print_section)
 
     CALL ewald_env_get(ewald_env,ewald_type=ewald_type,do_multipoles=do_multipoles,&
-                       gmax=gmax,o_spline=o_spline,alpha=alpha,rcut=rcut,error=error)
-    IF(do_multipoles) CALL cp_unimplemented_error(fromWhere=routineP,&
-       message="No multipole force fields allowed in QM-QM Ewald long range correction",&
-       error=error, error_level=cp_fatal_level)
+                       gmax=gmax,o_spline=o_spline,alpha=alpha,rcut=rcut)
+    IF(do_multipoles)&
+       CPABORT("No multipole force fields allowed in QM-QM Ewald long range correction")
 
     SELECT CASE(qmmm_coupl_type)
        CASE(do_qmmm_coulomb)
-          CALL cp_unimplemented_error(fromWhere=routineP, &
-            message="QM-QM long range correction not possible with COULOMB coupling", &
-            error=error, error_level=cp_fatal_level)
+          CPABORT("QM-QM long range correction not possible with COULOMB coupling")
        CASE(do_qmmm_pcharge)
           ! OK
        CASE(do_qmmm_gauss,do_qmmm_swave)
-          CALL cp_unimplemented_error(fromWhere=routineP, &
-            message="QM-QM long range correction not possible with GAUSS/SWAVE coupling", &
-            error=error, error_level=cp_fatal_level)
+          CPABORT("QM-QM long range correction not possible with GAUSS/SWAVE coupling")
        CASE DEFAULT
           ! We should never get to this point
-          CPPostcondition(.FALSE.,cp_failure_level,routineP,error,failure) 
+          CPABORT("")
     END SELECT
 
-    iw=cp_print_key_unit_nr(logger,print_section,"PERIODIC_INFO",extension=".log",error=error)
+    iw=cp_print_key_unit_nr(logger,print_section,"PERIODIC_INFO",extension=".log")
     IF ( iw > 0) THEN
        WRITE (UNIT=iw,FMT="(/,T2,A)") REPEAT("-",79)
        WRITE (UNIT=iw,FMT="(T2,A,T20,A,T80,A)")"-","QMMM PERIODIC BOUNDARY CONDITION INFO","-"
@@ -425,17 +394,11 @@ CONTAINS
        WRITE (UNIT=iw,FMT="(T2,A)") REPEAT("-",79)
        SELECT CASE(ewald_type)
           CASE(do_ewald_none)
-             CALL cp_unimplemented_error(fromWhere=routineP, &
-               message="QM-QM long range correction not compatible with Ewald=NONE", &
-               error=error, error_level=cp_fatal_level)
+             CPABORT("QM-QM long range correction not compatible with Ewald=NONE")
           CASE(do_ewald_pme)
-             CALL cp_unimplemented_error(fromWhere=routineP, &
-               message="QM-QM long range correction not possible with Ewald=PME", &
-               error=error, error_level=cp_fatal_level)
+             CPABORT("QM-QM long range correction not possible with Ewald=PME")
           CASE(do_ewald_ewald)
-             CALL cp_unimplemented_error(fromWhere=routineP, &
-               message="QM-QM long range correction not possible with Ewald method", &
-               error=error, error_level=cp_fatal_level)
+             CPABORT("QM-QM long range correction not possible with Ewald method")
           CASE(do_ewald_spme)
              WRITE (UNIT=iw,FMT="(T2,A,T35,A,T75,A,T80,A)")"-","Ewald type","SPME","-"
              WRITE (UNIT=iw,FMT="(T2,A,T35,A,T61,3I6,T80,A)")"-","GMAX values",gmax,"-"
@@ -445,7 +408,7 @@ CONTAINS
        END SELECT
        WRITE (UNIT=iw,FMT="(T2,A)") REPEAT("-",79)
     END IF
-    CALL cp_print_key_finished_output(iw,logger,print_section,"PERIODIC_INFO", error=error)
+    CALL cp_print_key_finished_output(iw,logger,print_section,"PERIODIC_INFO")
 
   END SUBROUTINE qmmm_ewald_potential_init
 

@@ -24,10 +24,6 @@ MODULE environment
   USE cp_fm_diag,                      ONLY: diag_init
   USE cp_fm_struct,                    ONLY: cp_fm_struct_config
   USE cp_fm_types,                     ONLY: cp_fm_setup
-  USE cp_ma_interface,                 ONLY: &
-       cp_ma_config, cp_ma_current_thread_run, cp_ma_mempol, cp_ma_mpi_sched, &
-       cp_ma_print_machine, cp_ma_print_strategy, cp_ma_run_on, &
-       cp_ma_thread_run_on, cp_ma_thread_sched
   USE cp_output_handling,              ONLY: cp_print_key_finished_output,&
                                              cp_print_key_unit_nr,&
                                              debug_print_level,&
@@ -70,10 +66,6 @@ MODULE environment
                                              m_flush_internal,&
                                              m_memory_details,&
                                              m_procrun
-  USE machine_architecture_types,      ONLY: group,&
-                                             has_ma,&
-                                             local,&
-                                             threads
   USE message_passing,                 ONLY: add_mp_perf_env,&
                                              describe_mp_perf_env,&
                                              mp_external_timeset,&
@@ -97,20 +89,18 @@ MODULE environment
                                              integer_to_string,&
                                              string_to_ascii
   USE termination,                     ONLY: set_error_unit,&
-                                             stop_memory,&
-                                             stop_program
+                                             stop_memory
   USE timings,                         ONLY: add_timer_env,&
                                              rm_timer_env,&
-                                             timeset,&
-                                             timestop,&
                                              timings_setup_tracing
   USE timings_report,                  ONLY: cost_type_energy,&
                                              cost_type_time,&
                                              timings_report_callgraph,&
                                              timings_report_print
 
-  !$ USE OMP_LIB
+  !$ USE OMP_LIB, ONLY: omp_get_max_threads, omp_get_thread_num, omp_get_num_threads
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -147,8 +137,9 @@ CONTAINS
     CHARACTER(len=*), PARAMETER :: routineN = 'cp2k_init', &
       routineP = moduleN//':'//routineN
 
+    CHARACTER(LEN=10*default_string_length)  :: cp_flags
     CHARACTER(LEN=default_string_length)     :: dev_flag
-    INTEGER                                  :: my_output_unit
+    INTEGER                                  :: ilen, my_output_unit
     TYPE(cp_logger_type), POINTER            :: logger
 
 ! create a timer_env
@@ -196,8 +187,14 @@ CONTAINS
        WRITE (UNIT=my_output_unit,FMT="(T2,A,T41,A40)")&
             "CP2K| source code revision number:",&
             ADJUSTR(compile_revision)
+       cp_flags=cp2k_flags()
+       ilen=LEN_TRIM(cp_flags)
        WRITE (UNIT=my_output_unit,FMT="(T2,A)")&
-            "CP2K| "//TRIM(cp2k_flags())
+            "CP2K| "//cp_flags(1:73)
+       IF(ilen>73) THEN
+          WRITE (UNIT=my_output_unit,FMT="(T2,A)")&
+            "CP2K|            "//TRIM(cp_flags(74:))
+       END IF
        WRITE (UNIT=my_output_unit,FMT="(T2,A,T41,A40)")&
             "CP2K| is freely available from ",&
             ADJUSTR(TRIM(cp2k_home))
@@ -268,15 +265,8 @@ CONTAINS
        END DO
        WRITE (UNIT=output_unit,FMT="(T2,A)") ""
     END IF
-    DEALLOCATE (all_pid,STAT=istat)
-    IF (istat /= 0) THEN
-       CALL stop_memory(routineN,moduleN,__LINE__,"all_pid")
-    END IF
-    DEALLOCATE (all_host,STAT=istat)
-    IF (istat /= 0) THEN
-       CALL stop_memory(routineN,moduleN,__LINE__,"all_host")
-
-    END IF
+    DEALLOCATE (all_pid)
+    DEALLOCATE (all_host)
 
   END SUBROUTINE echo_all_hosts
 
@@ -335,17 +325,11 @@ CONTAINS
           WRITE (UNIT=output_unit,FMT="(T2,A)") ""
         END IF
        END DO
-       DEALLOCATE (all_pid,STAT=istat)
-       IF (istat /= 0) THEN
-         CALL stop_memory(routineN,moduleN,__LINE__,"all_pid")
-       END IF
+       DEALLOCATE (all_pid)
 
     END IF
 
-    DEALLOCATE (all_host,STAT=istat)
-    IF (istat /= 0) THEN
-       CALL stop_memory(routineN,moduleN,__LINE__,"all_host")
-    END IF
+    DEALLOCATE (all_host)
 
   END SUBROUTINE echo_all_process_host
 
@@ -356,7 +340,6 @@ CONTAINS
 !> \param root_section ...
 !> \param para_env ...
 !> \param globenv the globenv
-!> \param error ...
 !> \author fawzi
 !> \note
 !>      The following routines need to be synchronized wrt. adding/removing
@@ -365,12 +348,11 @@ CONTAINS
 !>      f77_interface:f_env_add_defaults, f77_interface:f_env_rm_defaults,
 !>      f77_interface:create_force_env, f77_interface:destroy_force_env
 ! *****************************************************************************
-  SUBROUTINE cp2k_read(root_section,para_env,globenv,error)
+  SUBROUTINE cp2k_read(root_section,para_env,globenv)
 
     TYPE(section_vals_type), POINTER         :: root_section
     TYPE(cp_para_env_type), POINTER          :: para_env
     TYPE(global_environment_type), POINTER   :: globenv
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cp2k_read', &
       routineP = moduleN//':'//routineN
@@ -385,32 +367,32 @@ CONTAINS
 
     ! try to use better names for the local log if it is not too late
     CALL section_vals_val_get(root_section,"GLOBAL%OUTPUT_FILE_NAME",&
-         c_val=c_val,error=error)
+         c_val=c_val)
     IF (c_val/="") THEN
        CALL cp_logger_set(logger,&
             local_filename=TRIM(c_val)//"_localLog")
     END IF
-    CALL section_vals_val_get(root_section,"GLOBAL%PROJECT",c_val=c_val,error=error)
+    CALL section_vals_val_get(root_section,"GLOBAL%PROJECT",c_val=c_val)
     IF (c_val/="") THEN
        CALL cp_logger_set(logger,local_filename=TRIM(c_val)//"_localLog")
     END IF
     logger%iter_info%project_name=c_val
-    CALL section_vals_val_get(root_section,"GLOBAL%PRINT_LEVEL",i_val=logger%iter_info%print_level,error=error)
+    CALL section_vals_val_get(root_section,"GLOBAL%PRINT_LEVEL",i_val=logger%iter_info%print_level)
 
     !   *** Read the CP2K section ***
-    CALL read_cp2k_section(root_section,para_env,globenv,error=error)
+    CALL read_cp2k_section(root_section,para_env,globenv)
 
     iw = cp_print_key_unit_nr(logger,root_section,"GLOBAL%PRINT/BASIC_DATA_TYPES",&
-         extension=".Log",error=error)
+         extension=".Log")
     IF (iw>0) CALL print_kind_info(iw)
     CALL cp_print_key_finished_output(iw,logger,root_section,&
-         "GLOBAL%PRINT/BASIC_DATA_TYPES",error=error)
+         "GLOBAL%PRINT/BASIC_DATA_TYPES")
 
     iw = cp_print_key_unit_nr(logger,root_section,"GLOBAL%PRINT/PHYSCON",&
-         extension=".Log",error=error)
+         extension=".Log")
     IF (iw>0) CALL write_physcon(iw)
     CALL cp_print_key_finished_output(iw,logger,root_section,&
-         "GLOBAL%PRINT/PHYSCON",error=error)
+         "GLOBAL%PRINT/PHYSCON")
 
   END SUBROUTINE cp2k_read
 
@@ -419,77 +401,65 @@ CONTAINS
 !> \param root_section ...
 !> \param para_env ...
 !> \param globenv the global environment to initialize
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author fawzi
 !> \note
 !>      if possible do the initializations here as the environement
 !>      (error,...) is setup, instaed of cp2k_init
 ! *****************************************************************************
-  SUBROUTINE cp2k_setup(root_section,para_env,globenv,error)
+  SUBROUTINE cp2k_setup(root_section,para_env,globenv)
 
     TYPE(section_vals_type), POINTER         :: root_section
     TYPE(cp_para_env_type), POINTER          :: para_env
     TYPE(global_environment_type), POINTER   :: globenv
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'cp2k_setup', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: input_seed, iw
-    LOGICAL                                  :: failure
     REAL(KIND=dp), DIMENSION(3, 2)           :: initial_seed
     TYPE(cp_logger_type), POINTER            :: logger
 
-    failure = .FALSE.
-
     NULLIFY(logger)
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
 
-    IF (.NOT.failure) THEN
 
-       ! Initialize the parallel random number generator
+    ! Initialize the parallel random number generator
 
-       CALL init_rng()
-       iw = cp_print_key_unit_nr(logger,root_section,"GLOBAL%PRINT/RNG_MATRICES",&
-            extension=".Log",error=error)
-       IF (iw > 0) THEN
-          CALL write_rng_matrices(iw)
-       END IF
-       CALL cp_print_key_finished_output(iw,logger,root_section,&
-            "GLOBAL%PRINT/RNG_MATRICES",&
-            error=error)
-
-       ! Initialize a global normally Gaussian distributed (pseudo)random number stream
-
-       CALL section_vals_val_get(root_section,"GLOBAL%SEED",i_val=input_seed,error=error)
-       initial_seed(:,:) = REAL(input_seed,KIND=dp)
-       CALL create_rng_stream(rng_stream=globenv%gaussian_rng_stream,&
-            name="Global Gaussian random numbers",&
-            distribution_type=GAUSSIAN,&
-            seed=initial_seed,&
-            extended_precision=.TRUE.,&
-            error=error)
-
-       iw = cp_print_key_unit_nr(logger,root_section,"GLOBAL%PRINT/RNG_CHECK",&
-            extension=".Log",error=error)
-       IF (iw > 0) THEN
-          CALL check_rng(iw,para_env%ionode,error)
-       END IF
-       CALL cp_print_key_finished_output(iw,logger,root_section,&
-            "GLOBAL%PRINT/RNG_CHECK",&
-            error=error)
-
-       iw = cp_print_key_unit_nr(logger,root_section,"GLOBAL%PRINT/GLOBAL_GAUSSIAN_RNG",&
-            extension=".Log",error=error)
-       IF (iw > 0) THEN
-          CALL write_rng_stream(globenv%gaussian_rng_stream,iw,write_all=.TRUE.,error=error)
-       END IF
-       CALL cp_print_key_finished_output(iw,logger,root_section,&
-            "GLOBAL%PRINT/GLOBAL_GAUSSIAN_RNG",&
-            error=error)
-
+    CALL init_rng()
+    iw = cp_print_key_unit_nr(logger,root_section,"GLOBAL%PRINT/RNG_MATRICES",&
+         extension=".Log")
+    IF (iw > 0) THEN
+       CALL write_rng_matrices(iw)
     END IF
+    CALL cp_print_key_finished_output(iw,logger,root_section,&
+         "GLOBAL%PRINT/RNG_MATRICES")
+
+    ! Initialize a global normally Gaussian distributed (pseudo)random number stream
+
+    CALL section_vals_val_get(root_section,"GLOBAL%SEED",i_val=input_seed)
+    initial_seed(:,:) = REAL(input_seed,KIND=dp)
+    CALL create_rng_stream(rng_stream=globenv%gaussian_rng_stream,&
+         name="Global Gaussian random numbers",&
+         distribution_type=GAUSSIAN,&
+         seed=initial_seed,&
+         extended_precision=.TRUE.)
+
+    iw = cp_print_key_unit_nr(logger,root_section,"GLOBAL%PRINT/RNG_CHECK",&
+         extension=".Log")
+    IF (iw > 0) THEN
+       CALL check_rng(iw,para_env%ionode)
+    END IF
+    CALL cp_print_key_finished_output(iw,logger,root_section,&
+         "GLOBAL%PRINT/RNG_CHECK")
+
+    iw = cp_print_key_unit_nr(logger,root_section,"GLOBAL%PRINT/GLOBAL_GAUSSIAN_RNG",&
+         extension=".Log")
+    IF (iw > 0) THEN
+       CALL write_rng_stream(globenv%gaussian_rng_stream,iw,write_all=.TRUE.)
+    END IF
+    CALL cp_print_key_finished_output(iw,logger,root_section,&
+         "GLOBAL%PRINT/GLOBAL_GAUSSIAN_RNG")
+
 
   END SUBROUTINE cp2k_setup
 
@@ -498,7 +468,6 @@ CONTAINS
 !> \param root_section ...
 !> \param para_env ...
 !> \param globenv ...
-!> \param error ...
 !> \par History
 !>      06-2005 [created]
 !> \author MI
@@ -506,12 +475,11 @@ CONTAINS
 !>      Should not be required anymore once everything is converted
 !>      to get information directly from the input structure
 ! *****************************************************************************
-  SUBROUTINE read_global_section(root_section,para_env,globenv,error)
+  SUBROUTINE read_global_section(root_section,para_env,globenv)
 
     TYPE(section_vals_type), POINTER         :: root_section
     TYPE(cp_para_env_type), POINTER          :: para_env
     TYPE(global_environment_type), POINTER   :: globenv
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'read_global_section', &
       routineP = moduleN//':'//routineN, start_section_label = "GLOBAL"
@@ -527,8 +495,6 @@ CONTAINS
       DIMENSION(:), POINTER                  :: trace_routines
     INTEGER :: i_diag, i_fft, iforce_eval, method_name_id, n_rep_val, &
       nforce_eval, num_threads, output_unit, print_level, trace_max, unit_nr
-
-!$  INTEGER :: nid
     INTEGER(kind=int_8) :: Buffers, Buffers_avr, Buffers_max, Buffers_min, &
       Cached, Cached_avr, Cached_max, Cached_min, MemFree, MemFree_avr, &
       MemFree_max, MemFree_min, MemLikelyFree, MemLikelyFree_avr, &
@@ -537,8 +503,8 @@ CONTAINS
       SReclaimable, SReclaimable_avr, SReclaimable_max, SReclaimable_min
     INTEGER, DIMENSION(:), POINTER           :: i_force_eval
     LOGICAL                                  :: ata, do_echo_all_hosts, efl, &
-                                                explicit, failure, trace, &
-                                                trace_master, time_mpi
+                                                explicit, time_mpi, trace, &
+                                                trace_master
     TYPE(cp_logger_type), POINTER            :: logger
     TYPE(enumeration_type), POINTER          :: enum1, enum2
     TYPE(keyword_type), POINTER              :: keyword
@@ -548,43 +514,42 @@ CONTAINS
                                                 global_section, qmmm_section, &
                                                 subsys_section
 
-    failure = .FALSE.
     NULLIFY(dft_section,global_section, i_force_eval)
 
-    global_section => section_vals_get_subs_vals(root_section,"GLOBAL",error=error)
-    CALL section_vals_val_get(global_section,"BLACS_GRID",i_val=globenv%blacs_grid_layout,error=error)
-    CALL section_vals_val_get(global_section,"BLACS_REPEATABLE",l_val=globenv%blacs_repeatable,error=error)
-    CALL section_vals_val_get(global_section,"PREFERRED_DIAG_LIBRARY",i_val=i_diag,error=error)
-    CALL section_vals_val_get(global_section,"ELPA_KERNEL",i_val=globenv%k_elpa,error=error)
-    CALL section_vals_val_get(global_section,"PREFERRED_FFT_LIBRARY",i_val=i_fft,error=error)
+    global_section => section_vals_get_subs_vals(root_section,"GLOBAL")
+    CALL section_vals_val_get(global_section,"BLACS_GRID",i_val=globenv%blacs_grid_layout)
+    CALL section_vals_val_get(global_section,"BLACS_REPEATABLE",l_val=globenv%blacs_repeatable)
+    CALL section_vals_val_get(global_section,"PREFERRED_DIAG_LIBRARY",i_val=i_diag)
+    CALL section_vals_val_get(global_section,"ELPA_KERNEL",i_val=globenv%k_elpa)
+    CALL section_vals_val_get(global_section,"PREFERRED_FFT_LIBRARY",i_val=i_fft)
 
-    CALL section_vals_val_get(global_section,"PRINT_LEVEL",i_val=print_level,error=error)
-    CALL section_vals_val_get(global_section,"PROGRAM_NAME",i_val=globenv%prog_name_id,error=error)
-    CALL section_vals_val_get(global_section,"FFT_POOL_SCRATCH_LIMIT",i_val=globenv%fft_pool_scratch_limit,error=error)
-    CALL section_vals_val_get(global_section,"FFTW_PLAN_TYPE",i_val=globenv%fftw_plan_type,error=error)
-    CALL section_vals_val_get(global_section,"PROJECT_NAME",c_val=project_name,error=error)
-    CALL section_vals_val_get(global_section,"FFTW_WISDOM_FILE_NAME",c_val=globenv%fftw_wisdom_file_name,error=error)
-    CALL section_vals_val_get(global_section,"RUN_TYPE",i_val=globenv%run_type_id,error=error)
+    CALL section_vals_val_get(global_section,"PRINT_LEVEL",i_val=print_level)
+    CALL section_vals_val_get(global_section,"PROGRAM_NAME",i_val=globenv%prog_name_id)
+    CALL section_vals_val_get(global_section,"FFT_POOL_SCRATCH_LIMIT",i_val=globenv%fft_pool_scratch_limit)
+    CALL section_vals_val_get(global_section,"FFTW_PLAN_TYPE",i_val=globenv%fftw_plan_type)
+    CALL section_vals_val_get(global_section,"PROJECT_NAME",c_val=project_name)
+    CALL section_vals_val_get(global_section,"FFTW_WISDOM_FILE_NAME",c_val=globenv%fftw_wisdom_file_name)
+    CALL section_vals_val_get(global_section,"RUN_TYPE",i_val=globenv%run_type_id)
     CALL cp2k_get_walltime(section=global_section, keyword_name="WALLTIME",&
-                           walltime=globenv%cp2k_target_time, error=error)
-    CALL section_vals_val_get(global_section,"TRACE",l_val=trace,error=error)
-    CALL section_vals_val_get(global_section,"TRACE_MASTER",l_val=trace_MASTER,error=error)
-    CALL section_vals_val_get(global_section,"TRACE_MAX",i_val=trace_max,error=error)
-    CALL section_vals_val_get(global_section,"TRACE_ROUTINES",explicit=explicit,error=error)
+                           walltime=globenv%cp2k_target_time)
+    CALL section_vals_val_get(global_section,"TRACE",l_val=trace)
+    CALL section_vals_val_get(global_section,"TRACE_MASTER",l_val=trace_MASTER)
+    CALL section_vals_val_get(global_section,"TRACE_MAX",i_val=trace_max)
+    CALL section_vals_val_get(global_section,"TRACE_ROUTINES",explicit=explicit)
     IF (explicit) THEN
-       CALL section_vals_val_get(global_section,"TRACE_ROUTINES",c_vals=trace_routines,error=error)
+       CALL section_vals_val_get(global_section,"TRACE_ROUTINES",c_vals=trace_routines)
     ELSE
        NULLIFY(trace_routines)
     ENDIF
-    CALL section_vals_val_get(global_section,"FLUSH_SHOULD_FLUSH",l_val=flush_should_flush,error=error)
-    CALL section_vals_val_get(global_section,"ECHO_ALL_HOSTS",l_val=do_echo_all_hosts,error=error)
-    force_env_sections => section_vals_get_subs_vals(root_section,"FORCE_EVAL",error=error)
-    CALL section_vals_get(force_env_sections, n_repetition=nforce_eval, error=error)
-    logger=>cp_error_get_logger(error)
+    CALL section_vals_val_get(global_section,"FLUSH_SHOULD_FLUSH",l_val=flush_should_flush)
+    CALL section_vals_val_get(global_section,"ECHO_ALL_HOSTS",l_val=do_echo_all_hosts)
+    force_env_sections => section_vals_get_subs_vals(root_section,"FORCE_EVAL")
+    CALL section_vals_get(force_env_sections, n_repetition=nforce_eval)
+    logger=>cp_get_default_logger()
     output_unit=cp_print_key_unit_nr(logger,global_section,"PROGRAM_RUN_INFO",&
-         extension=".log",error=error)
+         extension=".log")
     
-    CALL fm_setup(global_section,error)
+    CALL fm_setup(global_section)
      
     IF(trace .AND. (.NOT. trace_master .OR. para_env%mepos==0)) THEN
        unit_nr = -1
@@ -598,7 +563,7 @@ CONTAINS
        END IF
     ENDIF 
    
-    CALL section_vals_val_get(global_section,"TIMINGS%TIME_MPI",l_val=time_mpi,error=error)
+    CALL section_vals_val_get(global_section,"TIMINGS%TIME_MPI",l_val=time_mpi)
     IF (time_mpi) THEN
        mp_external_timeset=>timeset
        mp_external_timestop=>timestop
@@ -612,8 +577,7 @@ CONTAINS
     CASE(do_diag_elpa)
        globenv%diag_library="ELPA" 
     CASE DEFAULT
-       CALL stop_program(routineN,moduleN,__LINE__,&
-                         "Unknown DIAG type",para_env)
+       CPABORT("Unknown DIAG type")
     END SELECT
 
     SELECT CASE(i_fft)
@@ -623,8 +587,7 @@ CONTAINS
        globenv%default_fft_library="FFTW3"
        CALL cite_reference(Frigo2005)
     CASE DEFAULT
-       CALL stop_program(routineN,moduleN,__LINE__,&
-                         "Unknown FFT type",para_env)
+       CPABORT("Unknown FFT type")
     END SELECT
 
     IF (globenv%run_type_id == 0) THEN
@@ -637,7 +600,7 @@ CONTAINS
              ! default MD
              globenv%run_type_id = mol_dyn_run
           ELSE
-             CALL section_vals_val_get(force_env_sections,"METHOD",i_val=method_name_id,error=error)
+             CALL section_vals_val_get(force_env_sections,"METHOD",i_val=method_name_id)
              SELECT CASE (method_name_id)
              CASE (do_fist)
                 globenv%run_type_id = mol_dyn_run
@@ -651,13 +614,11 @@ CONTAINS
     END IF
 
     IF(globenv%prog_name_id == do_farming .AND. globenv%run_type_id /= none_run) THEN
-       CALL stop_program(routineN,moduleN,__LINE__,&
-                         "FARMING program supports only NONE as run type",para_env)
+       CPABORT("FARMING program supports only NONE as run type")
     ENDIF
 
     IF (globenv%prog_name_id == do_test .AND. globenv%run_type_id /= none_run) &
-       CALL stop_program(routineN,moduleN,__LINE__,&
-                         "TEST program supports only NONE as run type",para_env)
+       CPABORT("TEST program supports only NONE as run type")
 
     CALL m_memory_details(MemTotal,MemFree,Buffers,Cached,Slab,SReclaimable,MemLikelyFree)
     MemTotal_avr=MemTotal
@@ -713,14 +674,6 @@ CONTAINS
     SReclaimable=SReclaimable/1024
     MemLikelyFree=MemLikelyFree/1024
 
-
-
-   ! Initialize the MA configurations
-    IF (has_ma) THEN
-      CALL cp_ma_config(root_section,error)
-      CALL cp_ma_mempol(error)
-    ENDIF
-
     !   *** Print a list of all started processes ***
     IF (do_echo_all_hosts) THEN
      CALL echo_all_hosts(para_env,output_unit)
@@ -733,30 +686,30 @@ CONTAINS
 !$  num_threads=omp_get_max_threads()
     IF (output_unit > 0 ) THEN
        WRITE (UNIT=output_unit,FMT=*)
-       CALL multiple_fe_list(force_env_sections, root_section, i_force_eval, nforce_eval, error)
+       CALL multiple_fe_list(force_env_sections, root_section, i_force_eval, nforce_eval)
        DO iforce_eval = 1, nforce_eval
           dft_section => section_vals_get_subs_vals3(force_env_sections,"DFT",&
-               i_rep_section=i_force_eval(iforce_eval),error=error)
+               i_rep_section=i_force_eval(iforce_eval))
           qmmm_section => section_vals_get_subs_vals3(force_env_sections,"QMMM",&
-               i_rep_section=i_force_eval(iforce_eval),error=error)
+               i_rep_section=i_force_eval(iforce_eval))
           CALL section_vals_val_get(dft_section,"BASIS_SET_FILE_NAME",&
-               c_val=basis_set_file_name, error=error)
+               c_val=basis_set_file_name)
           CALL section_vals_val_get(dft_section,"POTENTIAL_FILE_NAME",&
-               c_val=potential_file_name, error=error)
+               c_val=potential_file_name)
 
           CALL section_vals_val_get(qmmm_section,"MM_POTENTIAL_FILE_NAME",&
-               c_val=mm_potential_file_name, error=error)
+               c_val=mm_potential_file_name)
           ! SUBSYS - If any
           subsys_section => section_vals_get_subs_vals3(force_env_sections,"SUBSYS",&
-               i_rep_section=i_force_eval(iforce_eval),error=error)
-          CALL section_vals_get(subsys_section, explicit=explicit, error=error)
+               i_rep_section=i_force_eval(iforce_eval))
+          CALL section_vals_get(subsys_section, explicit=explicit)
           coord_file_name = "__STD_INPUT__"
           IF (explicit) THEN
              CALL section_vals_val_get(subsys_section,"TOPOLOGY%COORD_FILE_NAME",&
-                  n_rep_val=n_rep_val, error=error)
+                  n_rep_val=n_rep_val)
              IF (n_rep_val==1) THEN
                 CALL section_vals_val_get(subsys_section,"TOPOLOGY%COORD_FILE_NAME",&
-                     c_val=coord_file_name, error=error)
+                     c_val=coord_file_name)
              END IF
           END IF
           CALL integer_to_string(i_force_eval(iforce_eval),env_num)
@@ -774,15 +727,15 @@ CONTAINS
        DEALLOCATE(i_force_eval)
 
        NULLIFY (enum1,enum2,keyword,section)
-       CALL create_global_section(section,error=error)
-       keyword => section_get_keyword(section,"PROGRAM_NAME",error=error)
-       CALL keyword_get(keyword,enum=enum1,error=error)
-       keyword => section_get_keyword(section,"RUN_TYPE",error=error)
-       CALL keyword_get(keyword,enum=enum2,error=error)
+       CALL create_global_section(section)
+       keyword => section_get_keyword(section,"PROGRAM_NAME")
+       CALL keyword_get(keyword,enum=enum1)
+       keyword => section_get_keyword(section,"RUN_TYPE")
+       CALL keyword_get(keyword,enum=enum2)
 
        WRITE (UNIT=output_unit,FMT="(T2,A,T41,A40)")&
             start_section_label//"| Method name",&
-            ADJUSTR(TRIM(enum_i2c(enum1,globenv%prog_name_id,error=error))),&
+            ADJUSTR(TRIM(enum_i2c(enum1,globenv%prog_name_id))),&
             start_section_label//"| Project name",&
             ADJUSTR(project_name(:40)),&
             start_section_label//"| Preferred FFT library",&
@@ -790,14 +743,14 @@ CONTAINS
             start_section_label//"| Preferred diagonalization lib.",&
             ADJUSTR(globenv%diag_library(:40)),&
             start_section_label//"| Run type",&
-            ADJUSTR(TRIM(enum_i2c(enum2,globenv%run_type_id,error=error)))
+            ADJUSTR(TRIM(enum_i2c(enum2,globenv%run_type_id)))
 
-       CALL section_release(section,error=error)
+       CALL section_release(section)
 
-       CALL section_vals_val_get(global_section,"ALLTOALL_SGL",l_val=ata,error=error)
+       CALL section_vals_val_get(global_section,"ALLTOALL_SGL",l_val=ata)
        WRITE (UNIT=output_unit,FMT="(T2,A,T80,L1)")&
             start_section_label//"| All-to-all communication in single precision",ata
-       CALL section_vals_val_get(global_section,"EXTENDED_FFT_LENGTHS",l_val=efl,error=error)
+       CALL section_vals_val_get(global_section,"EXTENDED_FFT_LENGTHS",l_val=efl)
        WRITE (UNIT=output_unit,FMT="(T2,A,T80,L1)")&
             start_section_label//"| FFTs using library dependent lengths",efl
 
@@ -813,8 +766,7 @@ CONTAINS
        CASE(debug_print_level)
          print_level_string=" DEBUG"
        CASE DEFAULT
-         CALL stop_program(routineN,moduleN,__LINE__,&
-                           "Unknown print_level",para_env)
+         CPABORT("Unknown print_level")
        END SELECT
 
        WRITE (UNIT=output_unit,FMT="(T2,A,T75,A6)")&
@@ -840,38 +792,10 @@ CONTAINS
                                                              MemLikelyFree_avr
        WRITE (UNIT=output_unit,FMT='()')
 
-#if defined __GEMINI || __SEASTAR || __BLUEGENE || __NET || __HWLOC || __LIBNUMA
-    WRITE(UNIT=output_unit,FMT='(T2,A)') "MACHINE HARDWARE TOPOLOGY| Strategies details"
-    CALL cp_ma_print_strategy(unit_nr=output_unit,error=error)
-    WRITE (UNIT=output_unit,FMT='()')
-#endif
-       ! Show machine topology
-       CALL cp_ma_print_machine(unit_nr=output_unit, error=error)
-
     END IF
 
-    IF (has_ma) THEN
-      CALL cp_ma_mpi_sched()
-      CALL cp_ma_run_on(error, output_unit)
-
-
-!$omp parallel default(none) private(nid) shared(error)
-!$omp critical
-!$          nid = omp_get_thread_num()
-!$          CALL cp_ma_thread_sched(nid, error=error )
-!$omp end critical
-!$omp end parallel
-
-       CALL cp_ma_thread_run_on(output_unit, error=error)
-
-!$omp parallel default(none) private(nid) shared(error)
-!$          nid = omp_get_thread_num()
-!$          CALL cp_ma_current_thread_run(nid, error=error)
-!$omp end parallel
-     ENDIF
-
     CALL cp_print_key_finished_output(output_unit,logger,global_section,&
-         "PROGRAM_RUN_INFO", error=error)
+         "PROGRAM_RUN_INFO")
 
   END SUBROUTINE read_global_section
 
@@ -880,17 +804,15 @@ CONTAINS
 !> \param root_section ...
 !> \param para_env ...
 !> \param globenv ...
-!> \param error ...
 !> \par History
 !>      2-Dec-2000 (JGH) added default fft library
 !> \author JGH,MK
 ! *****************************************************************************
-  SUBROUTINE read_cp2k_section(root_section,para_env,globenv,error)
+  SUBROUTINE read_cp2k_section(root_section,para_env,globenv)
 
     TYPE(section_vals_type), POINTER         :: root_section
     TYPE(cp_para_env_type), POINTER          :: para_env
     TYPE(global_environment_type), POINTER   :: globenv
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'read_cp2k_section', &
       routineP = moduleN//':'//routineN
@@ -899,41 +821,35 @@ CONTAINS
     TYPE(cp_logger_type), POINTER            :: logger
     TYPE(section_vals_type), POINTER         :: global_section
 
-    global_section => section_vals_get_subs_vals(root_section,"GLOBAL",error=error)
-    CALL read_global_section(root_section,para_env,globenv,error=error)
-    logger => cp_error_get_logger(error)
+    global_section => section_vals_get_subs_vals(root_section,"GLOBAL")
+    CALL read_global_section(root_section,para_env,globenv)
+    logger => cp_get_default_logger()
     output_unit=cp_print_key_unit_nr(logger,global_section,"PROGRAM_RUN_INFO",&
-         extension=".log",error=error)
+         extension=".log")
 
-    CALL fft_setup_library(globenv, para_env, global_section, output_unit,error=error)
-    CALL diag_setup_library(globenv, output_unit,error=error)
+    CALL fft_setup_library(globenv, global_section, output_unit)
+    CALL diag_setup_library(globenv, output_unit)
 
     CALL cp_print_key_finished_output(output_unit,logger,global_section,&
-         "PROGRAM_RUN_INFO", error=error)
+         "PROGRAM_RUN_INFO")
 
   END SUBROUTINE read_cp2k_section
 
 ! *****************************************************************************
 !> \brief check FFT preferred library availability, if not switch
 !> \param globenv ...
-!> \param para_env ...
 !> \param global_section ...
 !> \param output_unit ...
-!> \param error ...
 !> \par History
 !>      2-Dec-2000 (JGH) added default fft library
 !>      Nov-2013 (MI) refactoring
 !> \author JGH,MK
 ! *****************************************************************************
-
-
-  SUBROUTINE fft_setup_library(globenv, para_env,global_section, output_unit,error)
+  SUBROUTINE fft_setup_library(globenv, global_section, output_unit)
 
     TYPE(global_environment_type), POINTER   :: globenv
-    TYPE(cp_para_env_type), POINTER          :: para_env
     TYPE(section_vals_type), POINTER         :: global_section
     INTEGER, INTENT(IN)                      :: output_unit
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fft_setup_library', &
       routineP = moduleN//':'//routineN
@@ -960,12 +876,11 @@ CONTAINS
 
     !   *** Initialize FFT library with the user's prefered FFT library ***
     CALL init_fft(fftlib=TRIM(globenv%default_fft_library),&
-         alltoall=section_get_lval(global_section,"ALLTOALL_SGL",error), &
-         fftsg_sizes=.NOT.section_get_lval(global_section,"EXTENDED_FFT_LENGTHS",error), &
+         alltoall=section_get_lval(global_section,"ALLTOALL_SGL"), &
+         fftsg_sizes=.NOT.section_get_lval(global_section,"EXTENDED_FFT_LENGTHS"), &
          pool_limit=globenv%fft_pool_scratch_limit,&
          wisdom_file=globenv%fftw_wisdom_file_name,&
-         plan_style=globenv%fftw_plan_type,&
-         error=error)
+         plan_style=globenv%fftw_plan_type)
 
     !   *** Check for FFT library ***
     CALL fft3d(1,n,zz,status=stat)
@@ -979,12 +894,11 @@ CONTAINS
           ENDIF
           globenv%default_fft_library="FFTW3"
           CALL init_fft(fftlib=TRIM(globenv%default_fft_library),&
-               alltoall=section_get_lval(global_section,"ALLTOALL_SGL",error), &
-               fftsg_sizes=.NOT.section_get_lval(global_section,"EXTENDED_FFT_LENGTHS",error), &
+               alltoall=section_get_lval(global_section,"ALLTOALL_SGL"), &
+               fftsg_sizes=.NOT.section_get_lval(global_section,"EXTENDED_FFT_LENGTHS"), &
                pool_limit=globenv%fft_pool_scratch_limit,&
                wisdom_file=globenv%fftw_wisdom_file_name,&
-               plan_style=globenv%fftw_plan_type,&
-               error=error)
+               plan_style=globenv%fftw_plan_type)
 
           CALL fft3d(1,n,zz,status=stat)
        ENDIF
@@ -999,17 +913,15 @@ CONTAINS
 
           globenv%default_fft_library="FFTSG"
           CALL init_fft(fftlib=TRIM(globenv%default_fft_library),&
-               alltoall=section_get_lval(global_section,"ALLTOALL_SGL",error), &
-               fftsg_sizes=.NOT.section_get_lval(global_section,"EXTENDED_FFT_LENGTHS",error), &
+               alltoall=section_get_lval(global_section,"ALLTOALL_SGL"), &
+               fftsg_sizes=.NOT.section_get_lval(global_section,"EXTENDED_FFT_LENGTHS"), &
                pool_limit=globenv%fft_pool_scratch_limit,&
                wisdom_file=globenv%fftw_wisdom_file_name,&
-               plan_style=globenv%fftw_plan_type,&
-               error=error)
+               plan_style=globenv%fftw_plan_type)
 
           CALL fft3d(1,n,zz,status=stat)
           IF (stat /= 0) THEN
-             CALL stop_program(routineN,moduleN,__LINE__,&
-                               "FFTSG not functional....",para_env)
+             CPABORT("FFTSG not functional....")
           ENDIF
 
        ENDIF
@@ -1023,13 +935,11 @@ CONTAINS
 !>
 !> \param globenv ...
 !> \param output_unit ...
-!> \param error ...
 !> \author MI
 ! *****************************************************************************
-  SUBROUTINE diag_setup_library(globenv, output_unit,error)
+  SUBROUTINE diag_setup_library(globenv, output_unit)
     TYPE(global_environment_type), POINTER   :: globenv
     INTEGER, INTENT(IN)                      :: output_unit
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'diag_setup_library', &
       routineP = moduleN//':'//routineN
@@ -1038,7 +948,7 @@ CONTAINS
 
     switched = .FALSE.
   
-    CALL diag_init(diag_lib=TRIM(globenv%diag_library), switched=switched,k_elpa=globenv%k_elpa,error=error)
+    CALL diag_init(diag_lib=TRIM(globenv%diag_library), switched=switched,k_elpa=globenv%k_elpa)
   
     IF(switched) THEN
   
@@ -1055,11 +965,9 @@ CONTAINS
 ! *****************************************************************************
 !> \brief ...
 !> \param glob_section ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE fm_setup(glob_section,error)
+  SUBROUTINE fm_setup(glob_section)
     TYPE(section_vals_type), POINTER         :: glob_section
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'fm_setup', &
       routineP = moduleN//':'//routineN
@@ -1068,16 +976,16 @@ CONTAINS
     LOGICAL                                  :: force_me
     TYPE(section_vals_type), POINTER         :: fm_section
 
-    fm_section => section_vals_get_subs_vals(glob_section,"FM",error=error)
+    fm_section => section_vals_get_subs_vals(glob_section,"FM")
 
-    CALL section_vals_val_get(fm_section,"NROW_BLOCKS",i_val=nrb,error=error)
-    CALL section_vals_val_get(fm_section,"NCOL_BLOCKS",i_val=ncb,error=error)
-    CALL section_vals_val_get(fm_section,"FORCE_BLOCK_SIZE",l_val=force_me,error=error)
+    CALL section_vals_val_get(fm_section,"NROW_BLOCKS",i_val=nrb)
+    CALL section_vals_val_get(fm_section,"NCOL_BLOCKS",i_val=ncb)
+    CALL section_vals_val_get(fm_section,"FORCE_BLOCK_SIZE",l_val=force_me)
 
     CALL cp_fm_struct_config(nrow_block=nrb,ncol_block=ncb,force_block=force_me)
 
     CALL section_vals_val_get(fm_section,"TYPE_OF_MATRIX_MULTIPLICATION",&
-                              i_val=multiplication_type,error=error)
+                              i_val=multiplication_type)
 
     CALL cp_fm_setup(multiplication_type)
 
@@ -1087,25 +995,22 @@ CONTAINS
 !> \param section ...
 !> \param keyword_name ...
 !> \param walltime ...
-!> \param error ...
 !> \par History
 !>      none
 !> \author Mandes
 ! *****************************************************************************
-  SUBROUTINE cp2k_get_walltime(section, keyword_name, walltime, error)
+  SUBROUTINE cp2k_get_walltime(section, keyword_name, walltime)
     TYPE(section_vals_type), POINTER         :: section
     CHARACTER(len=*), INTENT(in)             :: keyword_name
     REAL(KIND=dp), INTENT(out)               :: walltime
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cp2k_get_walltime', &
       routineP = moduleN//':'//routineN
 
     CHARACTER(LEN=100)                       :: ctmp
     INTEGER                                  :: ierr, itmp
-    LOGICAL                                  :: failure
 
-    CALL section_vals_val_get(section, keyword_name, c_val=ctmp, error=error)
+    CALL section_vals_val_get(section, keyword_name, c_val=ctmp)
 
     IF(ctmp == "") THEN
       walltime = -1.0_dp
@@ -1114,17 +1019,17 @@ CONTAINS
         walltime = 0
         ! read seconds
         READ(ctmp(INDEX(ctmp,":",BACK=.TRUE.)+1:),FMT=*,IOSTAT=ierr) walltime
-        CPPostcondition(ierr==0,cp_failure_level,routineP,error,failure)
+        CPASSERT(ierr==0)
         ! read minutes
         READ(ctmp(INDEX(ctmp,":",BACK=.TRUE.)-2:INDEX(ctmp,":",BACK=.TRUE.)-1),FMT=*,IOSTAT=ierr) itmp
         walltime = walltime + REAL(60*itmp,KIND=dp)
         ! read hours
         READ(ctmp(1:INDEX(ctmp,":")-1),FMT=*,IOSTAT=ierr) itmp
-        CPPostcondition(ierr==0,cp_failure_level,routineP,error,failure)
+        CPASSERT(ierr==0)
         walltime = walltime + REAL(3600*itmp,KIND=dp)
       ELSE
         READ(ctmp,FMT=*,IOSTAT=ierr) walltime
-        CPPostcondition(ierr==0,cp_failure_level,routineP,error,failure)
+        CPASSERT(ierr==0)
       END IF
     END IF
   END SUBROUTINE cp2k_get_walltime
@@ -1135,7 +1040,6 @@ CONTAINS
 !> \param para_env ...
 !> \param globenv ...
 !> \param wdir ...
-!> \param error ...
 !> \par History
 !>      none
 !> \author JGH,MK
@@ -1146,13 +1050,12 @@ CONTAINS
 !>      f77_interface:f_env_add_defaults, f77_interface:f_env_rm_defaults,
 !>      f77_interface:create_force_env, f77_interface:destroy_force_env
 ! *****************************************************************************
-  SUBROUTINE cp2k_finalize(root_section,para_env,globenv,wdir,error)
+  SUBROUTINE cp2k_finalize(root_section,para_env,globenv,wdir)
 
     TYPE(section_vals_type), POINTER         :: root_section
     TYPE(cp_para_env_type), POINTER          :: para_env
     TYPE(global_environment_type), POINTER   :: globenv
     CHARACTER(LEN=*), OPTIONAL               :: wdir
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cp2k_finalize', &
       routineP = moduleN//':'//routineN
@@ -1160,93 +1063,84 @@ CONTAINS
     CHARACTER(LEN=default_path_length)       :: cg_filename
     CHARACTER(LEN=default_string_length)     :: dev_flag
     INTEGER                                  :: cg_mode, iw, unit_exit
-    LOGICAL                                  :: delete_it, failure, &
-                                                sort_by_self_time
+    LOGICAL                                  :: delete_it, sort_by_self_time
     REAL(KIND=dp)                            :: r_timings
     TYPE(cp_logger_type), POINTER            :: logger
 
 ! look if we inherited a failure, more care is needed if so
 ! i.e. the input is most likely not available
+! Set flag if this is a development version
 
-    failure = .FALSE.
-
-    ! Set flag if this is a development version
     dev_flag = ""
     IF (id_cp2k_version==id_development_version) dev_flag=" (Development Version)"
 
     ! Clean up
     NULLIFY(logger)
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
     CALL deallocate_spherical_harmonics()
     CALL deallocate_orbital_pointers()
     CALL deallocate_md_ftable()
 
     ! finalize the fft (i.e. writes the wisdom if FFTW3 )
-    CALL finalize_fft(para_env,globenv%fftw_wisdom_file_name, error)
+    CALL finalize_fft(para_env,globenv%fftw_wisdom_file_name)
 
     ! Write message passing performance info
 
-    IF (.NOT. failure) THEN
-       iw=cp_print_key_unit_nr(logger,root_section,"GLOBAL%PROGRAM_RUN_INFO",&
-            extension=".log",error=error)
-       CALL describe_mp_perf_env ( iw )
-       CALL cp_print_key_finished_output(iw,logger,root_section,&
-            "GLOBAL%PROGRAM_RUN_INFO", error=error)
+    iw=cp_print_key_unit_nr(logger,root_section,"GLOBAL%PROGRAM_RUN_INFO",&
+         extension=".log")
+    CALL describe_mp_perf_env ( iw )
+    CALL cp_print_key_finished_output(iw,logger,root_section,&
+         "GLOBAL%PROGRAM_RUN_INFO")
+
+    CALL collect_citations_from_ranks(para_env)
+    iw = cp_print_key_unit_nr(logger,root_section,"GLOBAL%REFERENCES",&
+         extension=".Log")
+    IF (iw>0) THEN
+       WRITE (UNIT=iw,FMT="(/,T2,A)") REPEAT("-",79)
+       WRITE (UNIT=iw,FMT="(T2,A,T80,A)") "-","-"
+       WRITE (UNIT=iw,FMT="(T2,A,T30,A,T80,A)") "-","R E F E R E N C E S","-"
+       WRITE (UNIT=iw,FMT="(T2,A,T80,A)") "-","-"
+       WRITE (UNIT=iw,FMT="(T2,A)") REPEAT("-",79)
+
+       WRITE (UNIT=iw,FMT="(T2,A)") ""
+       WRITE (UNIT=iw,FMT="(T2,A)") TRIM(cp2k_version)//TRIM(dev_flag)//", the CP2K developers group ("//TRIM(cp2k_year)//")."
+       WRITE (UNIT=iw,FMT="(T2,A)") "CP2K is freely available from "//TRIM(cp2k_home)//" ."
+
+       CALL print_all_references(sorted=.TRUE.,cited_only=.TRUE., &
+            FORMAT=print_format_journal,unit=iw)
     ENDIF
-
-    IF (.NOT. failure) THEN
-       CALL collect_citations_from_ranks(para_env)
-       iw = cp_print_key_unit_nr(logger,root_section,"GLOBAL%REFERENCES",&
-            extension=".Log",error=error)
-       IF (iw>0) THEN
-          WRITE (UNIT=iw,FMT="(/,T2,A)") REPEAT("-",79)
-          WRITE (UNIT=iw,FMT="(T2,A,T80,A)") "-","-"
-          WRITE (UNIT=iw,FMT="(T2,A,T30,A,T80,A)") "-","R E F E R E N C E S","-"
-          WRITE (UNIT=iw,FMT="(T2,A,T80,A)") "-","-"
-          WRITE (UNIT=iw,FMT="(T2,A)") REPEAT("-",79)
-
-          WRITE (UNIT=iw,FMT="(T2,A)") ""
-          WRITE (UNIT=iw,FMT="(T2,A)") TRIM(cp2k_version)//TRIM(dev_flag)//", the CP2K developers group ("//TRIM(cp2k_year)//")."
-          WRITE (UNIT=iw,FMT="(T2,A)") "CP2K is freely available from "//TRIM(cp2k_home)//" ."
-
-          CALL print_all_references(sorted=.TRUE.,cited_only=.TRUE., &
-               FORMAT=print_format_journal,unit=iw)
-       ENDIF
-       CALL cp_print_key_finished_output(iw,logger,root_section,&
-            "GLOBAL%REFERENCES",error=error)
-    ENDIF
+    CALL cp_print_key_finished_output(iw,logger,root_section,&
+         "GLOBAL%REFERENCES")
 
     CALL timestop(globenv%handle) ! corresponding the "CP2K" in cp2k_init
     
-    IF (.NOT.failure) THEN
-       iw = cp_print_key_unit_nr(logger,root_section,"GLOBAL%TIMINGS",&
-            extension=".Log",error=error)
-       r_timings = section_get_rval(root_section,"GLOBAL%TIMINGS%THRESHOLD",error)
-       sort_by_self_time = section_get_lval(root_section,"GLOBAL%TIMINGS%SORT_BY_SELF_TIME",error)
-       IF (m_energy().NE.0.0_dp) THEN
-          CALL timings_report_print(iw,r_timings,sort_by_self_time,cost_type_energy,para_env)
+    iw = cp_print_key_unit_nr(logger,root_section,"GLOBAL%TIMINGS",&
+         extension=".Log")
+    r_timings = section_get_rval(root_section,"GLOBAL%TIMINGS%THRESHOLD")
+    sort_by_self_time = section_get_lval(root_section,"GLOBAL%TIMINGS%SORT_BY_SELF_TIME")
+    IF (m_energy().NE.0.0_dp) THEN
+       CALL timings_report_print(iw,r_timings,sort_by_self_time,cost_type_energy,para_env)
+    ENDIF
+    CALL timings_report_print(iw,r_timings,sort_by_self_time,cost_type_time,para_env)
+ 
+    !Write the callgraph, if desired by user
+    CALL section_vals_val_get(root_section,"GLOBAL%CALLGRAPH",i_val=cg_mode)
+    IF(cg_mode /= CALLGRAPH_NONE) THEN
+       CALL section_vals_val_get(root_section,"GLOBAL%CALLGRAPH_FILE_NAME",c_val=cg_filename)
+       IF(LEN_TRIM(cg_filename) == 0) cg_filename=TRIM(logger%iter_info%project_name)
+       IF(cg_mode==CALLGRAPH_ALL)& !incorporate mpi-rank into filename 
+          cg_filename = TRIM(cg_filename)//"_"//TRIM(ADJUSTL(cp_to_string(para_env%mepos)))
+       IF(iw>0) THEN
+          WRITE (UNIT=iw,FMT="(T2,3X,A)") "Writing callgraph to: "//TRIM(cg_filename)//".callgraph"
+          WRITE (UNIT=iw,FMT="()") 
+          WRITE (UNIT=iw,FMT="(T2,A)") "-------------------------------------------------------------------------------"
        ENDIF
-       CALL timings_report_print(iw,r_timings,sort_by_self_time,cost_type_time,para_env)
-    
-       !Write the callgraph, if desired by user
-       CALL section_vals_val_get(root_section,"GLOBAL%CALLGRAPH",i_val=cg_mode,error=error)
-       IF(cg_mode /= CALLGRAPH_NONE) THEN
-          CALL section_vals_val_get(root_section,"GLOBAL%CALLGRAPH_FILE_NAME",c_val=cg_filename,error=error)
-          IF(LEN_TRIM(cg_filename) == 0) cg_filename=TRIM(logger%iter_info%project_name)
-          IF(cg_mode==CALLGRAPH_ALL)& !incorporate mpi-rank into filename 
-             cg_filename = TRIM(cg_filename)//"_"//TRIM(ADJUSTL(cp_to_string(para_env%mepos)))
-          IF(iw>0) THEN
-             WRITE (UNIT=iw,FMT="(T2,3X,A)") "Writing callgraph to: "//TRIM(cg_filename)//".callgraph"
-             WRITE (UNIT=iw,FMT="()") 
-             WRITE (UNIT=iw,FMT="(T2,A)") "-------------------------------------------------------------------------------"
-          ENDIF
-          IF(cg_mode==CALLGRAPH_ALL .OR. para_env%mepos==para_env%source)&
-             CALL timings_report_callgraph(TRIM(cg_filename)//".callgraph")
-       END IF
-       
-       CALL cp_print_key_finished_output(iw,logger,root_section,&
-            "GLOBAL%TIMINGS",error=error)
+       IF(cg_mode==CALLGRAPH_ALL .OR. para_env%mepos==para_env%source)&
+          CALL timings_report_callgraph(TRIM(cg_filename)//".callgraph")
     END IF
+    
+    CALL cp_print_key_finished_output(iw,logger,root_section,&
+         "GLOBAL%TIMINGS")
 
     
     CALL rm_mp_perf_env()
@@ -1254,7 +1148,7 @@ CONTAINS
 
     IF (para_env%ionode) THEN
        iw=cp_print_key_unit_nr(logger,root_section,"GLOBAL%PROGRAM_RUN_INFO",&
-            extension=".log",error=error)
+            extension=".log")
 
        ! Deleting (if existing) the external EXIT files
        delete_it = .FALSE.
@@ -1275,13 +1169,11 @@ CONTAINS
        CALL get_runtime_info()
 
        ! Just a choice, do not print the CP2K footer if there is a failure
-       IF (.NOT.failure) THEN
-          CALL cp2k_footer(iw,wdir)
-          IF (iw>0) CALL m_flush_internal(iw)
-       END IF
+       CALL cp2k_footer(iw,wdir)
+       IF (iw>0) CALL m_flush_internal(iw)
 
        CALL cp_print_key_finished_output(iw,logger,root_section,&
-            "GLOBAL%PROGRAM_RUN_INFO", error=error)
+            "GLOBAL%PROGRAM_RUN_INFO")
     END IF
     ! Release message passing environment
     CALL cp_rm_default_logger()

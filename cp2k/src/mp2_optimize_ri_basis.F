@@ -14,10 +14,10 @@
 ! *****************************************************************************
 MODULE mp2_optimize_ri_basis
   USE atomic_kind_types,               ONLY: atomic_kind_type
+  USE basis_set_container_types,       ONLY: add_basis_set_to_container,&
+                                             remove_basis_from_container
   USE basis_set_types,                 ONLY: allocate_gto_basis_set,&
-                                             deallocate_gto_basis_set,&
                                              gto_basis_set_type
-  USE cp_dbcsr_interface,              ONLY: cp_dbcsr_p_type
   USE cp_para_env,                     ONLY: cp_para_env_create,&
                                              cp_para_env_release
   USE cp_para_types,                   ONLY: cp_para_env_type
@@ -25,7 +25,6 @@ MODULE mp2_optimize_ri_basis
   USE hfx_libint_wrapper_types,        ONLY: build_eri_size
   USE hfx_types,                       ONLY: hfx_basis_info_type,&
                                              hfx_basis_type
-  USE input_section_types,             ONLY: section_vals_type
   USE kinds,                           ONLY: dp
   USE machine,                         ONLY: default_output_unit
   USE memory_utilities,                ONLY: reallocate
@@ -44,17 +43,14 @@ MODULE mp2_optimize_ri_basis
                                              nso
   USE orbital_symbols,                 ONLY: cgf_symbol,&
                                              sgf_symbol
-  USE particle_types,                  ONLY: particle_type
   USE qs_environment_types,            ONLY: get_qs_env,&
                                              qs_environment_type
   USE qs_kind_types,                   ONLY: get_qs_kind,&
                                              qs_kind_type
   USE qs_rho_types,                    ONLY: qs_rho_type
-  USE termination,                     ONLY: stop_program
-  USE timings,                         ONLY: timeset,&
-                                             timestop
   USE util,                            ONLY: sort
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -81,26 +77,19 @@ MODULE mp2_optimize_ri_basis
 !> \param C ...
 !> \param Auto ...
 !> \param kind_of ...
-!> \param basis_parameter ...
 !> \param qs_env ...
-!> \param particle_set ...
-!> \param matrix_ks ...
 !> \param rho ...
-!> \param hfx_sections ...
 !> \param para_env ...
 !> \param unit_nr ...
-!> \param error ...
 !> \param homo_beta ...
 !> \param C_beta ...
 !> \param Auto_beta ...
 !> \author Mauro Del Ben
 ! *****************************************************************************
-  SUBROUTINE optimize_ri_basis_main(Emp2,Emp2_Cou,Emp2_ex,Emp2_S,Emp2_T,dimen,natom,homo, &
-                                     mp2_biel,mp2_env,C,Auto, &
-                                     kind_of,basis_parameter, &
-                                     qs_env,particle_set,matrix_ks,rho,hfx_sections,para_env, &
-                                     unit_nr,error,&
-                                     homo_beta,C_beta,Auto_beta)
+ SUBROUTINE optimize_ri_basis_main(Emp2,Emp2_Cou,Emp2_ex,Emp2_S,Emp2_T,dimen,natom,homo, &
+                                     mp2_biel,mp2_env,C,Auto,kind_of,&
+                                     qs_env,rho,para_env, &
+                                     unit_nr,homo_beta,C_beta,Auto_beta)
 
     REAL(KIND=dp)                            :: Emp2, Emp2_Cou, Emp2_ex, &
                                                 Emp2_S, Emp2_T
@@ -111,18 +100,10 @@ MODULE mp2_optimize_ri_basis
       DIMENSION(:, :)                        :: C
     REAL(KIND=dp), ALLOCATABLE, DIMENSION(:) :: Auto
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: kind_of
-    TYPE(hfx_basis_type), DIMENSION(:), &
-      POINTER                                :: basis_parameter
     TYPE(qs_environment_type), POINTER       :: qs_env
-    TYPE(particle_type), DIMENSION(:), &
-      POINTER                                :: particle_set
-    TYPE(cp_dbcsr_p_type), DIMENSION(:), &
-      POINTER                                :: matrix_ks
     TYPE(qs_rho_type), POINTER               :: rho
-    TYPE(section_vals_type), POINTER         :: hfx_sections
     TYPE(cp_para_env_type), POINTER          :: para_env
     INTEGER                                  :: unit_nr
-    TYPE(cp_error_type), INTENT(inout)       :: error
     INTEGER, OPTIONAL                        :: homo_beta
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :), OPTIONAL              :: C_beta
@@ -134,10 +115,9 @@ MODULE mp2_optimize_ri_basis
 
     INTEGER :: color_sub, comm_sub, dimen_RI, elements_ij_proc, handle, i, &
       iiter, ikind, ipgf, iset, ishell, j, local_unit_nr, max_l_am, &
-      max_num_iter, ndof, nkind, number_groups, stat, virtual, virtual_beta
+      max_num_iter, ndof, nkind, number_groups, virtual, virtual_beta
     INTEGER, ALLOCATABLE, DIMENSION(:, :)    :: ij_list_proc, index_table_RI
-    LOGICAL                                  :: failure, hess_up, &
-                                                open_shell_case, &
+    LOGICAL                                  :: hess_up, open_shell_case, &
                                                 reset_boundary
     LOGICAL, ALLOCATABLE, DIMENSION(:)       :: basis_was_assoc
     REAL(KIND=dp) :: DI, DI_new, DRI, DRI_new, Emp2_AA, Emp2_AA_Cou, &
@@ -154,11 +134,9 @@ MODULE mp2_optimize_ri_basis
                                                 Integ_MP2_AB, Integ_MP2_BB
     TYPE(atomic_kind_type), DIMENSION(:), &
       POINTER                                :: atomic_kind_set
-    TYPE(cp_error_type)                      :: error_sub
     TYPE(cp_logger_type), POINTER            :: logger, logger_sub
     TYPE(cp_para_env_type), POINTER          :: para_env_sub
-    TYPE(gto_basis_set_type), DIMENSION(:), &
-      POINTER                                :: basis_set_RI
+    TYPE(gto_basis_set_type), POINTER        :: ri_aux_basis
     TYPE(hfx_basis_info_type)                :: RI_basis_info
     TYPE(hfx_basis_type), DIMENSION(:), &
       POINTER                                :: basis_S0, RI_basis_parameter
@@ -166,8 +144,7 @@ MODULE mp2_optimize_ri_basis
       POINTER                                :: qs_kind_set
 
     CALL timeset(routineN,handle)
-    failure=.FALSE.
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
 
     open_shell_case=.FALSE.
     IF(PRESENT(homo_beta).AND.PRESENT(C_beta).AND.PRESENT(Auto_beta)) open_shell_case=.TRUE.
@@ -193,11 +170,11 @@ MODULE mp2_optimize_ri_basis
       Emp2_AA=0.0_dp
       Emp2_AA_Cou=0.0_dp
       Emp2_AA_ex=0.0_dp
-      CALL calc_elem_ij_proc(homo,homo,para_env,elements_ij_proc,ij_list_proc,error)
-      CALL mp2_canonical_direct_single_batch(Emp2_AA,Emp2_AA_Cou,Emp2_AA_ex,mp2_env,qs_env,rho,hfx_sections,para_env,&
+      CALL calc_elem_ij_proc(homo,homo,para_env,elements_ij_proc,ij_list_proc)
+      CALL mp2_canonical_direct_single_batch(Emp2_AA,Emp2_AA_Cou,Emp2_AA_ex,mp2_env,qs_env,rho,para_env,&
                                              mp2_biel,dimen,C,Auto,0,homo,homo,&
                                              elements_ij_proc,ij_list_proc,homo,0,&
-                                             Integ_MP2=Integ_MP2_AA,error=error)
+                                             Integ_MP2=Integ_MP2_AA)
       CALL mp_sum(Emp2_AA_Cou,para_env%group)
       CALL mp_sum(Emp2_AA_Ex,para_env%group)
       CALL mp_sum(Emp2_AA,para_env%group)
@@ -207,11 +184,11 @@ MODULE mp2_optimize_ri_basis
       Emp2_BB=0.0_dp
       Emp2_BB_Cou=0.0_dp
       Emp2_BB_ex=0.0_dp
-      CALL calc_elem_ij_proc(homo_beta,homo_beta,para_env,elements_ij_proc,ij_list_proc,error)
-      CALL mp2_canonical_direct_single_batch(Emp2_BB,Emp2_BB_Cou,Emp2_BB_ex,mp2_env,qs_env,rho,hfx_sections,para_env,&
+      CALL calc_elem_ij_proc(homo_beta,homo_beta,para_env,elements_ij_proc,ij_list_proc)
+      CALL mp2_canonical_direct_single_batch(Emp2_BB,Emp2_BB_Cou,Emp2_BB_ex,mp2_env,qs_env,rho,para_env,&
                                              mp2_biel,dimen,C_beta,Auto_beta,0,homo_beta,homo_beta,&
                                              elements_ij_proc,ij_list_proc,homo_beta,0,&
-                                             Integ_MP2=Integ_MP2_BB,error=error)
+                                             Integ_MP2=Integ_MP2_BB)
       CALL mp_sum(Emp2_BB_Cou,para_env%group)
       CALL mp_sum(Emp2_BB_Ex,para_env%group)
       CALL mp_sum(Emp2_BB,para_env%group)
@@ -221,11 +198,11 @@ MODULE mp2_optimize_ri_basis
       Emp2_AB=0.0_dp
       Emp2_AB_Cou=0.0_dp
       Emp2_AB_ex=0.0_dp
-      CALL calc_elem_ij_proc(homo,homo_beta,para_env,elements_ij_proc,ij_list_proc,error)
-      CALL mp2_canonical_direct_single_batch(Emp2_AB,Emp2_AB_Cou,Emp2_AB_ex,mp2_env,qs_env,rho,hfx_sections,para_env,&
+      CALL calc_elem_ij_proc(homo,homo_beta,para_env,elements_ij_proc,ij_list_proc)
+      CALL mp2_canonical_direct_single_batch(Emp2_AB,Emp2_AB_Cou,Emp2_AB_ex,mp2_env,qs_env,rho,para_env,&
                                              mp2_biel,dimen,C,Auto,0,homo,homo,&
                                              elements_ij_proc, ij_list_proc,homo_beta,0,&
-                                             homo_beta,C_beta,Auto_beta,Integ_MP2=Integ_MP2_AB,error=error)
+                                             homo_beta,C_beta,Auto_beta,Integ_MP2=Integ_MP2_AB)
       CALL mp_sum(Emp2_AB_Cou,para_env%group)
       CALL mp_sum(Emp2_AB_Ex,para_env%group)
       CALL mp_sum(Emp2_AB,para_env%group)
@@ -249,11 +226,11 @@ MODULE mp2_optimize_ri_basis
 
     ELSE
       ! close shell case
-      CALL calc_elem_ij_proc(homo,homo,para_env,elements_ij_proc,ij_list_proc,error)
-      CALL mp2_canonical_direct_single_batch(Emp2,Emp2_Cou,Emp2_ex,mp2_env,qs_env,rho,hfx_sections,para_env,&
+      CALL calc_elem_ij_proc(homo,homo,para_env,elements_ij_proc,ij_list_proc)
+      CALL mp2_canonical_direct_single_batch(Emp2,Emp2_Cou,Emp2_ex,mp2_env,qs_env,rho,para_env,&
                                              mp2_biel,dimen,C,Auto,0,homo,homo,&
                                              elements_ij_proc,ij_list_proc,homo,0,&
-                                             Integ_MP2=Integ_MP2,error=error)
+                                             Integ_MP2=Integ_MP2)
       CALL mp_sum(Emp2_Cou,para_env%group)
       CALL mp_sum(Emp2_Ex,para_env%group)
       CALL mp_sum(Emp2,para_env%group)
@@ -269,7 +246,7 @@ MODULE mp2_optimize_ri_basis
     color_sub=para_env%mepos/mp2_env%mp2_num_proc
     CALL mp_comm_split_direct(para_env%group,comm_sub,color_sub)
     NULLIFY(para_env_sub)
-    CALL cp_para_env_create(para_env_sub,comm_sub,error=error)
+    CALL cp_para_env_create(para_env_sub,comm_sub)
 
     IF (para_env%mepos==para_env%source) THEN
        local_unit_nr=cp_logger_get_default_unit_nr(logger,local=.FALSE.)
@@ -280,13 +257,13 @@ MODULE mp2_optimize_ri_basis
     CALL cp_logger_create(logger_sub,para_env=para_env_sub,&
                default_global_unit_nr=local_unit_nr, close_global_unit_on_dealloc=.FALSE.)
     CALL cp_logger_set(logger_sub,local_filename="opt_RI_basis_localLog")
-    CALL cp_error_init(error_sub, logger=logger_sub)
+    CALL cp_add_default_logger(logger_sub)
 
-    CALL generate_RI_init_basis(qs_env,mp2_env,natom,nkind,kind_of,max_rel_dev,basis_was_assoc,error)
+    CALL generate_RI_init_basis(qs_env,mp2_env,nkind,max_rel_dev,basis_was_assoc)
 
     CALL read_RI_basis_set(qs_env,RI_basis_parameter,RI_basis_info,&
                            natom,nkind,kind_of,index_table_RI,dimen_RI,&
-                           basis_S0,error) 
+                           basis_S0) 
 
     ndof=0
     max_l_am=0
@@ -318,72 +295,61 @@ MODULE mp2_optimize_ri_basis
 
     ! check if the max angular momentum exceed the libint one
     IF(max_l_am>build_eri_size) THEN
-      CALL stop_program(routineN,moduleN,__LINE__,&
-                        "The angular momentum needed exceeds the value assumed when configuring libint.")
+      CPABORT("The angular momentum needed exceeds the value assumed when configuring libint.")
     END IF
 
     ! Allocate stuff
-    ALLOCATE(p(ndof),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(p(ndof))
     p=0.0_dp
-    ALLOCATE(xi(ndof),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(xi(ndof))
     xi=0.0_dp
-    ALLOCATE(g(ndof),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(g(ndof))
     g=0.0_dp
-    ALLOCATE(dg(ndof),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(dg(ndof))
     dg=0.0_dp
-    ALLOCATE(hdg(ndof),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(hdg(ndof))
     hdg=0.0_dp
-    ALLOCATE(pnew(ndof),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(pnew(ndof))
     pnew=0.0_dp
-    ALLOCATE(deriv(ndof),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(deriv(ndof))
     deriv=0.0_dp
-    ALLOCATE(hessin(ndof,ndof),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(hessin(ndof,ndof))
     hessin=0.0_dp
     DO i=1, ndof 
       hessin(i,i)=1.0_dp
     END DO
 
     ! initialize trasformation function
-    ALLOCATE(lower_B(ndof),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(lower_B(ndof))
     lower_B=0.0_dp
-    ALLOCATE(max_dev(ndof),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(max_dev(ndof))
     max_dev=0.0_dp
 
     ! Initialize the transformation function
-    CALL init_transf(nkind,ndof,basis_set_RI,RI_basis_parameter,lower_B,max_dev,max_rel_dev)
+    CALL init_transf(nkind,RI_basis_parameter,lower_B,max_dev,max_rel_dev)
 
     ! get the atomic kind set for writing the basis
-    CALL get_qs_env(qs_env=qs_env,atomic_kind_set=atomic_kind_set,qs_kind_set=qs_kind_set,error=error)
+    CALL get_qs_env(qs_env=qs_env,atomic_kind_set=atomic_kind_set,qs_kind_set=qs_kind_set)
 
     ! Calculate RI-MO-ERI's
     CALL calc_energy_func(Emp2,Emp2_AA,Emp2_BB,Emp2_AB,Emp2_RI,DRI,DI,&
                           Integ_MP2,Integ_MP2_AA,Integ_MP2_BB,Integ_MP2_AB,&
-                          qs_env,particle_set,nkind,natom,dimen,dimen_RI,homo,virtual,&
-                          kind_of,index_table_RI,basis_set_RI,mp2_biel,mp2_env,Auto,C,&
-                          hfx_sections,basis_parameter,RI_basis_parameter,RI_basis_info,basis_S0,&
+                          qs_env,natom,dimen,dimen_RI,homo,virtual,&
+                          kind_of,index_table_RI,mp2_biel,mp2_env,Auto,C,&
+                          RI_basis_parameter,RI_basis_info,basis_S0,&
                           open_shell_case,homo_beta,virtual_beta,Auto_beta,C_beta,para_env,unit_nr,&
-                          .TRUE.,error)
+                          .TRUE.)
 
     ! ! Calculate function (DI) derivatives with respect to the RI basis exponent
-    CALL calc_energy_func_der(Emp2,Emp2_AA,Emp2_BB,Emp2_AB,Emp2_RI,DRI,DI,&
+    CALL calc_energy_func_der(Emp2,Emp2_AA,Emp2_BB,Emp2_AB,DI,&
                               Integ_MP2,Integ_MP2_AA,Integ_MP2_BB,Integ_MP2_AB,eps_step,&
-                              qs_env,particle_set,nkind,natom,dimen,dimen_RI,homo,virtual,&
-                              kind_of,index_table_RI,basis_set_RI,mp2_biel,mp2_env,Auto,C,&
-                              hfx_sections,basis_parameter,RI_basis_parameter,RI_basis_info,basis_S0,&
+                              qs_env,nkind,natom,dimen,dimen_RI,homo,virtual,&
+                              kind_of,index_table_RI,mp2_biel,mp2_env,Auto,C,&
+                              RI_basis_parameter,RI_basis_info,basis_S0,&
                               open_shell_case,homo_beta,virtual_beta,Auto_beta,C_beta,&
                               para_env,para_env_sub,number_groups,color_sub,unit_nr,&
                               p,lower_B,max_dev,&
-                              deriv,error,error_sub)
+                              deriv)
 
     g(:)=deriv
     xi(:)=-g
@@ -394,7 +360,7 @@ MODULE mp2_optimize_ri_basis
 
       ! perform step
       pnew(:)=p+xi
-      CALL p2basis(nkind,ndof,basis_set_RI,RI_basis_parameter,lower_B,max_dev,pnew)
+      CALL p2basis(nkind,RI_basis_parameter,lower_B,max_dev,pnew)
 
       ! check if we have to reset boundaries 
       reset_boundary=.FALSE.
@@ -414,8 +380,8 @@ MODULE mp2_optimize_ri_basis
 
       IF(reset_boundary) THEN
         IF (unit_nr>0) WRITE(unit_nr,'(T3,A)') 'RESET BASIS: one of the exponent hits the boundary'
-        CALL reset_basis(nkind,ndof,basis_set_RI,RI_basis_parameter,reset_edge,&
-                         pnew,lower_B,max_dev,max_rel_dev,exp_limits,error)
+        CALL reset_basis(nkind,ndof,RI_basis_parameter,reset_edge,&
+                         pnew,lower_B,max_dev,max_rel_dev,exp_limits)
         p(:)=pnew
         xi=0.0_dp
         g=0.0_dp
@@ -430,36 +396,36 @@ MODULE mp2_optimize_ri_basis
         ! Calculate RI-MO-ERI's
         CALL calc_energy_func(Emp2,Emp2_AA,Emp2_BB,Emp2_AB,Emp2_RI,DRI,DI,&
                               Integ_MP2,Integ_MP2_AA,Integ_MP2_BB,Integ_MP2_AB,&
-                              qs_env,particle_set,nkind,natom,dimen,dimen_RI,homo,virtual,&
-                              kind_of,index_table_RI,basis_set_RI,mp2_biel,mp2_env,Auto,C,&
-                              hfx_sections,basis_parameter,RI_basis_parameter,RI_basis_info,basis_S0,&
+                              qs_env,natom,dimen,dimen_RI,homo,virtual,&
+                              kind_of,index_table_RI,mp2_biel,mp2_env,Auto,C,&
+                              RI_basis_parameter,RI_basis_info,basis_S0,&
                               open_shell_case,homo_beta,virtual_beta,Auto_beta,C_beta,para_env,unit_nr,&
-                              .FALSE.,error)
+                              .FALSE.)
         ! ! Calculate function (DI) derivatives with respect to the RI basis exponent
-        CALL calc_energy_func_der(Emp2,Emp2_AA,Emp2_BB,Emp2_AB,Emp2_RI,DRI,DI,&
+        CALL calc_energy_func_der(Emp2,Emp2_AA,Emp2_BB,Emp2_AB,DI,&
                                   Integ_MP2,Integ_MP2_AA,Integ_MP2_BB,Integ_MP2_AB,eps_step,&
-                                  qs_env,particle_set,nkind,natom,dimen,dimen_RI,homo,virtual,&
-                                  kind_of,index_table_RI,basis_set_RI,mp2_biel,mp2_env,Auto,C,&
-                                  hfx_sections,basis_parameter,RI_basis_parameter,RI_basis_info,basis_S0,&
+                                  qs_env,nkind,natom,dimen,dimen_RI,homo,virtual,&
+                                  kind_of,index_table_RI,mp2_biel,mp2_env,Auto,C,&
+                                  RI_basis_parameter,RI_basis_info,basis_S0,&
                                   open_shell_case,homo_beta,virtual_beta,Auto_beta,C_beta,&
                                   para_env,para_env_sub,number_groups,color_sub,unit_nr,&
                                   p,lower_B,max_dev,&
-                                  deriv,error,error_sub)
+                                  deriv)
 
         g(:)=deriv
         xi(:)=-g
         pnew(:)=p+xi
-        CALL p2basis(nkind,ndof,basis_set_RI,RI_basis_parameter,lower_B,max_dev,pnew)
+        CALL p2basis(nkind,RI_basis_parameter,lower_B,max_dev,pnew)
       END IF
 
       ! calculate energy at the new point
       CALL calc_energy_func(Emp2,Emp2_AA,Emp2_BB,Emp2_AB,Emp2_RI_new,DRI_new,DI_new,&
                             Integ_MP2,Integ_MP2_AA,Integ_MP2_BB,Integ_MP2_AB,&
-                            qs_env,particle_set,nkind,natom,dimen,dimen_RI,homo,virtual,&
-                            kind_of,index_table_RI,basis_set_RI,mp2_biel,mp2_env,Auto,C,&
-                            hfx_sections,basis_parameter,RI_basis_parameter,RI_basis_info,basis_S0,&
+                            qs_env,natom,dimen,dimen_RI,homo,virtual,&
+                            kind_of,index_table_RI,mp2_biel,mp2_env,Auto,C,&
+                            RI_basis_parameter,RI_basis_info,basis_S0,&
                             open_shell_case,homo_beta,virtual_beta,Auto_beta,C_beta,para_env,unit_nr,&
-                            .FALSE.,error)
+                            .FALSE.)
  
       ! update energy and direction
       DI=DI_new
@@ -470,6 +436,8 @@ MODULE mp2_optimize_ri_basis
       IF (unit_nr>0) THEN
         WRITE(unit_nr,*)
         DO ikind=1, nkind
+          CALL get_qs_kind(qs_kind=qs_kind_set(ikind),basis_set=ri_aux_basis,&
+               basis_type="RI_AUX")
           WRITE(unit_nr,'(T3,A,A)') atomic_kind_set(ikind)%element_symbol,'   RI_opt_basis'
           WRITE(unit_nr,'(T3,I3)') RI_basis_parameter(ikind)%nset
           DO iset=1, RI_basis_parameter(ikind)%nset
@@ -480,9 +448,8 @@ MODULE mp2_optimize_ri_basis
                                        (1,ishell=1,RI_basis_parameter(ikind)%nshell(iset))
             DO ipgf=1,RI_basis_parameter(ikind)%npgf(iset)
               WRITE(unit_nr,'(T3,10F16.10)') RI_basis_parameter(ikind)%zet(ipgf,iset),&
-                                             (qs_kind_set(ikind)%ri_aux_basis_set%&
-                                             gcc(ipgf,ishell,iset),&
-                                             ishell=1,qs_kind_set(ikind)%ri_aux_basis_set%nshell(iset))
+                                             (ri_aux_basis%gcc(ipgf,ishell,iset),&
+                                             ishell=1,ri_aux_basis%nshell(iset))
             END DO                            
           END DO
           WRITE(unit_nr,*)
@@ -496,15 +463,15 @@ MODULE mp2_optimize_ri_basis
       END IF
 
       ! calculate gradients
-      CALL calc_energy_func_der(Emp2,Emp2_AA,Emp2_BB,Emp2_AB,Emp2_RI,DRI,DI,&
+      CALL calc_energy_func_der(Emp2,Emp2_AA,Emp2_BB,Emp2_AB,DI,&
                                 Integ_MP2,Integ_MP2_AA,Integ_MP2_BB,Integ_MP2_AB,eps_step,&
-                                qs_env,particle_set,nkind,natom,dimen,dimen_RI,homo,virtual,&
-                                kind_of,index_table_RI,basis_set_RI,mp2_biel,mp2_env,Auto,C,&
-                                hfx_sections,basis_parameter,RI_basis_parameter,RI_basis_info,basis_S0,&
+                                qs_env,nkind,natom,dimen,dimen_RI,homo,virtual,&
+                                kind_of,index_table_RI,mp2_biel,mp2_env,Auto,C,&
+                                RI_basis_parameter,RI_basis_info,basis_S0,&
                                 open_shell_case,homo_beta,virtual_beta,Auto_beta,C_beta,&
                                 para_env,para_env_sub,number_groups,color_sub,unit_nr,&
                                 p,lower_B,max_dev,&
-                                deriv,error,error_sub)
+                                deriv)
 
       ! g is the vector containing the old gradient
       dg(:)=deriv-g
@@ -577,10 +544,10 @@ MODULE mp2_optimize_ri_basis
     DEALLOCATE(index_table_RI)
 
     ! Release RI basis set
-    CALL release_RI_basis_set(RI_basis_parameter,basis_S0,error)
+    CALL release_RI_basis_set(RI_basis_parameter,basis_S0)
  
-    CALL cp_para_env_release(para_env_sub,error)
-    CALL cp_error_dealloc_ref(error_sub,error=error)
+    CALL cp_para_env_release(para_env_sub)
+    CALL cp_rm_default_logger()
     CALL cp_logger_release(logger_sub)
 
     CALL timestop(handle)
@@ -593,8 +560,6 @@ MODULE mp2_optimize_ri_basis
 !> \param Emp2_AA ...
 !> \param Emp2_BB ...
 !> \param Emp2_AB ...
-!> \param Emp2_RI_ref ...
-!> \param DRI_ref ...
 !> \param DI_ref ...
 !> \param Integ_MP2 ...
 !> \param Integ_MP2_AA ...
@@ -602,7 +567,6 @@ MODULE mp2_optimize_ri_basis
 !> \param Integ_MP2_AB ...
 !> \param eps ...
 !> \param qs_env ...
-!> \param particle_set ...
 !> \param nkind ...
 !> \param natom ...
 !> \param dimen ...
@@ -611,13 +575,10 @@ MODULE mp2_optimize_ri_basis
 !> \param virtual ...
 !> \param kind_of ...
 !> \param index_table_RI ...
-!> \param basis_set_RI_original ...
 !> \param mp2_biel ...
 !> \param mp2_env ...
 !> \param Auto ...
 !> \param C ...
-!> \param hfx_sections ...
-!> \param basis_parameter ...
 !> \param RI_basis_parameter ...
 !> \param RI_basis_info ...
 !> \param basis_S0 ...
@@ -635,43 +596,34 @@ MODULE mp2_optimize_ri_basis
 !> \param lower_B ...
 !> \param max_dev ...
 !> \param deriv ...
-!> \param error ...
-!> \param error_sub ...
 ! *****************************************************************************
-  SUBROUTINE calc_energy_func_der(Emp2,Emp2_AA,Emp2_BB,Emp2_AB,Emp2_RI_ref,DRI_ref,DI_ref,&
+  SUBROUTINE calc_energy_func_der(Emp2,Emp2_AA,Emp2_BB,Emp2_AB,DI_ref,&
                                   Integ_MP2,Integ_MP2_AA,Integ_MP2_BB,Integ_MP2_AB,eps,&
-                                  qs_env,particle_set,nkind,natom,dimen,dimen_RI,homo,virtual,&
-                                  kind_of,index_table_RI,basis_set_RI_original,mp2_biel,mp2_env,Auto,C,&
-                                  hfx_sections,basis_parameter,RI_basis_parameter,RI_basis_info,basis_S0,&
+                                  qs_env,nkind,natom,dimen,dimen_RI,homo,virtual,&
+                                  kind_of,index_table_RI,mp2_biel,mp2_env,Auto,C,&
+                                  RI_basis_parameter,RI_basis_info,basis_S0,&
                                   open_shell_case,homo_beta,virtual_beta,Auto_beta,C_beta,&
                                   para_env,para_env_sub,number_groups,color_sub,unit_nr,&
                                   p,lower_B,max_dev,&
-                                  deriv,error,error_sub)
+                                  deriv)
     REAL(KIND=dp)                            :: Emp2, Emp2_AA, Emp2_BB, &
-                                                Emp2_AB, Emp2_RI_ref, &
-                                                DRI_ref, DI_ref
+                                                Emp2_AB, DI_ref
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :, :, :)                  :: Integ_MP2, Integ_MP2_AA, &
                                                 Integ_MP2_BB, Integ_MP2_AB
     REAL(KIND=dp)                            :: eps
     TYPE(qs_environment_type), POINTER       :: qs_env
-    TYPE(particle_type), DIMENSION(:), &
-      POINTER                                :: particle_set
     INTEGER                                  :: nkind, natom, dimen, &
                                                 dimen_RI, homo, virtual
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: kind_of
     INTEGER, ALLOCATABLE, DIMENSION(:, :)    :: index_table_RI
-    TYPE(gto_basis_set_type), DIMENSION(:), &
-      POINTER                                :: basis_set_RI_original
     TYPE(mp2_biel_type)                      :: mp2_biel
     TYPE(mp2_type), POINTER                  :: mp2_env
     REAL(KIND=dp), ALLOCATABLE, DIMENSION(:) :: Auto
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :)                        :: C
-    TYPE(section_vals_type), POINTER         :: hfx_sections
     TYPE(hfx_basis_type), DIMENSION(:), &
-      POINTER                                :: basis_parameter, &
-                                                RI_basis_parameter
+      POINTER                                :: RI_basis_parameter
     TYPE(hfx_basis_info_type)                :: RI_basis_info
     TYPE(hfx_basis_type), DIMENSION(:), &
       POINTER                                :: basis_S0
@@ -684,22 +636,17 @@ MODULE mp2_optimize_ri_basis
     INTEGER                                  :: number_groups, color_sub, &
                                                 unit_nr
     REAL(KIND=dp), ALLOCATABLE, DIMENSION(:) :: p, lower_B, max_dev, deriv
-    TYPE(cp_error_type), INTENT(inout)       :: error, error_sub
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'calc_energy_func_der', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, ideriv, ikind, iset, &
                                                 nseta
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: DI, DRI, Emp2_RI, &
                                                 new_basis_val, orig_basis_val
     REAL(KIND=dp), VOLATILE                  :: step, temp
-    TYPE(gto_basis_set_type), DIMENSION(:), &
-      POINTER                                :: basis_set_RI
 
     CALL timeset(routineN,handle)
-    failure=.FALSE.
 
     step=eps
 
@@ -716,7 +663,7 @@ MODULE mp2_optimize_ri_basis
         ! ! calculate the numerical derivative
         ! ! The eps is the relative change of the exponent for the
         ! ! calculation of the numerical derivative
-        ! CPPostcondition(RI_basis_parameter(ikind)%npgf(iset)==1,cp_failure_level,routineP,error,failure)
+        ! CPPostcondition(RI_basis_parameter(ikind)%npgf(iset)==1,cp_failure_level,routineP,failure)
         ! step=eps*RI_basis_parameter(ikind)%zet(1,iset)
         ! temp=RI_basis_parameter(ikind)%zet(1,iset)+step
         ! step=temp-RI_basis_parameter(ikind)%zet(1,iset)
@@ -724,7 +671,7 @@ MODULE mp2_optimize_ri_basis
 
         ! in the new case eps is just the step length for calculating the numerical derivative
 
-        CPPostcondition(RI_basis_parameter(ikind)%npgf(iset)==1,cp_failure_level,routineP,error,failure)
+        CPASSERT(RI_basis_parameter(ikind)%npgf(iset)==1)
         orig_basis_val=RI_basis_parameter(ikind)%zet(1,iset)
         temp=p(ideriv)+step
         CALL transf_val(lower_B(ideriv), max_dev(ideriv), temp, new_basis_val)
@@ -732,11 +679,11 @@ MODULE mp2_optimize_ri_basis
      
         CALL calc_energy_func(Emp2,Emp2_AA,Emp2_BB,Emp2_AB,Emp2_RI,DRI,DI,&
                               Integ_MP2,Integ_MP2_AA,Integ_MP2_BB,Integ_MP2_AB,&
-                              qs_env,particle_set,nkind,natom,dimen,dimen_RI,homo,virtual,&
-                              kind_of,index_table_RI,basis_set_RI,mp2_biel,mp2_env,Auto,C,&
-                              hfx_sections,basis_parameter,RI_basis_parameter,RI_basis_info,basis_S0,&
+                              qs_env,natom,dimen,dimen_RI,homo,virtual,&
+                              kind_of,index_table_RI,mp2_biel,mp2_env,Auto,C,&
+                              RI_basis_parameter,RI_basis_info,basis_S0,&
                               open_shell_case,homo_beta,virtual_beta,Auto_beta,C_beta,&
-                              para_env_sub,unit_nr,.TRUE.,error_sub)
+                              para_env_sub,unit_nr,.TRUE.)
 
         RI_basis_parameter(ikind)%zet(1,iset)=orig_basis_val
 
@@ -769,8 +716,6 @@ MODULE mp2_optimize_ri_basis
 !> \param Integ_MP2_BB ...
 !> \param Integ_MP2_AB ...
 !> \param qs_env ...
-!> \param particle_set ...
-!> \param nkind ...
 !> \param natom ...
 !> \param dimen ...
 !> \param dimen_RI ...
@@ -778,13 +723,10 @@ MODULE mp2_optimize_ri_basis
 !> \param virtual ...
 !> \param kind_of ...
 !> \param index_table_RI ...
-!> \param basis_set_RI_original ...
 !> \param mp2_biel ...
 !> \param mp2_env ...
 !> \param Auto ...
 !> \param C ...
-!> \param hfx_sections ...
-!> \param basis_parameter ...
 !> \param RI_basis_parameter ...
 !> \param RI_basis_info ...
 !> \param basis_S0 ...
@@ -796,38 +738,31 @@ MODULE mp2_optimize_ri_basis
 !> \param para_env ...
 !> \param unit_nr ...
 !> \param no_write ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE calc_energy_func(Emp2,Emp2_AA,Emp2_BB,Emp2_AB,Emp2_RI,DRI,DI,&
                               Integ_MP2,Integ_MP2_AA,Integ_MP2_BB,Integ_MP2_AB,&
-                              qs_env,particle_set,nkind,natom,dimen,dimen_RI,homo,virtual,&
-                              kind_of,index_table_RI,basis_set_RI_original,mp2_biel,mp2_env,Auto,C,&
-                              hfx_sections,basis_parameter,RI_basis_parameter,RI_basis_info,basis_S0,&
+                              qs_env,natom,dimen,dimen_RI,homo,virtual,&
+                              kind_of,index_table_RI,mp2_biel,mp2_env,Auto,C,&
+                              RI_basis_parameter,RI_basis_info,basis_S0,&
                               open_shell_case,homo_beta,virtual_beta,Auto_beta,C_beta,para_env,unit_nr,&
-                              no_write,error)
+                              no_write)
     REAL(KIND=dp)                            :: Emp2, Emp2_AA, Emp2_BB, &
                                                 Emp2_AB, Emp2_RI, DRI, DI
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :, :, :)                  :: Integ_MP2, Integ_MP2_AA, &
                                                 Integ_MP2_BB, Integ_MP2_AB
     TYPE(qs_environment_type), POINTER       :: qs_env
-    TYPE(particle_type), DIMENSION(:), &
-      POINTER                                :: particle_set
-    INTEGER                                  :: nkind, natom, dimen, &
-                                                dimen_RI, homo, virtual
+    INTEGER                                  :: natom, dimen, dimen_RI, homo, &
+                                                virtual
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: kind_of
     INTEGER, ALLOCATABLE, DIMENSION(:, :)    :: index_table_RI
-    TYPE(gto_basis_set_type), DIMENSION(:), &
-      POINTER                                :: basis_set_RI_original
     TYPE(mp2_biel_type)                      :: mp2_biel
     TYPE(mp2_type), POINTER                  :: mp2_env
     REAL(KIND=dp), ALLOCATABLE, DIMENSION(:) :: Auto
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :)                        :: C
-    TYPE(section_vals_type), POINTER         :: hfx_sections
     TYPE(hfx_basis_type), DIMENSION(:), &
-      POINTER                                :: basis_parameter, &
-                                                RI_basis_parameter
+      POINTER                                :: RI_basis_parameter
     TYPE(hfx_basis_info_type)                :: RI_basis_info
     TYPE(hfx_basis_type), DIMENSION(:), &
       POINTER                                :: basis_S0
@@ -839,13 +774,11 @@ MODULE mp2_optimize_ri_basis
     TYPE(cp_para_env_type), POINTER          :: para_env
     INTEGER                                  :: unit_nr
     LOGICAL                                  :: no_write
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'calc_energy_func', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: DI_AA, DI_AB, DI_BB, DRI_AA, &
                                                 DRI_AB, DRI_BB, Emp2_RI_AA, &
                                                 Emp2_RI_AB, Emp2_RI_BB
@@ -853,49 +786,44 @@ MODULE mp2_optimize_ri_basis
       DIMENSION(:, :, :)                     :: Lai, Lai_beta
 
     CALL timeset(routineN,handle)
-    failure=.FALSE.
 
     CALL libint_ri_mp2(dimen,dimen_RI,homo,natom,mp2_biel,mp2_env,C,&
-                       kind_of,basis_parameter,particle_set,&
-                       RI_basis_parameter,RI_basis_info,basis_S0,index_table_RI,&
-                       qs_env,hfx_sections,para_env,&
-                       unit_nr,Lai,error)
+                       kind_of,RI_basis_parameter,RI_basis_info,basis_S0,index_table_RI,&
+                       qs_env,para_env,Lai)
     IF(open_shell_case) THEN
       CALL libint_ri_mp2(dimen,dimen_RI,homo_beta,natom,mp2_biel,mp2_env,C_beta,&
-                         kind_of,basis_parameter,particle_set,&
-                         RI_basis_parameter,RI_basis_info,basis_S0,index_table_RI,&
-                         qs_env,hfx_sections,para_env,&
-                         unit_nr,Lai_beta,error)
+                         kind_of,RI_basis_parameter,RI_basis_info,basis_S0,index_table_RI,&
+                         qs_env,para_env,Lai_beta)
     END IF
 
     ! Contract integrals into energy
     IF(open_shell_case) THEN
       ! alpha-alpha
-      CALL contract_integrals(DI_AA,Emp2_RI_AA,DRI_AA,Emp2_AA,dimen_RI,homo,homo,virtual,virtual,&
+      CALL contract_integrals(DI_AA,Emp2_RI_AA,DRI_AA,Emp2_AA,homo,homo,virtual,virtual,&
                               1.0_dp,0.5_dp,.TRUE.,&
                               Auto,Auto,Integ_MP2_AA,&
-                              Lai,Lai,para_env,error)
+                              Lai,Lai,para_env)
 
       ! beta-beta
-      CALL contract_integrals(DI_BB,Emp2_RI_BB,DRI_BB,Emp2_BB,dimen_RI,homo_beta,homo_beta,virtual_beta,virtual_beta,&
+      CALL contract_integrals(DI_BB,Emp2_RI_BB,DRI_BB,Emp2_BB,homo_beta,homo_beta,virtual_beta,virtual_beta,&
                               1.0_dp,0.5_dp,.TRUE.,&
                               Auto_beta,Auto_beta,Integ_MP2_BB,&
-                              Lai_beta,Lai_beta,para_env,error)
+                              Lai_beta,Lai_beta,para_env)
 
       ! alpha-beta
-      CALL contract_integrals(DI_AB,Emp2_RI_AB,DRI_AB,Emp2_AB*2.0_dp,dimen_RI,homo,homo_beta,virtual,virtual_beta,&
+      CALL contract_integrals(DI_AB,Emp2_RI_AB,DRI_AB,Emp2_AB*2.0_dp,homo,homo_beta,virtual,virtual_beta,&
                               1.0_dp,1.0_dp,.FALSE.,&
                               Auto,Auto_beta,Integ_MP2_AB,&
-                              Lai,Lai_beta,para_env,error)
+                              Lai,Lai_beta,para_env)
 
       Emp2_RI=Emp2_RI_AA+Emp2_RI_BB+Emp2_RI_AB
       DRI=DRI_AA+DRI_BB+DRI_AB
       DI=DI_AA+DI_BB+DI_AB
     ELSE
-      CALL contract_integrals(DI,Emp2_RI,DRI,Emp2,dimen_RI,homo,homo,virtual,virtual,&
+      CALL contract_integrals(DI,Emp2_RI,DRI,Emp2,homo,homo,virtual,virtual,&
                               2.0_dp,1.0_dp,.TRUE.,&
                               Auto,Auto,Integ_MP2,&
-                              Lai,Lai,para_env,error)
+                              Lai,Lai,para_env)
     END IF
 
     IF(.NOT.no_write) THEN
@@ -917,17 +845,13 @@ MODULE mp2_optimize_ri_basis
 ! *****************************************************************************
 !> \brief ...
 !> \param nkind ...
-!> \param ndof ...
-!> \param basis_set_RI ...
 !> \param RI_basis_parameter ...
 !> \param lower_B ...
 !> \param max_dev ...
 !> \param max_rel_dev ...
 ! *****************************************************************************
-  SUBROUTINE init_transf(nkind,ndof,basis_set_RI,RI_basis_parameter,lower_B,max_dev,max_rel_dev)
-    INTEGER                                  :: nkind, ndof
-    TYPE(gto_basis_set_type), DIMENSION(:), &
-      POINTER                                :: basis_set_RI
+  SUBROUTINE init_transf(nkind,RI_basis_parameter,lower_B,max_dev,max_rel_dev)
+    INTEGER                                  :: nkind
     TYPE(hfx_basis_type), DIMENSION(:), &
       POINTER                                :: RI_basis_parameter
     REAL(KIND=dp), ALLOCATABLE, DIMENSION(:) :: lower_B, max_dev, max_rel_dev
@@ -948,17 +872,13 @@ MODULE mp2_optimize_ri_basis
 ! *****************************************************************************
 !> \brief ...
 !> \param nkind ...
-!> \param ndof ...
-!> \param basis_set_RI ...
 !> \param RI_basis_parameter ...
 !> \param Lower_B ...
 !> \param max_dev ...
 !> \param p ...
 ! *****************************************************************************
-  SUBROUTINE p2basis(nkind,ndof,basis_set_RI,RI_basis_parameter,Lower_B,max_dev,p)
-    INTEGER                                  :: nkind, ndof
-    TYPE(gto_basis_set_type), DIMENSION(:), &
-      POINTER                                :: basis_set_RI
+  SUBROUTINE p2basis(nkind,RI_basis_parameter,Lower_B,max_dev,p)
+    INTEGER                                  :: nkind
     TYPE(hfx_basis_type), DIMENSION(:), &
       POINTER                                :: RI_basis_parameter
     REAL(KIND=dp), ALLOCATABLE, DIMENSION(:) :: Lower_B, max_dev, p
@@ -981,7 +901,6 @@ MODULE mp2_optimize_ri_basis
 !> \brief ...
 !> \param nkind ...
 !> \param ndof ...
-!> \param basis_set_RI ...
 !> \param RI_basis_parameter ...
 !> \param reset_edge ...
 !> \param pnew ...
@@ -989,13 +908,10 @@ MODULE mp2_optimize_ri_basis
 !> \param max_dev ...
 !> \param max_rel_dev ...
 !> \param exp_limits ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE reset_basis(nkind,ndof,basis_set_RI,RI_basis_parameter,reset_edge,&
-                         pnew,lower_B,max_dev,max_rel_dev,exp_limits,error)
+  SUBROUTINE reset_basis(nkind,ndof,RI_basis_parameter,reset_edge,&
+                         pnew,lower_B,max_dev,max_rel_dev,exp_limits)
     INTEGER                                  :: nkind, ndof
-    TYPE(gto_basis_set_type), DIMENSION(:), &
-      POINTER                                :: basis_set_RI
     TYPE(hfx_basis_type), DIMENSION(:), &
       POINTER                                :: RI_basis_parameter
     REAL(KIND=dp)                            :: reset_edge
@@ -1003,16 +919,14 @@ MODULE mp2_optimize_ri_basis
                                                 max_rel_dev
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :)                        :: exp_limits
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'reset_basis', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: am_max, iexpo, ikind, ipos, &
-                                                ipos_p, iset, la, stat
+                                                ipos_p, iset, la
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: nf_per_l
     INTEGER, DIMENSION(ndof)                 :: change_expo
-    LOGICAL                                  :: failure
     LOGICAL, ALLOCATABLE, DIMENSION(:)       :: has_to_be_changed
     REAL(KIND=dp)                            :: expo, geom_fact, pmax
     REAL(KIND=dp), ALLOCATABLE, &
@@ -1021,9 +935,8 @@ MODULE mp2_optimize_ri_basis
                                                 old_lower_B, old_max_dev, &
                                                 old_max_rel_dev, old_pnew
 
-    failure=.FALSE.
+! make a copy of the original parameters
 
-    ! make a copy of the original parameters
     old_pnew        = pnew
     old_lower_B     = lower_B
     old_max_dev     = max_dev
@@ -1049,11 +962,9 @@ MODULE mp2_optimize_ri_basis
     ipos_p=0
     DO ikind=1, nkind
       am_max=MAXVAL(RI_basis_parameter(ikind)%lmax(:))
-      ALLOCATE(nf_per_l(0:am_max),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(nf_per_l(0:am_max))
       nf_per_l=0
-      ALLOCATE(max_min_exp_per_l(2,0:am_max),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(max_min_exp_per_l(2,0:am_max))
       max_min_exp_per_l(1,:)=HUGE(0)
       max_min_exp_per_l(2,:)=-HUGE(0)
 
@@ -1074,8 +985,7 @@ MODULE mp2_optimize_ri_basis
       ! expo=MINVAL(max_min_exp_per_l(1,:))
       ! max_min_exp_per_l(1,0)=expo
 
-      ALLOCATE(has_to_be_changed(0:am_max),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(has_to_be_changed(0:am_max))
       has_to_be_changed=.FALSE.
       DO la=0, am_max
         pmax=-HUGE(0)
@@ -1130,7 +1040,7 @@ MODULE mp2_optimize_ri_basis
       END DO
     END DO
 
-    CALL init_transf(nkind,ndof,basis_set_RI,RI_basis_parameter,lower_B,max_dev,max_rel_dev)
+    CALL init_transf(nkind,RI_basis_parameter,lower_B,max_dev,max_rel_dev)
 
     ipos=0
     DO ikind=1, nkind
@@ -1155,7 +1065,6 @@ MODULE mp2_optimize_ri_basis
 !> \param Emp2_RI ...
 !> \param DRI ...
 !> \param Emp2 ...
-!> \param dimen_RI ...
 !> \param homo ...
 !> \param homo_beta ...
 !> \param virtual ...
@@ -1169,15 +1078,14 @@ MODULE mp2_optimize_ri_basis
 !> \param Lai ...
 !> \param Lai_beta ...
 !> \param para_env ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE contract_integrals(DI,Emp2_RI,DRI,Emp2,dimen_RI,homo,homo_beta,virtual,virtual_beta,&
+  SUBROUTINE contract_integrals(DI,Emp2_RI,DRI,Emp2,homo,homo_beta,virtual,virtual_beta,&
                                 fact,fact2,calc_ex,&
                                 MOenerg,MOenerg_beta,abij,&
-                                Lai,Lai_beta,para_env,error)
+                                Lai,Lai_beta,para_env)
     REAL(KIND=dp)                            :: DI, Emp2_RI, DRI, Emp2
-    INTEGER                                  :: dimen_RI, homo, homo_beta, &
-                                                virtual, virtual_beta
+    INTEGER                                  :: homo, homo_beta, virtual, &
+                                                virtual_beta
     REAL(KIND=dp)                            :: fact, fact2
     LOGICAL                                  :: calc_ex
     REAL(KIND=dp), ALLOCATABLE, DIMENSION(:) :: MOenerg, MOenerg_beta
@@ -1186,21 +1094,16 @@ MODULE mp2_optimize_ri_basis
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :, :)                     :: Lai, Lai_beta
     TYPE(cp_para_env_type), POINTER          :: para_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'contract_integrals', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: a, b, i, ij_counter, j, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: a, b, i, ij_counter, j
     REAL(KIND=dp)                            :: t_iajb, t_iajb_RI
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :)                        :: mat_ab
 
-    failure=.FALSE.
-
-    ALLOCATE(mat_ab(virtual,virtual_beta),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(mat_ab(virtual,virtual_beta))
   
     DI=0.0_dp
     Emp2_RI=0.0_dp
@@ -1248,22 +1151,17 @@ MODULE mp2_optimize_ri_basis
 !> \param para_env ...
 !> \param elements_ij_proc ...
 !> \param ij_list_proc ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE calc_elem_ij_proc(homo,homo_beta,para_env,elements_ij_proc,ij_list_proc,error)
+  SUBROUTINE calc_elem_ij_proc(homo,homo_beta,para_env,elements_ij_proc,ij_list_proc)
     INTEGER                                  :: homo, homo_beta
     TYPE(cp_para_env_type), POINTER          :: para_env
     INTEGER                                  :: elements_ij_proc
     INTEGER, ALLOCATABLE, DIMENSION(:, :)    :: ij_list_proc
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'calc_elem_ij_proc', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, ij_counter, j, stat
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
+    INTEGER                                  :: i, ij_counter, j
 
     elements_ij_proc=0
     ij_counter=-1
@@ -1274,8 +1172,7 @@ MODULE mp2_optimize_ri_basis
       END DO
     END DO
 
-    ALLOCATE(ij_list_proc(elements_ij_proc,2),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(ij_list_proc(elements_ij_proc,2))
     ij_list_proc=0
     ij_counter=-1
     elements_ij_proc=0
@@ -1314,28 +1211,23 @@ MODULE mp2_optimize_ri_basis
 !> \brief ...
 !> \param qs_env ...
 !> \param mp2_env ...
-!> \param natom ...
 !> \param nkind ...
-!> \param kind_of ...
 !> \param max_rel_dev_output ...
 !> \param basis_was_assoc ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE generate_RI_init_basis(qs_env,mp2_env,natom,nkind,kind_of,max_rel_dev_output,basis_was_assoc,error)
+  SUBROUTINE generate_RI_init_basis(qs_env,mp2_env,nkind,max_rel_dev_output,basis_was_assoc)
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(mp2_type), POINTER                  :: mp2_env
-    INTEGER                                  :: natom, nkind
-    INTEGER, DIMENSION(:)                    :: kind_of
+    INTEGER                                  :: nkind
     REAL(KIND=dp), ALLOCATABLE, DIMENSION(:) :: max_rel_dev_output
     LOGICAL, ALLOCATABLE, DIMENSION(:)       :: basis_was_assoc
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'generate_RI_init_basis', &
       routineP = moduleN//':'//routineN
 
     INTEGER :: basis_quality, handle, iexpo, iii, ikind, ipgf, iset, ishell, &
       jexpo, jjj, la, max_am, nexpo_shell, nseta, nsgfa, nsgfa_RI, prog_func, &
-      prog_l, RI_max_am, RI_nset, RI_prev_size, stat
+      prog_l, RI_max_am, RI_nset, RI_prev_size
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: l_expo, num_sgf_per_l, &
                                                 ordered_pos, RI_l_expo, &
                                                 RI_num_sgf_per_l, &
@@ -1343,51 +1235,48 @@ MODULE mp2_optimize_ri_basis
     INTEGER, ALLOCATABLE, DIMENSION(:, :)    :: l_tab
     INTEGER, DIMENSION(:), POINTER           :: la_max, la_min, npgfa, nshell
     INTEGER, DIMENSION(:, :), POINTER        :: first_sgfa, nl
-    LOGICAL                                  :: external_num_of_func, failure
+    LOGICAL                                  :: external_num_of_func
     REAL(dp)                                 :: geom_fact
     REAL(dp), ALLOCATABLE, DIMENSION(:)      :: exponents, RI_exponents
     REAL(dp), ALLOCATABLE, DIMENSION(:, :)   :: exp_tab, max_min_exp_l
     REAL(dp), DIMENSION(:, :), POINTER       :: sphi_a, zet
     REAL(dp), DIMENSION(:, :, :), POINTER    :: gcc
     REAL(KIND=dp), ALLOCATABLE, DIMENSION(:) :: max_rel_dev, max_rel_dev_prev
-    TYPE(gto_basis_set_type), POINTER        :: orb_basis_a
+    TYPE(gto_basis_set_type), POINTER        :: orb_basis_a, tmp_basis
     TYPE(qs_kind_type), DIMENSION(:), &
       POINTER                                :: qs_kind_set
     TYPE(qs_kind_type), POINTER              :: atom_kind
 
     CALL timeset(routineN,handle)
-    failure = .FALSE.
 
     basis_quality=mp2_env%ri_opt_param%basis_quality
     external_num_of_func=.FALSE.
     IF(ALLOCATED(mp2_env%ri_opt_param%RI_nset_per_l)) external_num_of_func=.TRUE.
 
     NULLIFY(qs_kind_set)
-    CALL get_qs_env(qs_env=qs_env, qs_kind_set=qs_kind_set, error=error)
+    CALL get_qs_env(qs_env=qs_env, qs_kind_set=qs_kind_set)
     nkind = SIZE(qs_kind_set,1) 
 
-    ALLOCATE(basis_was_assoc(nkind),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(basis_was_assoc(nkind))
     basis_was_assoc=.FALSE.
 
     IF(external_num_of_func.AND.nkind>1) THEN
-      CALL cp_assert(.FALSE.,cp_warning_level,cp_assertion_failed,routineP,&
-                     "There are more than one kind of atom. The same pattern of functions, "//&
-                     "as specified by NUM_FUNC, will be used for all kinds.", &
-                     error,only_ionode=.TRUE.)
+      CALL cp_warn(__LOCATION__,&
+           "There are more than one kind of atom. The same pattern of functions, "//&
+           "as specified by NUM_FUNC, will be used for all kinds.")
     END IF
 
     DO ikind = 1, nkind
       NULLIFY(atom_kind)
       atom_kind => qs_kind_set(ikind)
 
+      CALL get_qs_kind(qs_kind=atom_kind,basis_set=orb_basis_a,basis_type="RI_AUX")
       ! save info if the basis was or not associated
-      basis_was_assoc(ikind)=ASSOCIATED(qs_kind_set(ikind)%ri_aux_basis_set)
+      basis_was_assoc(ikind)=ASSOCIATED(orb_basis_a)
 
       ! skip the generation of the initial guess if the RI basis is 
       ! provided in input
-      IF(ASSOCIATED(qs_kind_set(ikind)%ri_aux_basis_set)) THEN
-        CALL get_qs_kind(qs_kind=atom_kind,ri_aux_basis_set=orb_basis_a)
+      IF(basis_was_assoc(ikind)) THEN
         nseta = orb_basis_a%nset
         la_max => orb_basis_a%lmax
         la_min => orb_basis_a%lmin
@@ -1399,8 +1288,7 @@ MODULE mp2_optimize_ri_basis
         max_am=MAXVAL(la_max)
 
         RI_max_am=max_am
-        ALLOCATE(RI_num_sgf_per_l(0:RI_max_am),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(RI_num_sgf_per_l(0:RI_max_am))
         RI_num_sgf_per_l=0
         RI_nset=0
         DO iset=1, nseta
@@ -1408,16 +1296,14 @@ MODULE mp2_optimize_ri_basis
             RI_nset=RI_nset+1
             RI_num_sgf_per_l(la)=RI_num_sgf_per_l(la)+1
             IF(npgfa(iset)>1) THEN
-              CALL cp_assert(.FALSE.,cp_warning_level,cp_assertion_failed,routineP,&
+              CALL cp_warn(__LOCATION__,&
                    "The RI basis set optimizer can not handle contracted Gaussian. "//&
-                   "Calculation continue with only uncontracted functions.", &
-                   error,only_ionode=.TRUE.)
+                   "Calculation continue with only uncontracted functions.")
             END IF
           END DO
         END DO
 
-        ALLOCATE(exp_tab(MAXVAL(RI_num_sgf_per_l),0:RI_max_am),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(exp_tab(MAXVAL(RI_num_sgf_per_l),0:RI_max_am))
         exp_tab=0.0_dp
         DO iii=0, RI_max_am
           iexpo=0
@@ -1432,18 +1318,15 @@ MODULE mp2_optimize_ri_basis
 
         ! sort exponents
         DO iii=0, RI_max_am
-          ALLOCATE(ordered_pos(RI_num_sgf_per_l(iii)),STAT=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          ALLOCATE(ordered_pos(RI_num_sgf_per_l(iii)))
           ordered_pos=0
           CALL sort(exp_tab(1:RI_num_sgf_per_l(iii),iii), RI_num_sgf_per_l(iii), ordered_pos)
           DEALLOCATE(ordered_pos)
         END DO
 
-        ALLOCATE(RI_l_expo(RI_nset),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(RI_l_expo(RI_nset))
         RI_l_expo=0
-        ALLOCATE(RI_exponents(RI_nset),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(RI_exponents(RI_nset))
         RI_exponents=0.0_dp
 
         iset=0
@@ -1457,8 +1340,7 @@ MODULE mp2_optimize_ri_basis
         DEALLOCATE(exp_tab)
 
 
-        ALLOCATE(max_rel_dev(RI_nset),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(max_rel_dev(RI_nset))
         max_rel_dev=1.0_dp
         iset=0
         DO iii=0, RI_max_am
@@ -1480,14 +1362,11 @@ MODULE mp2_optimize_ri_basis
         DEALLOCATE(RI_num_sgf_per_l)
 
         ! deallocate the old basis before moving on
-        CALL deallocate_gto_basis_set(qs_kind_set(ikind)%ri_aux_basis_set,error)
-
-        ! IF(qs_env%para_env%mepos==0) THEN
-        ! END IF
+        CALL remove_basis_from_container(qs_kind_set(ikind)%basis_sets,basis_type="RI_AUX")
 
       ELSE
  
-        CALL get_qs_kind(qs_kind=atom_kind,orb_basis_set=orb_basis_a)
+        CALL get_qs_kind(qs_kind=atom_kind,basis_set=orb_basis_a)
 
         sphi_a => orb_basis_a%sphi
         nseta = orb_basis_a%nset
@@ -1516,14 +1395,11 @@ MODULE mp2_optimize_ri_basis
           END DO
         END DO  
 
-        ALLOCATE(exponents(nexpo_shell),STAT=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(exponents(nexpo_shell))
         exponents=0.0_dp
-        ALLOCATE(l_expo(nexpo_shell),STAT=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(l_expo(nexpo_shell))
         l_expo=0
-        ALLOCATE(num_sgf_per_l(0:max_am),STAT=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(num_sgf_per_l(0:max_am))
         num_sgf_per_l=0
         iexpo=0
         DO iset = 1, nseta
@@ -1543,14 +1419,11 @@ MODULE mp2_optimize_ri_basis
           END DO
         END DO
 
-        ALLOCATE(exp_tab(nexpo_shell,nexpo_shell),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(exp_tab(nexpo_shell,nexpo_shell))
         exp_tab=0.0_dp
-        ALLOCATE(l_tab(nexpo_shell,nexpo_shell),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(l_tab(nexpo_shell,nexpo_shell))
         l_tab=0
-        ALLOCATE(tot_num_exp_per_l(0:max_am*2),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(tot_num_exp_per_l(0:max_am*2))
         tot_num_exp_per_l=0
         DO iexpo=1, nexpo_shell
           DO jexpo=iexpo, nexpo_shell
@@ -1564,8 +1437,7 @@ MODULE mp2_optimize_ri_basis
         DEALLOCATE(l_expo)
         DEALLOCATE(exponents)
 
-        ALLOCATE(max_min_exp_l(2,0:max_am*2),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(max_min_exp_l(2,0:max_am*2))
         max_min_exp_l(1,:)=HUGE(0)
         max_min_exp_l(2,:)=-HUGE(0)
 
@@ -1586,8 +1458,7 @@ MODULE mp2_optimize_ri_basis
         max_min_exp_l(1,:)=max_min_exp_l(1,:)/0.80_dp
         max_min_exp_l(2,:)=max_min_exp_l(2,:)/1.20_dp
 
-        ALLOCATE(RI_num_sgf_per_l(0:max_am*2),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(RI_num_sgf_per_l(0:max_am*2))
         RI_num_sgf_per_l=0
         
         SELECT CASE(basis_quality)
@@ -1612,8 +1483,7 @@ MODULE mp2_optimize_ri_basis
           RI_max_am=MIN(SIZE(mp2_env%ri_opt_param%RI_nset_per_l)-1,7)
           IF(RI_max_am>max_am*2) THEN
             DEALLOCATE(RI_num_sgf_per_l)
-            ALLOCATE(RI_num_sgf_per_l(0:RI_max_am),STAT=stat)
-            CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+            ALLOCATE(RI_num_sgf_per_l(0:RI_max_am))
             RI_num_sgf_per_l=0
           END IF
           DO la=0, RI_max_am
@@ -1661,16 +1531,13 @@ MODULE mp2_optimize_ri_basis
 
         RI_nset=SUM(RI_num_sgf_per_l)
 
-        ALLOCATE(RI_exponents(RI_nset),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(RI_exponents(RI_nset))
         RI_exponents=0.0_dp
 
-        ALLOCATE(RI_l_expo(RI_nset),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(RI_l_expo(RI_nset))
         RI_l_expo=0
 
-        ALLOCATE(max_rel_dev(RI_nset),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(max_rel_dev(RI_nset))
         max_rel_dev=1.0_dp
 
         iset=0
@@ -1680,6 +1547,7 @@ MODULE mp2_optimize_ri_basis
             RI_exponents(iset)=(max_min_exp_l(2,la)+max_min_exp_l(1,la))/2.0_dp
             RI_l_expo(iset)=la
             geom_fact=max_min_exp_l(2,la)/max_min_exp_l(1,la)
+
             max_rel_dev(iset)=(geom_fact-1.0_dp)/(geom_fact+1.0_dp)*0.9_dp
           ELSE
             geom_fact=(max_min_exp_l(2,la)/max_min_exp_l(1,la))**(1.0_dp/REAL(RI_num_sgf_per_l(la)-1,dp))
@@ -1710,26 +1578,25 @@ MODULE mp2_optimize_ri_basis
       END IF ! RI basis not associated
 
       ! create the new basis
-      NULLIFY(qs_kind_set(ikind)%ri_aux_basis_set)
-      CALL create_ri_basis(qs_kind_set(ikind)%ri_aux_basis_set,&
-                           RI_nset,RI_l_expo,RI_exponents,error)
+      NULLIFY(tmp_basis)
+      CALL create_ri_basis(tmp_basis,RI_nset,RI_l_expo,RI_exponents)
+      CALL add_basis_set_to_container(qs_kind_set(ikind)%basis_sets,tmp_basis,"RI_AUX")
+!d    CALL copy_gto_basis_set(tmp_basis,qs_kind_set(ikind)%ri_aux_basis_set)
+
       DEALLOCATE(RI_exponents)
       DEALLOCATE(RI_l_expo)
 
       IF(.NOT.ALLOCATED(max_rel_dev_output)) THEN
-        ALLOCATE(max_rel_dev_output(RI_nset),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(max_rel_dev_output(RI_nset))
         max_rel_dev_output(:)=max_rel_dev
       ELSE
         ! make a copy
         RI_prev_size=SIZE(max_rel_dev_output)
-        ALLOCATE(max_rel_dev_prev(RI_prev_size),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(max_rel_dev_prev(RI_prev_size))
         max_rel_dev_prev(:)=max_rel_dev_output
         DEALLOCATE(max_rel_dev_output)
         ! reallocate and copy
-        ALLOCATE(max_rel_dev_output(RI_prev_size+RI_nset),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(max_rel_dev_output(RI_prev_size+RI_nset))
         max_rel_dev_output(1:RI_prev_size)=max_rel_dev_prev
         max_rel_dev_output(RI_prev_size+1:RI_prev_size+RI_nset)=max_rel_dev
         DEALLOCATE(max_rel_dev_prev)
@@ -1750,14 +1617,12 @@ MODULE mp2_optimize_ri_basis
 !> \param RI_nset ...
 !> \param RI_l_expo ...
 !> \param RI_exponents ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE create_ri_basis(gto_basis_set,RI_nset,RI_l_expo,RI_exponents,error)
+  SUBROUTINE create_ri_basis(gto_basis_set,RI_nset,RI_l_expo,RI_exponents)
     TYPE(gto_basis_set_type), POINTER        :: gto_basis_set
     INTEGER                                  :: RI_nset
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: RI_l_expo
     REAL(dp), ALLOCATABLE, DIMENSION(:)      :: RI_exponents
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'create_ri_basis', &
       routineP = moduleN//':'//routineN
@@ -1765,20 +1630,18 @@ MODULE mp2_optimize_ri_basis
     INTEGER                                  :: handle, i, ico, ipgf, iset, &
                                                 ishell, lshell, m, maxco, &
                                                 maxl, maxpgf, maxshell, ncgf, &
-                                                nmin, nset, nsgf, stat
+                                                nmin, nset, nsgf
     INTEGER, DIMENSION(:), POINTER           :: lmax, lmin, npgf, nshell
     INTEGER, DIMENSION(:, :), POINTER        :: l, n
-    LOGICAL                                  :: failure
     REAL(KIND=dp), DIMENSION(:, :), POINTER  :: zet
     REAL(KIND=dp), DIMENSION(:, :, :), &
       POINTER                                :: gcc
 
     CALL timeset(routineN,handle)
-    failure = .FALSE.
     NULLIFY(lmax, lmin, npgf, nshell, l, n, zet, gcc)
 
     ! allocate the basis
-    CALL allocate_gto_basis_set(gto_basis_set,error)
+    CALL allocate_gto_basis_set(gto_basis_set)
 
     ! brute force
     nset = 0
@@ -1941,11 +1804,9 @@ MODULE mp2_optimize_ri_basis
     CALL reallocate(gto_basis_set%lz,1,ncgf)
     CALL reallocate(gto_basis_set%m,1,nsgf)
     CALL reallocate(gto_basis_set%norm_cgf,1,ncgf)
-    ALLOCATE (gto_basis_set%cgf_symbol(ncgf),STAT=stat)
-    CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (gto_basis_set%cgf_symbol(ncgf))
 
-    ALLOCATE (gto_basis_set%sgf_symbol(nsgf),STAT=stat)
-    CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (gto_basis_set%sgf_symbol(nsgf))
 
     ncgf = 0
     nsgf = 0
@@ -1972,8 +1833,7 @@ MODULE mp2_optimize_ri_basis
        END DO
     END DO
 
-    DEALLOCATE (gcc,l,lmax,lmin,n,npgf,nshell,zet,STAT=stat)
-    CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE (gcc,l,lmax,lmin,n,npgf,nshell,zet)
 
     CALL timestop(handle)
 

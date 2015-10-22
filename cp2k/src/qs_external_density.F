@@ -11,7 +11,6 @@ MODULE qs_external_density
   USE cell_types,                      ONLY: cell_type
   USE cp_control_types,                ONLY: dft_control_type
   USE cp_files,                        ONLY: close_file,&
-                                             get_unit_number,&
                                              open_file
   USE gaussian_gridlevels,             ONLY: gridlevel_info_type
   USE input_section_types,             ONLY: section_vals_get_subs_vals,&
@@ -35,9 +34,8 @@ MODULE qs_external_density
                                              rs_grid_create,&
                                              rs_grid_zero
   USE rs_pw_interface,                 ONLY: density_rs2pw
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -52,14 +50,12 @@ CONTAINS
 ! *****************************************************************************
 !> \brief  Computes the external density on the grid
 !> \param qs_env ...
-!> \param error ...
 !> \date   03.2011
 !> \author D. Varsano 
 ! *****************************************************************************
-  SUBROUTINE external_read_density(qs_env,error)
+  SUBROUTINE external_read_density(qs_env)
 
     TYPE(qs_environment_type), POINTER       :: qs_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'external_read_density', &
       routineP = moduleN//':'//routineN
@@ -68,11 +64,10 @@ CONTAINS
     INTEGER                                  :: extunit, gid, handle, i, &
                                                 igrid_level, ip, j, k, &
                                                 master, my_rank, nat, ndum, &
-                                                num_pe, stat, tag
+                                                num_pe, tag
     INTEGER, DIMENSION(3)                    :: lbounds, lbounds_local, &
                                                 npoints, npoints_local, &
                                                 ubounds, ubounds_local
-    LOGICAL                                  :: failure
     REAL(kind=dp), ALLOCATABLE, DIMENSION(:) :: buffer
     REAL(kind=dp), DIMENSION(3)              :: dr, rdum
     REAL(KIND=dp), DIMENSION(:), POINTER     :: tot_rho_r_ext
@@ -88,7 +83,6 @@ CONTAINS
       DIMENSION(:), POINTER                  :: rs_rho_ext
     TYPE(section_vals_type), POINTER         :: ext_den_section, input
 
-    failure=.FALSE.
     CALL timeset(routineN,handle)
     NULLIFY(cell, rs_rho_ext, input, ext_den_section, rs_descs, dft_control)
     NULLIFY(rho_ext_r, rho_ext_g, tot_rho_r_ext)
@@ -98,33 +92,30 @@ CONTAINS
                     rho_external=rho_external,&
                     input=input,&
                     pw_env=pw_env,&
-                    dft_control=dft_control,&
-                    error=error)
+                    dft_control=dft_control)
 
     IF (dft_control%apply_external_density) THEN
       CALL qs_rho_get(rho_external,&
                     rho_r=rho_ext_r,&
                     rho_g=rho_ext_g,&
-                    tot_rho_r=tot_rho_r_ext,&
-                    error=error)
+                    tot_rho_r=tot_rho_r_ext)
 
       gridlevel_info=>pw_env%gridlevel_info
 
-      CALL pw_env_get(pw_env, rs_descs=rs_descs, error=error)
+      CALL pw_env_get(pw_env, rs_descs=rs_descs)
 
-      ALLOCATE (rs_rho_ext(gridlevel_info%ngrid_levels),STAT=stat)
+      ALLOCATE (rs_rho_ext(gridlevel_info%ngrid_levels))
 
       DO igrid_level=1,gridlevel_info%ngrid_levels
         CALL rs_grid_create(rs_rho_ext(igrid_level)%rs_grid,&
-                            rs_descs(igrid_level)%rs_desc, error=error)
+                            rs_descs(igrid_level)%rs_desc)
         CALL rs_grid_zero(rs_rho_ext(igrid_level)%rs_grid)
       ENDDO
 
       igrid_level=igrid_level-1
 
-      ext_den_section => section_vals_get_subs_vals(input,"DFT%EXTERNAL_DENSITY",&
-                                                    error=error)
-      CALL section_vals_val_get(ext_den_section,"FILE_DENSITY",c_val=filename,error=error)
+      ext_den_section => section_vals_get_subs_vals(input,"DFT%EXTERNAL_DENSITY")
+      CALL section_vals_val_get(ext_den_section,"FILE_DENSITY",c_val=filename)
 
       gid     = rho_ext_r(1)%pw%pw_grid%para%group
       my_rank = rho_ext_r(1)%pw%pw_grid%para%my_pos
@@ -210,8 +201,8 @@ CONTAINS
       ENDIF
 
 
-      CALL density_rs2pw(pw_env,rs_rho_ext,rho=rho_ext_r(1),rho_gspace=rho_ext_g(1),error=error)
-      tot_rho_r_ext(1) = pw_integrate_function(rho_ext_r(1)%pw,isign=1,error=error)
+      CALL density_rs2pw(pw_env,rs_rho_ext,rho=rho_ext_r(1),rho_gspace=rho_ext_g(1))
+      tot_rho_r_ext(1) = pw_integrate_function(rho_ext_r(1)%pw,isign=1)
       IF (my_rank == 0) THEN
         WRITE(*,FMT="(T3,A,T61,F20.10)") "ZMP| Total external charge:                    ",&
                tot_rho_r_ext(1)
@@ -223,91 +214,6 @@ CONTAINS
     CALL timestop(handle)
     
   END SUBROUTINE external_read_density
-
-! *****************************************************************************
-!> \brief  Read external vxc potential
-!> \param qs_env ...
-!> \param error ...
-!> \date   03.2011
-!> \author DV 
-! *****************************************************************************
-  SUBROUTINE external_read_vxc(qs_env,error)
-
-    TYPE(qs_environment_type), POINTER       :: qs_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
-
-    CHARACTER(len=*), PARAMETER :: routineN = 'external_read_vxc', &
-      routineP = moduleN//':'//routineN
-
-    CHARACTER(LEN=default_string_length)     :: filename
-    INTEGER                                  :: extunit, handle, i, j, k, &
-                                                nat, ndum
-    INTEGER, DIMENSION(2, 3)                 :: bo_global, bo_local
-    INTEGER, DIMENSION(3)                    :: lbounds, npoints, ubounds
-    LOGICAL                                  :: failure
-    REAL(kind=dp)                            :: dvol
-    REAL(kind=dp), DIMENSION(3)              :: dr, rdum
-    TYPE(cell_type), POINTER                 :: cell
-    TYPE(dft_control_type), POINTER          :: dft_control
-    TYPE(pw_p_type), POINTER                 :: vxc_ext
-    TYPE(section_vals_type), POINTER         :: ext_vxc_section, input
-
-    failure=.FALSE.
-    NULLIFY(cell, vxc_ext, input, ext_vxc_section, dft_control)
-    CALL timeset(routineN,handle)
-    CALL get_qs_env(qs_env,&
-                    cell=cell,&
-                    external_vxc=vxc_ext,&
-                    input=input,&
-                    dft_control=dft_control,&
-                    error=error)
-    IF (dft_control%apply_external_vxc) THEN
-      ext_vxc_section => section_vals_get_subs_vals(input,"DFT%EXTERNAL_VXC",error=error)
-      IF (dft_control%read_external_vxc) THEN
-        dr=vxc_ext%pw%pw_grid%dr
-        dvol=vxc_ext%pw%pw_grid%dvol
-        vxc_ext%pw%cr3d=0.0_dp
-
-        bo_local=vxc_ext%pw%pw_grid%bounds_local
-        bo_global=vxc_ext%pw%pw_grid%bounds
-        DO i=1,3
-          npoints(i) = bo_local(2,i)-bo_local(1,i)+1
-          lbounds(i) = bo_local(1,i)
-          ubounds(i) = bo_local(2,i)
-        ENDDO
-        CALL section_vals_val_get(ext_vxc_section,"FILE_VXC",c_val=filename,error=error)
-        WRITE(*,*) "NOW READING VXC FILE:   ", filename
-        extunit=get_unit_number()
-        CALL open_file(file_name=filename,file_status="OLD",&
-               file_form="FORMATTED", file_action="READ", unit_number=extunit)
-        DO i =1,2
-          READ(extunit,*)
-        ENDDO
-        READ(extunit,*) nat,rdum
-        DO i=1,3
-           READ(extunit,*) ndum,rdum
-           IF (ndum/=npoints(i).OR.(ABS(rdum(i)-dr(i)) > 1e-4 )) THEN
-!Here valid only for cubic cells
-             WRITE(*,*) "check dimensions ", i
-             WRITE(*,*) ndum,"differs from", npoints(i)
-             WRITE(*,*) rdum(i),"differs from", dr(i)
-             STOP
-           ENDIF
-        ENDDO
-        DO i =1,nat
-          READ(extunit,*)
-        ENDDO 
-        DO i=lbounds(1),ubounds(1)
-          DO j=lbounds(2),ubounds(2)
-            READ(extunit,'(6E13.5)') (vxc_ext%pw%cr3d(i,j,k),k=lbounds(3),ubounds(3))
-          ENDDO
-        ENDDO
-        CALL close_file(unit_number=extunit)
-        dft_control%read_external_vxc = .FALSE.
-      END IF
-    END IF
-    CALL timestop(handle)
-  END SUBROUTINE external_read_vxc
 
 END MODULE qs_external_density
 

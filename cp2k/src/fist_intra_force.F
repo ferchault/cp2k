@@ -30,9 +30,8 @@ MODULE fist_intra_force
   USE molecule_types_new,              ONLY: get_molecule,&
                                              molecule_type
   USE particle_types,                  ONLY: particle_type
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -72,7 +71,6 @@ CONTAINS
 !> \param cell ...
 !> \param use_virial ...
 !> \param atprop_env ...
-!> \param error ...
 !> \par History
 !>      none
 !> \author CJM
@@ -82,7 +80,7 @@ CONTAINS
        pot_bond, pot_bend, pot_urey_bradley, pot_torsion, pot_imp_torsion, &
        pot_opbend, pot_shell, pv_bond, pv_bend, pv_urey_bradley, pv_torsion, &
        pv_imp_torsion, pv_opbend, f_bond, f_bend, f_torsion, f_ub, &
-       f_imptor, f_opbend, cell, use_virial, atprop_env, error)
+       f_imptor, f_opbend, cell, use_virial, atprop_env)
 
     TYPE(molecule_type), POINTER             :: molecule_set( : )
     TYPE(molecule_kind_type), POINTER        :: molecule_kind_set( : )
@@ -102,7 +100,6 @@ CONTAINS
     TYPE(cell_type), POINTER                 :: cell
     LOGICAL, INTENT(IN)                      :: use_virial
     TYPE(atprop_type), POINTER               :: atprop_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'force_intra_control', &
       routineP = moduleN//':'//routineN
@@ -133,7 +130,7 @@ CONTAINS
 
     CALL timeset ( routineN, handle )
     NULLIFY(logger)
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
 
     IF ( PRESENT ( f_bond)) f_bond = 0.0_dp
     IF ( PRESENT ( f_bend)) f_bend = 0.0_dp
@@ -376,7 +373,7 @@ CONTAINS
              dist2 = DOT_PRODUCT(t34,t32)
              DO imul = 1, torsion_list(itorsion)%torsion_kind%nmul
                 CALL force_torsions(torsion_list(itorsion)%torsion_kind%id_type, &
-                                    s32, is32,ism,isn,dist1,dist2,tm,tn, t12, t32,&
+                                    s32, is32,ism,isn,dist1,dist2,tm,tn, t12,&
                                     torsion_list(itorsion)%torsion_kind%k(imul), &
                                     torsion_list(itorsion)%torsion_kind%phi0(imul), &
                                     torsion_list(itorsion)%torsion_kind%m(imul), &
@@ -456,7 +453,7 @@ CONTAINS
              dist1 = DOT_PRODUCT(t12,t32)
              dist2 = DOT_PRODUCT(t34,t32)
              CALL force_imp_torsions( impr_list(itorsion)%impr_kind%id_type, &
-                                      s32, is32,ism,isn,dist1,dist2,tm,tn, t12, t32, &
+                                      s32, is32,ism,isn,dist1,dist2,tm,tn, t12, &
                                       impr_list(itorsion)%impr_kind%k, &
                                       impr_list(itorsion)%impr_kind%phi0, &
                                       gt1,gt2,gt3,gt4,energy,fscalar)
@@ -525,7 +522,6 @@ CONTAINS
              tm(2) = -t32(1)*t12(3)+t12(1)*t32(3)
              tm(3) =  t32(1)*t12(2)-t12(1)*t32(2)
              sm = SQRT ( DOT_PRODUCT(tm,tm) )
-             sn = SQRT ( DOT_PRODUCT(tn,tn) )
              s32 = SQRT ( DOT_PRODUCT(t32,t32) )
              CALL force_opbends( opbend_list(iopbend)%opbend_kind%id_type, &
                                       s32,tm,t41, t42, t43, &

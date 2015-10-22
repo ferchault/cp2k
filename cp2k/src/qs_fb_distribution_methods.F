@@ -27,10 +27,9 @@ MODULE qs_fb_distribution_methods
                                              fb_env_obj,&
                                              fb_env_set
   USE qs_kind_types,                   ONLY: qs_kind_type
-  USE timings,                         ONLY: timeset,&
-                                             timestop
   USE util,                            ONLY: sort
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -112,26 +111,23 @@ CONTAINS
 !> \param fb_env : the filter matrix environment
 !> \param qs_env : quickstep environment
 !> \param scf_section : SCF input section
-!> \param error : cp2k error container
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
-  SUBROUTINE fb_distribution_build(fb_env, qs_env, scf_section, error)
+  SUBROUTINE fb_distribution_build(fb_env, qs_env, scf_section)
     TYPE(fb_env_obj), INTENT(INOUT)          :: fb_env
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(section_vals_type), POINTER         :: scf_section
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_distribution_build', &
       routineP = moduleN//':'//routineN
 
     INTEGER :: handle, i_common_set, iatom, ii, ipe, lb, lowest_cost_ind, &
       my_pe, n_common_sets, natoms, nhalo_atoms, nkinds, nprocs, &
-      owner_id_in_halo, pref_pe, stat, ub
+      owner_id_in_halo, pref_pe, ub
     INTEGER, ALLOCATABLE, DIMENSION(:) :: common_set_ids, local_atoms_all, &
       local_atoms_sizes, local_atoms_starts, pe, pos_in_preferred_list
     INTEGER, DIMENSION(:), POINTER           :: halo_atoms, local_atoms
-    LOGICAL                                  :: acceptable_move, failure, &
-                                                move_happened
+    LOGICAL                                  :: acceptable_move, move_happened
     REAL(KIND=dp)                            :: average_cost
     REAL(KIND=dp), ALLOCATABLE, DIMENSION(:) :: cost_per_atom, cost_per_proc
     REAL(KIND=dp), ALLOCATABLE, &
@@ -154,7 +150,6 @@ CONTAINS
 
     CALL timeset(routineN, handle)
 
-    failure = .FALSE.
 
     NULLIFY(mat_ks, rcut, cell, para_env, particle_set, qs_kind_set, &
             halo_atoms, local_atoms)
@@ -162,8 +157,7 @@ CONTAINS
 
     ! obtain relevant data from fb_env, qs_env
     CALL fb_env_get(fb_env=fb_env, &
-                    rcut=rcut, &
-                    error=error)
+                    rcut=rcut)
     CALL get_qs_env(qs_env=qs_env, &
                     natom=natoms, &
                     particle_set=particle_set, &
@@ -171,62 +165,51 @@ CONTAINS
                     nkind=nkinds, &
                     cell=cell, &
                     para_env=para_env, &
-                    matrix_ks=mat_ks, &
-                    error=error)
+                    matrix_ks=mat_ks)
     nprocs = para_env%num_pe
     my_pe = para_env%mepos + 1 ! counting from 1
 
     ! for each global atom, build atomic halo and get the associated cost
-    ALLOCATE(pair_radii(nkinds,nkinds), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    ALLOCATE(pair_radii(nkinds,nkinds))
     CALL fb_build_pair_radii(rcut, nkinds, pair_radii)
-    CALL fb_atomic_halo_create(atomic_halo, error)
-    ALLOCATE(cost_per_atom(natoms), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    CALL fb_atomic_halo_create(atomic_halo)
+    ALLOCATE(cost_per_atom(natoms))
     DO iatom = 1, natoms
-       CALL fb_atomic_halo_init(atomic_halo, error)
+       CALL fb_atomic_halo_init(atomic_halo)
        CALL fb_atomic_halo_build_halo_atoms(iatom, &
                                             particle_set, &
                                             cell, &
                                             pair_radii, &
                                             halo_atoms, &
                                             nhalo_atoms, &
-                                            owner_id_in_halo, &
-                                            error)
+                                            owner_id_in_halo)
        CALL fb_atomic_halo_set(atomic_halo=atomic_halo, &
                                owner_atom=iatom, &
                                natoms=nhalo_atoms, &
-                               halo_atoms=halo_atoms, &
-                               error=error)
+                               halo_atoms=halo_atoms)
        NULLIFY(halo_atoms)
        cost_per_atom(iatom) = fb_atomic_halo_cost(atomic_halo, particle_set, qs_kind_set)
     END DO
-    DEALLOCATE(pair_radii, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    CALL fb_atomic_halo_release(atomic_halo, error)
+    DEALLOCATE(pair_radii)
+    CALL fb_atomic_halo_release(atomic_halo)
 
     ! build the preferred_procs_set according to DBCSR mat H
-    ALLOCATE(preferred_procs_set(natoms), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    ALLOCATE(common_set_ids(natoms), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    ALLOCATE(preferred_procs_set(natoms))
+    ALLOCATE(common_set_ids(natoms))
     CALL fb_build_preferred_procs(mat_ks(1)%matrix, &
                                   natoms, &
                                   preferred_procs_set, &
                                   common_set_ids, &
-                                  n_common_sets, &
-                                  error)
+                                  n_common_sets)
 
     ! for each atomic halo, construct distribution_element, and assign
     ! the element to a processors using preferred_procs_set in a
     ! round-robin manner
-    ALLOCATE(dist(nprocs), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    ALLOCATE(dist(nprocs))
     DO ipe = 1, nprocs
-       CALL fb_distribution_init(dist=dist(ipe), error=error)
+       CALL fb_distribution_init(dist=dist(ipe))
     END DO
-    ALLOCATE(pos_in_preferred_list(n_common_sets), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    ALLOCATE(pos_in_preferred_list(n_common_sets))
     pos_in_preferred_list(:) = 0
     DO iatom = 1, natoms
        element%id = iatom
@@ -236,25 +219,20 @@ CONTAINS
             MOD(pos_in_preferred_list(i_common_set), &
                 preferred_procs_set(iatom)%nprocs) + 1
        ipe = preferred_procs_set(iatom)%list(pos_in_preferred_list(i_common_set))
-       CALL fb_distribution_add(dist(ipe), element, error)
+       CALL fb_distribution_add(dist(ipe), element)
     END DO
 
-    DEALLOCATE(pos_in_preferred_list, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    DEALLOCATE(common_set_ids, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    DEALLOCATE(cost_per_atom, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    DEALLOCATE(pos_in_preferred_list)
+    DEALLOCATE(common_set_ids)
+    DEALLOCATE(cost_per_atom)
 
     ! sort processors according to the overall cost of their assigned
     ! corresponding distribution
-    ALLOCATE(cost_per_proc(nprocs), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    ALLOCATE(cost_per_proc(nprocs))
     DO ipe = 1, nprocs
        cost_per_proc(ipe) = dist(ipe)%cost
     END DO
-    ALLOCATE(pe(nprocs), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    ALLOCATE(pe(nprocs))
     CALL sort(cost_per_proc, nprocs, pe)
     ! now that cost_per_proc is sorted, ipe's no longer give mpi
     ! ranks, the correct one to use should be pe(ipe)
@@ -263,8 +241,7 @@ CONTAINS
     ! distributed
     average_cost = SUM(cost_per_proc) / REAL(nprocs, dp)
 
-    DEALLOCATE(cost_per_proc, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    DEALLOCATE(cost_per_proc)
 
     ! loop over the processors, starting with the highest cost, move
     ! atoms one by one:
@@ -290,8 +267,7 @@ CONTAINS
              IF ((pref_pe .NE. pe(ipe)) .AND. acceptable_move) THEN
                 CALL fb_distribution_move(dist(pe(ipe)), &
                                           lowest_cost_ind, &
-                                          dist(pref_pe), &
-                                          error)
+                                          dist(pref_pe))
                 move_happened = .TRUE.
                 EXIT preferred
              END IF
@@ -311,8 +287,7 @@ CONTAINS
                 IF ((pe(ii) .NE. pe(ipe)) .AND. acceptable_move) THEN
                    CALL fb_distribution_move(dist(pe(ipe)), &
                                              lowest_cost_ind, &
-                                             dist(pe(ii)), &
-                                             error)
+                                             dist(pe(ii)))
                    move_happened = .TRUE.
                    EXIT next_in_line
                 END IF
@@ -329,50 +304,38 @@ CONTAINS
        END DO redistribute ! while
     END DO ! ipe
 
-    DEALLOCATE(pe, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    DEALLOCATE(pe)
     DO ii = 1, SIZE(preferred_procs_set)
-       CALL fb_preferred_procs_list_release(preferred_procs_set(ii), error)
+       CALL fb_preferred_procs_list_release(preferred_procs_set(ii))
     END DO
-    DEALLOCATE(preferred_procs_set, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    DEALLOCATE(preferred_procs_set)
 
     ! generate local atoms from dist
-    ALLOCATE(local_atoms_all(natoms), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    ALLOCATE(local_atoms_starts(nprocs), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    ALLOCATE(local_atoms_sizes(nprocs), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    ALLOCATE(local_atoms_all(natoms))
+    ALLOCATE(local_atoms_starts(nprocs))
+    ALLOCATE(local_atoms_sizes(nprocs))
     CALL fb_distribution_to_local_atoms(dist, &
                                         local_atoms_all, &
                                         local_atoms_starts, &
-                                        local_atoms_sizes, &
-                                        error)
-    ALLOCATE(local_atoms(local_atoms_sizes(my_pe)), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+                                        local_atoms_sizes)
+    ALLOCATE(local_atoms(local_atoms_sizes(my_pe)))
     lb = local_atoms_starts(my_pe)
     ub = local_atoms_starts(my_pe) + local_atoms_sizes(my_pe) - 1
     local_atoms(1:local_atoms_sizes(my_pe)) = local_atoms_all(lb:ub)
     CALL fb_env_set(fb_env=fb_env, &
                     local_atoms=local_atoms, &
-                    nlocal_atoms=local_atoms_sizes(my_pe), &
-                    error=error)
+                    nlocal_atoms=local_atoms_sizes(my_pe))
 
     ! write out info
-    CALL fb_distribution_write_info(dist, scf_section, error)
+    CALL fb_distribution_write_info(dist, scf_section)
 
-    DEALLOCATE(local_atoms_all, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    DEALLOCATE(local_atoms_starts, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    DEALLOCATE(local_atoms_sizes, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    DEALLOCATE(local_atoms_all)
+    DEALLOCATE(local_atoms_starts)
+    DEALLOCATE(local_atoms_sizes)
     DO ipe = 1, SIZE(dist)
-       CALL fb_distribution_release(dist(ipe), error)
+       CALL fb_distribution_release(dist(ipe))
     END DO
-    DEALLOCATE(dist, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    DEALLOCATE(dist)
 
     CALL timestop(handle)
 
@@ -409,26 +372,21 @@ CONTAINS
 !> \brief Write out information on the load distribution on processors
 !> \param dist_set    : set of distributions for the processors
 !> \param scf_section : SCF input section
-!> \param error       : cp2k error container
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
-  SUBROUTINE fb_distribution_write_info(dist_set, scf_section, error)
+  SUBROUTINE fb_distribution_write_info(dist_set, scf_section)
     TYPE(fb_distribution_list), &
       DIMENSION(:), INTENT(IN)               :: dist_set
     TYPE(section_vals_type), POINTER         :: scf_section
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_distribution_write_info', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: ii, max_natoms, min_natoms, &
                                                 natoms, nprocs, unit_nr
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: ave_cost, ave_natoms, &
                                                 max_cost, min_cost, total_cost
     TYPE(cp_logger_type), POINTER            :: logger
-
-    failure = .FALSE.
 
     nprocs = SIZE(dist_set)
     natoms = 0
@@ -452,11 +410,10 @@ CONTAINS
        min_cost = MIN(min_cost, dist_set(ii)%cost)
     END DO
 
-    logger => cp_error_get_logger(error=error)
+    logger => cp_get_default_logger()
     unit_nr = cp_print_key_unit_nr(logger, scf_section, &
                                    "PRINT%FILTER_MATRIX", &
-                                   extension="", &
-                                   error=error)
+                                   extension="")
 
     IF (unit_nr > 0) THEN
        WRITE (UNIT=unit_nr, FMT="(/,A,I6,A)") &
@@ -476,7 +433,7 @@ CONTAINS
             " FILTER_MAT_DIAG| (* cost is calculated as sum of cube of atomic matrix sizes)"
     END IF
     CALL cp_print_key_finished_output(unit_nr, logger, scf_section, &
-                                      "PRINT%FILTER_MATRIX", error=error)
+                                      "PRINT%FILTER_MATRIX")
   END SUBROUTINE fb_distribution_write_info
 
 ! *****************************************************************************
@@ -489,39 +446,35 @@ CONTAINS
 !>                         col will have the same preferred list. This list
 !>                         maps each atom to their corresponding group
 !> \param n_common_sets  : number of unique preferred lists (groups)
-!> \param error       : cp2k error container
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
   SUBROUTINE fb_build_preferred_procs(dbcsr_mat, &
                                       natoms, &
                                       preferred_procs_set, &
                                       common_set_ids, &
-                                      n_common_sets, &
-                                      error)
+                                      n_common_sets)
     TYPE(cp_dbcsr_type), POINTER             :: dbcsr_mat
     INTEGER, INTENT(IN)                      :: natoms
     TYPE(fb_preferred_procs_list), &
       DIMENSION(:), INTENT(INOUT)            :: preferred_procs_set
     INTEGER, DIMENSION(:), INTENT(OUT)       :: common_set_ids
     INTEGER, INTENT(OUT)                     :: n_common_sets
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_build_preferred_procs', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: icol, nprows, pcol, prow, stat
+    INTEGER                                  :: icol, nprows, pcol, prow
     INTEGER, DIMENSION(:), POINTER           :: col_dist
-    LOGICAL                                  :: check_ok, failure
+    LOGICAL                                  :: check_ok
     TYPE(dbcsr_distribution_obj)             :: dbcsr_dist
     TYPE(dbcsr_mp_obj)                       :: dbcsr_mp
 
-    failure = .FALSE.
     check_ok = natoms .LE. cp_dbcsr_nblkcols_total(dbcsr_mat)
-    CPPostcondition(check_ok, cp_failure_level, routineP, error, failure)
+    CPASSERT(check_ok)
     check_ok = SIZE(preferred_procs_set) .GE. natoms
-    CPPostcondition(check_ok, cp_failure_level, routineP, error, failure)
+    CPASSERT(check_ok)
     check_ok = SIZE(common_set_ids) .GE. natoms
-    CPPostcondition(check_ok, cp_failure_level, routineP, error, failure)
+    CPASSERT(check_ok)
 
     CALL cp_dbcsr_get_info(dbcsr_mat, distribution=dbcsr_dist, proc_col_dist=col_dist)
     dbcsr_mp = dbcsr_distribution_mp(dbcsr_dist)
@@ -529,11 +482,9 @@ CONTAINS
 
     DO icol = 1, natoms
        IF (ASSOCIATED(preferred_procs_set(icol)%list)) THEN
-          DEALLOCATE(preferred_procs_set(icol)%list, STAT=stat)
-          CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+          DEALLOCATE(preferred_procs_set(icol)%list)
        END IF
-       ALLOCATE(preferred_procs_set(icol)%list(nprows), STAT=stat)
-       CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+       ALLOCATE(preferred_procs_set(icol)%list(nprows))
        pcol = col_dist(icol)
        ! dbcsr prow and pcol counts from 0
        DO prow = 0, nprows-1
@@ -553,25 +504,18 @@ CONTAINS
 ! *****************************************************************************
 !> \brief Release a preferred_procs_list
 !> \param preferred_procs_list  : the preferred procs list in question
-!> \param error                 : cp2k error container
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
-  SUBROUTINE fb_preferred_procs_list_release(preferred_procs_list, error)
+  SUBROUTINE fb_preferred_procs_list_release(preferred_procs_list)
     TYPE(fb_preferred_procs_list), &
       INTENT(INOUT)                          :: preferred_procs_list
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: &
       routineN = 'fb_preferred_procs_list_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
     IF (ASSOCIATED(preferred_procs_list%list)) THEN
-       DEALLOCATE(preferred_procs_list%list, STAT=stat)
-       CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+       DEALLOCATE(preferred_procs_list%list)
     END IF
   END SUBROUTINE fb_preferred_procs_list_release
 
@@ -584,36 +528,31 @@ CONTAINS
 !> \param local_atoms_starts : starting position in local_atoms array for
 !>                             each processor
 !> \param local_atoms_sizes  : number of atoms local to each processor
-!> \param error       : cp2k error container
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
   SUBROUTINE fb_distribution_to_local_atoms(dist_set, &
                                             local_atoms, &
                                             local_atoms_starts, &
-                                            local_atoms_sizes, &
-                                            error)
+                                            local_atoms_sizes)
     TYPE(fb_distribution_list), &
       DIMENSION(:), INTENT(IN)               :: dist_set
     INTEGER, DIMENSION(:), INTENT(OUT)       :: local_atoms, &
                                                 local_atoms_starts, &
                                                 local_atoms_sizes
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: &
       routineN = 'fb_distribution_to_local_atoms', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: iatom, ipe, n_procs, pos
-    LOGICAL                                  :: check_ok, failure
-
-    failure = .FALSE.
+    LOGICAL                                  :: check_ok
 
     n_procs = SIZE(dist_set)
 
     check_ok = SIZE(local_atoms_starts) .GE. n_procs
-    CPPostcondition(check_ok, cp_failure_level, routineP, error, failure)
+    CPASSERT(check_ok)
     check_ok = SIZE(local_atoms_sizes) .GE. n_procs
-    CPPostcondition(check_ok, cp_failure_level, routineP, error, failure)
+    CPASSERT(check_ok)
 
     local_atoms(:) = 0
     local_atoms_starts(:) = 0
@@ -634,32 +573,26 @@ CONTAINS
 !> \brief Initialise a distribution
 !> \param dist        : the distribution in question
 !> \param nmax        : [OPTIONAL] size of the list array to be allocated
-!> \param error       : cp2k error container
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
-  SUBROUTINE fb_distribution_init(dist, nmax, error)
+  SUBROUTINE fb_distribution_init(dist, nmax)
     TYPE(fb_distribution_list), &
       INTENT(INOUT)                          :: dist
     INTEGER, INTENT(IN), OPTIONAL            :: nmax
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_distribution_init', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: ii, my_nmax, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: ii, my_nmax
 
-    failure = .FALSE.
     my_nmax = 0
     IF (PRESENT(nmax)) my_nmax = nmax
     IF (ASSOCIATED(dist%list)) THEN
-       DEALLOCATE(dist%list, STAT=stat)
-       CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+       DEALLOCATE(dist%list)
     END IF
     NULLIFY(dist%list)
     IF (my_nmax .GT. 0) THEN
-       ALLOCATE(dist%list(my_nmax), STAT=stat)
-       CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+       ALLOCATE(dist%list(my_nmax))
        DO ii = 1, SIZE(dist%list)
           dist%list(ii)%id = 0
           dist%list(ii)%cost = 0.0_dp
@@ -673,32 +606,26 @@ CONTAINS
 !> \brief Resize the list array in a distribution
 !> \param dist        : The distribution in question
 !> \param nmax        : new size of the list array
-!> \param error       : cp2k error container
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
-  SUBROUTINE fb_distribution_resize(dist, nmax, error)
+  SUBROUTINE fb_distribution_resize(dist, nmax)
     TYPE(fb_distribution_list), &
       INTENT(INOUT)                          :: dist
     INTEGER, INTENT(IN)                      :: nmax
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_distribution_resize', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: ii, my_nmax, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: ii, my_nmax
     TYPE(fb_distribution_element), &
       DIMENSION(:), POINTER                  :: new_list
 
-    failure = .FALSE.
     IF (.NOT. ASSOCIATED(dist%list)) THEN
        my_nmax = MAX(nmax, 1)
-       ALLOCATE(dist%list(my_nmax), STAT=stat)
-       CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+       ALLOCATE(dist%list(my_nmax))
     ELSE
        my_nmax = MAX(nmax, dist%nelements)
-       ALLOCATE(new_list(my_nmax), STAT=stat)
-       CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+       ALLOCATE(new_list(my_nmax))
        DO ii = 1, SIZE(new_list)
           new_list(ii)%id = 0
           new_list(ii)%cost = 0.0_dp
@@ -706,8 +633,7 @@ CONTAINS
        DO ii = 1, dist%nelements
           new_list(ii) = dist%list(ii)
        END DO
-       DEALLOCATE(dist%list, STAT=stat)
-       CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+       DEALLOCATE(dist%list)
        dist%list => new_list
     END IF
   END SUBROUTINE fb_distribution_resize
@@ -716,30 +642,26 @@ CONTAINS
 !> \brief Add an atom (element) to a distribution
 !> \param dist        : the distribution in question
 !> \param element     : the element to be added
-!> \param error       : cp2k error container
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
-  SUBROUTINE fb_distribution_add(dist, element, error)
+  SUBROUTINE fb_distribution_add(dist, element)
     TYPE(fb_distribution_list), &
       INTENT(INOUT)                          :: dist
     TYPE(fb_distribution_element), &
       INTENT(IN)                             :: element
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_distribution_add', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: ii, new_nelements, pos
-    LOGICAL                                  :: failure
 
-    failure = .FALSE.
     new_nelements = dist%nelements + 1
 
     ! resize list if necessary
     IF (.NOT. ASSOCIATED(dist%list)) THEN
-       CALL fb_distribution_resize(dist, new_nelements, error=error)
+       CALL fb_distribution_resize(dist, new_nelements)
     ELSE IF (new_nelements*ENLARGE_RATIO .GT. SIZE(dist%list)) THEN
-       CALL fb_distribution_resize(dist, SIZE(dist%list)*EXPAND_FACTOR, error)
+       CALL fb_distribution_resize(dist, SIZE(dist%list)*EXPAND_FACTOR)
     END IF
     ! assuming the list of elements is always sorted with respect to cost
     ! slot the new element into the appropriate spot
@@ -798,24 +720,21 @@ CONTAINS
 !> \brief Remove the pos-th element from a distribution
 !> \param dist        : the distribution in question
 !> \param pos         : index of the element in the list array
-!> \param error       : cp2k error container
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
-  SUBROUTINE fb_distribution_remove_ind(dist, pos, error)
+  SUBROUTINE fb_distribution_remove_ind(dist, pos)
     TYPE(fb_distribution_list), &
       INTENT(INOUT)                          :: dist
     INTEGER, INTENT(IN)                      :: pos
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_distribution_remove_ind', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: ii
-    LOGICAL                                  :: check_ok, failure
+    LOGICAL                                  :: check_ok
 
-    failure = .FALSE.
     check_ok = pos .GT. 0
-    CPPostcondition(check_ok, cp_failure_level, routineP, error, failure)
+    CPASSERT(check_ok)
     IF (pos .LE. dist%nelements) THEN
        dist%cost = dist%cost - dist%list(pos)%cost
        DO ii = pos, dist%nelements-1
@@ -826,7 +745,7 @@ CONTAINS
        dist%nelements = dist%nelements - 1
        ! auto resize if required
        IF (dist%nelements*REDUCE_RATIO .LT. SIZE(dist%list)) THEN
-          CALL fb_distribution_resize(dist, dist%nelements/SHRINK_FACTOR, error)
+          CALL fb_distribution_resize(dist, dist%nelements/SHRINK_FACTOR)
        END IF
     END IF
   END SUBROUTINE fb_distribution_remove_ind
@@ -835,15 +754,13 @@ CONTAINS
 !> \brief Remove a given element from a distribution
 !> \param dist        : the distribution in question
 !> \param element     : the element in question
-!> \param error       : cp2k error container
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
-  SUBROUTINE fb_distribution_remove_el(dist, element, error)
+  SUBROUTINE fb_distribution_remove_el(dist, element)
     TYPE(fb_distribution_list), &
       INTENT(INOUT)                          :: dist
     TYPE(fb_distribution_element), &
       INTENT(IN)                             :: element
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_distribution_remove_el', &
       routineP = moduleN//':'//routineN
@@ -857,7 +774,7 @@ CONTAINS
           EXIT
        END IF
     END DO
-    CALL fb_distribution_remove_ind(dist, pos, error)
+    CALL fb_distribution_remove_ind(dist, pos)
   END SUBROUTINE fb_distribution_remove_el
 
 ! *****************************************************************************
@@ -865,31 +782,28 @@ CONTAINS
 !> \param dist_from   : the source distribution
 !> \param pos         : index of the element in the source distribution
 !> \param dist_to     : the destination distribution
-!> \param error       : cp2k error container
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
-  SUBROUTINE fb_distribution_move_ind(dist_from, pos, dist_to, error)
+  SUBROUTINE fb_distribution_move_ind(dist_from, pos, dist_to)
     TYPE(fb_distribution_list), &
       INTENT(INOUT)                          :: dist_from
     INTEGER, INTENT(IN)                      :: pos
     TYPE(fb_distribution_list), &
       INTENT(INOUT)                          :: dist_to
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_distribution_move_ind', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: check_ok, failure
+    LOGICAL                                  :: check_ok
     TYPE(fb_distribution_element)            :: element
 
-    failure = .FALSE.
     check_ok = ASSOCIATED(dist_from%list)
-    CPPostcondition(check_ok, cp_failure_level, routineP, error, failure)
+    CPASSERT(check_ok)
     check_ok = pos .LE. dist_from%nelements
-    CPPostcondition(check_ok, cp_failure_level, routineP, error, failure)
+    CPASSERT(check_ok)
     element = dist_from%list(pos)
-    CALL fb_distribution_add(dist_to, element, error)
-    CALL fb_distribution_remove(dist_from, pos, error)
+    CALL fb_distribution_add(dist_to, element)
+    CALL fb_distribution_remove(dist_from, pos)
   END SUBROUTINE fb_distribution_move_ind
 
 ! *****************************************************************************
@@ -897,51 +811,41 @@ CONTAINS
 !> \param dist_from   : the source distribution
 !> \param element     : the element in question
 !> \param dist_to     : the destination distribution
-!> \param error       : cp2k error container
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
-  SUBROUTINE fb_distribution_move_el(dist_from, element, dist_to, error)
+  SUBROUTINE fb_distribution_move_el(dist_from, element, dist_to)
     TYPE(fb_distribution_list), &
       INTENT(INOUT)                          :: dist_from
     TYPE(fb_distribution_element), &
       INTENT(IN)                             :: element
     TYPE(fb_distribution_list), &
       INTENT(INOUT)                          :: dist_to
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_distribution_move_el', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: check_ok, failure
+    LOGICAL                                  :: check_ok
 
-    failure = .FALSE.
     check_ok = ASSOCIATED(dist_from%list)
-    CPPostcondition(check_ok, cp_failure_level, routineP, error, failure)
-    CALL fb_distribution_add(dist_to, element, error)
-    CALL fb_distribution_remove(dist_from, element, error)
+    CPASSERT(check_ok)
+    CALL fb_distribution_add(dist_to, element)
+    CALL fb_distribution_remove(dist_from, element)
   END SUBROUTINE fb_distribution_move_el
 
 ! *****************************************************************************
 !> \brief Release a distribution
 !> \param dist  : the distribution in question
-!> \param error : cp2k error container
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
-  SUBROUTINE fb_distribution_release(dist, error)
+  SUBROUTINE fb_distribution_release(dist)
     TYPE(fb_distribution_list), &
       INTENT(INOUT)                          :: dist
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_distribution_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
     IF (ASSOCIATED(dist%list)) THEN
-       DEALLOCATE(dist%list, STAT=stat)
-       CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+       DEALLOCATE(dist%list)
     END IF
   END SUBROUTINE fb_distribution_release
 

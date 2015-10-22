@@ -43,9 +43,8 @@ MODULE qs_fermi_contact
                                              neighbor_list_iterator_release,&
                                              neighbor_list_set_p_type
   USE termination,                     ONLY: stop_memory
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -67,19 +66,17 @@ CONTAINS
 !> \param qs_env ...
 !> \param matrix_fc ...
 !> \param rc ...
-!> \param error ...
 !> \date    27.02.2009
 !> \author  VW
 !> \version 1.0
 ! *****************************************************************************
 
-  SUBROUTINE build_fermi_contact_matrix(qs_env,matrix_fc,rc,error)
+  SUBROUTINE build_fermi_contact_matrix(qs_env,matrix_fc,rc)
 
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(cp_dbcsr_p_type), DIMENSION(:), &
       POINTER                                :: matrix_fc
     REAL(dp), DIMENSION(3), INTENT(IN)       :: rc
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'build_fermi_contact_matrix', &
       routineP = moduleN//':'//routineN
@@ -91,7 +88,8 @@ CONTAINS
                                                 lb_min, npgfa, npgfb, nsgfa, &
                                                 nsgfb
     INTEGER, DIMENSION(:, :), POINTER        :: first_sgfa, first_sgfb
-    LOGICAL                                  :: found, new_atom_b
+    LOGICAL                                  :: found, new_atom_b, &
+                                                omit_headers
     REAL(KIND=dp)                            :: dab, rab2
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :)                        :: fcab, work
@@ -122,15 +120,14 @@ CONTAINS
     NULLIFY(cell,sab_orb,qs_kind_set,particle_set,para_env)
     NULLIFY(logger)
 
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
 
     CALL get_qs_env(qs_env=qs_env,&
                     qs_kind_set=qs_kind_set,&
                     particle_set=particle_set,&
                     para_env=para_env,&
                     sab_orb=sab_orb,&
-                    cell=cell,&
-                    error=error)
+                    cell=cell)
 
     nkind = SIZE(qs_kind_set)
     natom = SIZE(particle_set)
@@ -166,7 +163,7 @@ CONTAINS
                                      "basis_set_list",nkind)
     DO ikind=1,nkind
       qs_kind => qs_kind_set(ikind)
-      CALL get_qs_kind(qs_kind=qs_kind,orb_basis_set=basis_set_a)
+      CALL get_qs_kind(qs_kind=qs_kind,basis_set=basis_set_a)
       IF (ASSOCIATED(basis_set_a)) THEN
         basis_set_list(ikind)%gto_basis_set => basis_set_a
       ELSE
@@ -287,34 +284,28 @@ CONTAINS
     CALL neighbor_list_iterator_release(nl_iterator)
 
     ! *** Release work storage ***
-    DEALLOCATE (basis_set_list,STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-                                     "basis_set_list")
+    DEALLOCATE (basis_set_list)
 
-    DEALLOCATE (fcab,STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-                                     "fcab")
+    DEALLOCATE (fcab)
 
-    DEALLOCATE (work,STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-                                     "work")
+    DEALLOCATE (work)
 
     NULLIFY (fcint(1)%block)
-    DEALLOCATE (fcint,STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-                                     "fcint")
+    DEALLOCATE (fcint)
 
 !   *** Print the Fermi contact matrix, if requested ***
 
     IF (BTEST(cp_print_key_should_output(logger%iter_info,&
-         qs_env%input,"DFT%PRINT%AO_MATRICES/FERMI_CONTACT",error=error),cp_p_file)) THEN
+         qs_env%input,"DFT%PRINT%AO_MATRICES/FERMI_CONTACT"),cp_p_file)) THEN
        iw = cp_print_key_unit_nr(logger,qs_env%input,"DFT%PRINT%AO_MATRICES/FERMI_CONTACT",&
-            extension=".Log",error=error)
-       CALL section_vals_val_get(qs_env%input,"DFT%PRINT%AO_MATRICES%NDIGITS",i_val=after,error=error)
+            extension=".Log")
+       CALL section_vals_val_get(qs_env%input,"DFT%PRINT%AO_MATRICES%NDIGITS",i_val=after)
+       CALL section_vals_val_get(qs_env%input,"DFT%PRINT%AO_MATRICES%OMIT_HEADERS",l_val=omit_headers)
        after = MIN(MAX(after,1),16)
-       CALL cp_dbcsr_write_sparse_matrix(matrix_fc(1)%matrix,4,after,qs_env,para_env,output_unit=iw,error=error)
+       CALL cp_dbcsr_write_sparse_matrix(matrix_fc(1)%matrix,4,after,qs_env,&
+            para_env,output_unit=iw,omit_headers=omit_headers)
        CALL cp_print_key_finished_output(iw,logger,qs_env%input,&
-            "DFT%PRINT%AO_MATRICES/FERMI_CONTACT", error=error)
+            "DFT%PRINT%AO_MATRICES/FERMI_CONTACT")
     END IF
 
     CALL timestop(handle)

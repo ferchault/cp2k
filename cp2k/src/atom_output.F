@@ -25,12 +25,15 @@ MODULE atom_output
                                              section_vals_get_subs_vals2,&
                                              section_vals_type,&
                                              section_vals_val_get
-  USE kinds,                           ONLY: dp
+  USE kinds,                           ONLY: default_string_length,&
+                                             dp
   USE mathconstants,                   ONLY: pi
   USE periodic_table,                  ONLY: ptable
   USE physcon,                         ONLY: evolt
   USE xc_derivatives,                  ONLY: xc_functional_get_info
+  USE xc_libxc,                        ONLY: libxc_version_info
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -52,13 +55,11 @@ CONTAINS
 !> \param zval ...
 !> \param info ...
 !> \param iw ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE atom_print_info(zval,info,iw,error)
+  SUBROUTINE atom_print_info(zval,info,iw)
     INTEGER, INTENT(IN)                      :: zval
     CHARACTER(len=*), INTENT(IN)             :: info
     INTEGER, INTENT(IN)                      :: iw
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'atom_print_info', &
       routineP = moduleN//':'//routineN
@@ -71,12 +72,10 @@ CONTAINS
 !> \brief ...
 !> \param state ...
 !> \param iw ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE atom_print_state(state,iw,error)
+  SUBROUTINE atom_print_state(state,iw)
     TYPE(atom_state)                         :: state
     INTEGER, INTENT(IN)                      :: iw
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'atom_print_state', &
       routineP = moduleN//':'//routineN
@@ -85,9 +84,7 @@ CONTAINS
 
     INTEGER                                  :: j, l, mc, mlc, mlo, mm(0:3), &
                                                 mo
-    LOGICAL                                  :: failure
 
-    failure = .FALSE.
     WRITE(iw,'(/,T2,A)') "Electronic structure"
     WRITE(iw,'(T5,A,T71,F10.2)') "Total number of core electrons",SUM(state%core)
     WRITE(iw,'(T5,A,T71,F10.2)') "Total number of valence electrons",SUM(state%occ)
@@ -127,7 +124,7 @@ CONTAINS
            WRITE(iw,'(A5,T10,10F6.2)') label(l),(state%occ(l,j),j=1,mo)
         ELSE
            mc = mm(l)
-           CPPrecondition(SUM(state%occ(l,1:mc))==0,cp_failure_level,routineP,error,failure)
+           CPASSERT(SUM(state%occ(l,1:mc))==0)
            WRITE(iw,ADVANCE="no",FMT='(A5,T9,A1,10F6.2)') label(l),"[",(state%core(l,j),j=1,mc)
            WRITE(iw,FMT='(A1,F5.2,10F6.2)') "]",(state%occ(l,j),j=mc+1,mc+mo)
         END IF
@@ -163,12 +160,10 @@ CONTAINS
 !> \brief ...
 !> \param atom ...
 !> \param iw ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE atom_print_energies(atom,iw,error)
+  SUBROUTINE atom_print_energies(atom,iw)
     TYPE(atom_type)                          :: atom
     INTEGER, INTENT(IN)                      :: iw
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'atom_print_energies', &
       routineP = moduleN//':'//routineN
@@ -237,15 +232,13 @@ CONTAINS
 !> \param deps ...
 !> \param atom ...
 !> \param iw ...
-!> \param error ...
 !> \author D. Varsano [daniele.varsano@nano.cnr.it]
 ! *****************************************************************************
-  SUBROUTINE atom_print_zmp_iteration(iter,deps,atom,iw,error)
+  SUBROUTINE atom_print_zmp_iteration(iter,deps,atom,iw)
     INTEGER, INTENT(IN)                      :: iter
     REAL(dp), INTENT(IN)                     :: deps
     TYPE(atom_type), INTENT(IN)              :: atom
     INTEGER, INTENT(IN)                      :: iw
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'atom_print_zmp_iteration', &
       routineP = moduleN//':'//routineN
@@ -265,13 +258,11 @@ CONTAINS
 !> \param deps ...
 !> \param etot ...
 !> \param iw ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE atom_print_iteration(iter,deps,etot,iw,error)
+  SUBROUTINE atom_print_iteration(iter,deps,etot,iw)
     INTEGER, INTENT(IN)                      :: iter
     REAL(dp), INTENT(IN)                     :: deps, etot
     INTEGER, INTENT(IN)                      :: iw
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'atom_print_iteration', &
       routineP = moduleN//':'//routineN
@@ -288,21 +279,17 @@ CONTAINS
 !> \param atom_basis ...
 !> \param iw ...
 !> \param title ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE atom_print_basis(atom_basis,iw,title,error)
+  SUBROUTINE atom_print_basis(atom_basis,iw,title)
     TYPE(atom_basis_type)                    :: atom_basis
     INTEGER, INTENT(IN)                      :: iw
     CHARACTER(len=*)                         :: title
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'atom_print_basis', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: i, j, l
-    LOGICAL                                  :: failure
 
-    failure = .FALSE.
     WRITE(iw,'(/,A)') TRIM(title)
     SELECT CASE (atom_basis%basis_type)
       CASE (GTO_BASIS)
@@ -361,28 +348,24 @@ CONTAINS
         END DO
         WRITE(iw,'(" ",79("*"))')
       CASE (NUM_BASIS)
-        CPPostcondition(.FALSE., cp_failure_level, routineP, error, failure)
+        CPABORT("")
       CASE DEFAULT
-        CPPostcondition(.FALSE., cp_failure_level, routineP, error, failure)
+        CPABORT("")
     END SELECT
 
   END SUBROUTINE atom_print_basis
 ! *****************************************************************************
 !> \brief ...
 !> \param atom_basis ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE atom_print_basis_file(atom_basis,error)
+  SUBROUTINE atom_print_basis_file(atom_basis)
     TYPE(atom_basis_type)                    :: atom_basis
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'atom_print_basis_file', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: i, iw
-    LOGICAL                                  :: failure
 
-    failure = .FALSE.
     CALL open_file(file_name="OPT_BASIS",file_status="UNKNOWN",file_action="WRITE",unit_number=iw)
     SELECT CASE (atom_basis%basis_type)
       CASE (GTO_BASIS)
@@ -410,7 +393,7 @@ CONTAINS
            "F_EXPONENTS ",(atom_basis%am(i,3),i=1,atom_basis%nbas(3))
         END IF
       CASE (CGTO_BASIS)
-        CPPostcondition(.FALSE., cp_failure_level, routineP, error, failure)
+        CPABORT("")
       CASE (STO_BASIS)
         WRITE(iw,'(A)') "      BASIS_TYPE SLATER"
         IF ( atom_basis%nbas(0) > 0 ) THEN
@@ -438,9 +421,9 @@ CONTAINS
            "F_QUANTUM_NUMBERS ",(atom_basis%ns(i,3),i=1,atom_basis%nbas(3))
         END IF
       CASE (NUM_BASIS)
-        CPPostcondition(.FALSE., cp_failure_level, routineP, error, failure)
+        CPABORT("")
       CASE DEFAULT
-        CPPostcondition(.FALSE., cp_failure_level, routineP, error, failure)
+        CPABORT("")
     END SELECT
     CALL close_file(unit_number=iw)
 
@@ -449,39 +432,37 @@ CONTAINS
 !> \brief ...
 !> \param atom ...
 !> \param iw ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE atom_print_method(atom,iw,error)
+  SUBROUTINE atom_print_method(atom,iw)
     TYPE(atom_type)                          :: atom
     INTEGER, INTENT(IN)                      :: iw
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'atom_print_method', &
       routineP = moduleN//':'//routineN
 
-    CHARACTER(len=160)                       :: reference, shortform
+    CHARACTER(len=10*default_string_length)  :: reference
+    CHARACTER(len=160)                       :: shortform
     CHARACTER(len=20)                        :: tmpStr
     CHARACTER(len=80), DIMENSION(:), POINTER :: func_name
     INTEGER                                  :: ifun, ifunc_name, il, meth, &
-                                                myfun, reltyp, vmajor, vminor
-    LOGICAL                                  :: failure, lsd
+                                                myfun, reltyp
+    LOGICAL                                  :: lsd
     TYPE(section_vals_type), POINTER         :: xc_fun, xc_fun_section, &
                                                 xc_section
 
-    failure = .FALSE.
     NULLIFY(xc_fun,xc_fun_section,xc_section)
 
     meth = atom%method_type
 
     xc_section => atom%xc_section
-    xc_fun_section => section_vals_get_subs_vals(xc_section,"XC_FUNCTIONAL",error=error)
+    xc_fun_section => section_vals_get_subs_vals(xc_section,"XC_FUNCTIONAL")
     SELECT CASE (meth)
       CASE DEFAULT
-        CPPostcondition(.FALSE., cp_failure_level, routineP, error, failure)
+        CPABORT("")
       CASE (do_rks_atom)
-        CALL section_vals_val_get(xc_fun_section,"_SECTION_PARAMETERS_",i_val=myfun,error=error)
+        CALL section_vals_val_get(xc_fun_section,"_SECTION_PARAMETERS_",i_val=myfun)
       CASE (do_uks_atom)
-        CALL section_vals_val_get(xc_fun_section,"_SECTION_PARAMETERS_",i_val=myfun,error=error)
+        CALL section_vals_val_get(xc_fun_section,"_SECTION_PARAMETERS_",i_val=myfun)
       CASE (do_rhf_atom)
         myfun = xc_none
       CASE (do_uhf_atom)
@@ -492,7 +473,7 @@ CONTAINS
 
     SELECT CASE (meth)
       CASE DEFAULT
-        CPPostcondition(.FALSE., cp_failure_level, routineP, error, failure)
+        CPABORT("")
       CASE (do_rks_atom)
         IF (iw > 0) WRITE (iw, fmt="(/,' METHOD    | Restricted Kohn-Sham Calculation')")
       CASE (do_uks_atom)
@@ -530,7 +511,7 @@ CONTAINS
 
       SELECT CASE (reltyp)
         CASE DEFAULT
-          CPPostcondition(.FALSE., cp_failure_level, routineP, error, failure)
+          CPABORT("")
         CASE (do_nonrel_atom)
           IF (iw > 0) WRITE (iw, fmt="(' METHOD    | Nonrelativistic Calculation')")
         CASE (do_zoramp_atom)
@@ -557,70 +538,42 @@ CONTAINS
     lsd = (meth==do_uks_atom)
 
     IF (myfun/=xc_none) THEN
-      CALL section_vals_val_get(xc_section,"FUNCTIONAL_ROUTINE",c_val=tmpStr,error=error)
+      CALL section_vals_val_get(xc_section,"FUNCTIONAL_ROUTINE",c_val=tmpStr)
       IF (iw > 0) WRITE (iw, fmt="(' FUNCTIONAL| ROUTINE=',a)") TRIM(tmpStr)
-      CALL xc_functionals_expand(xc_fun_section,xc_section,error=error)
+      CALL xc_functionals_expand(xc_fun_section,xc_section)
       IF (iw > 0) THEN
         ifun=0
         DO
           ifun=ifun+1
-          xc_fun => section_vals_get_subs_vals2(xc_fun_section,i_section=ifun,error=error)
+          xc_fun => section_vals_get_subs_vals2(xc_fun_section,i_section=ifun)
           IF (.NOT.ASSOCIATED(xc_fun)) EXIT
           CALL xc_functional_get_info(xc_fun,lsd=lsd,reference=reference,&
-            shortform=shortform,ifunc_name=1,error=error)
+            shortform=shortform,ifunc_name=1)
           IF (TRIM(xc_fun%section%name) == "LIBXC") THEN
-#if defined(__LIBXC2)
-               CALL xc_f90_version(vmajor,vminor)
-#else
-               vmajor=0 ; vminor=0
-#endif
-            WRITE (iw, fmt="(A,i1,A,i1,A)") ' FUNCTIONAL| LIBXC version ', vmajor, ".", vminor, &
-                      ' (Marques, Oliveira, Burnus, CPC 183, 2272 (2012))'
+            CALL libxc_version_info(tmpStr)
+            WRITE (iw, fmt="(A,A,A)") ' FUNCTIONAL| LIBXC Vers. ', TRIM(tmpStr(1:5)), &
+                   ' (Marques, Oliveira, Burnus, CPC 183, 2272 (2012))'
             WRITE (iw, fmt="(' FUNCTIONAL| ',a,':')") TRIM(shortform)
-            il = LEN_TRIM(reference)
-            IF (il < 67) THEN
-              WRITE (iw, fmt="(' FUNCTIONAL| ',a)") reference(1:il)
-            ELSE IF (il < 134) THEN
-              WRITE (iw, fmt="(' FUNCTIONAL| ',a)") reference(1:67)
-              WRITE (iw, fmt="(' FUNCTIONAL| ',a)") reference(68:il)
-            ELSE
-              WRITE (iw, fmt="(' FUNCTIONAL| ',a)") reference(1:67)
-              WRITE (iw, fmt="(' FUNCTIONAL| ',a)") reference(68:134)
-              WRITE (iw, fmt="(' FUNCTIONAL| ',a)") reference(134:il)
-            END IF
-            CALL section_vals_val_get(xc_fun,"functional",c_vals=func_name,error=error)
+            DO il=1,LEN_TRIM(reference),67
+              WRITE (iw, fmt="(' FUNCTIONAL| ',a67)") reference(il:)
+            END DO
+            CALL section_vals_val_get(xc_fun,"functional",c_vals=func_name)
             DO ifunc_name=2, SIZE(func_name)
               CALL xc_functional_get_info(xc_fun,lsd=lsd,reference=reference,&
-                shortform=shortform,ifunc_name=ifunc_name,error=error)
-              WRITE (iw, fmt="(A,i1,A,i1,A)") ' FUNCTIONAL| LIBXC version ', vmajor, ".", vminor, &
-                      ' (Marques, Oliveira, Burnus, CPC 183, 2272 (2012))'
+                shortform=shortform,ifunc_name=ifunc_name)
+              WRITE (iw, fmt="(A,A,A)") ' FUNCTIONAL| LIBXC Vers. ', TRIM(tmpStr(1:5)), &
+                     ' (Marques, Oliveira, Burnus, CPC 183, 2272 (2012))'
               WRITE (iw, fmt="(' FUNCTIONAL| ',a,':')") TRIM(shortform)
-              il = LEN_TRIM(reference)
-              IF (il < 67) THEN
-                WRITE (iw, fmt="(' FUNCTIONAL| ',a)") reference(1:il)
-              ELSE IF (il < 134) THEN
-                WRITE (iw, fmt="(' FUNCTIONAL| ',a)") reference(1:67)
-                WRITE (iw, fmt="(' FUNCTIONAL| ',a)") reference(68:il)
-              ELSE
-                WRITE (iw, fmt="(' FUNCTIONAL| ',a)") reference(1:67)
-                WRITE (iw, fmt="(' FUNCTIONAL| ',a)") reference(68:134)
-                WRITE (iw, fmt="(' FUNCTIONAL| ',a)") reference(134:il)
-              END IF
+              DO il=1,LEN_TRIM(reference),67
+                WRITE (iw, fmt="(' FUNCTIONAL| ',a67)") reference(il:)
+              END DO
             END DO
           ELSE
             WRITE (iw, fmt="(' FUNCTIONAL| ',a,':')")&
                  TRIM(xc_fun%section%name)
-            il = LEN_TRIM(reference)
-            IF (il < 67) THEN
-              WRITE (iw, fmt="(' FUNCTIONAL| ',a)") reference(1:il)
-            ELSE IF (il < 134) THEN
-              WRITE (iw, fmt="(' FUNCTIONAL| ',a)") reference(1:67)
-              WRITE (iw, fmt="(' FUNCTIONAL| ',a)") reference(68:il)
-            ELSE
-              WRITE (iw, fmt="(' FUNCTIONAL| ',a)") reference(1:67)
-              WRITE (iw, fmt="(' FUNCTIONAL| ',a)") reference(68:134)
-              WRITE (iw, fmt="(' FUNCTIONAL| ',a)") reference(134:il)
-            END IF
+            DO il=1,LEN_TRIM(reference),67
+              WRITE (iw, fmt="(' FUNCTIONAL| ',a67)") reference(il:)
+            END DO
           END IF
         END DO
       END IF
@@ -633,21 +586,17 @@ CONTAINS
 !> \brief ...
 !> \param potential ...
 !> \param iw ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE atom_print_potential(potential,iw,error)
+  SUBROUTINE atom_print_potential(potential,iw)
     TYPE(atom_potential_type)                :: potential
     INTEGER, INTENT(IN)                      :: iw
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'atom_print_potential', &
       routineP = moduleN//':'//routineN
 
     CHARACTER(len=60)                        :: pline
     INTEGER                                  :: i, j, k, l
-    LOGICAL                                  :: failure
 
-    failure = .FALSE.
     SELECT CASE (potential%ppot_type)
       CASE (NO_PSEUDO)
         WRITE(iw,'(/," ",28("*"),A,27("*"))') " All Electron Potential "
@@ -689,7 +638,7 @@ CONTAINS
           END IF
         END DO
       CASE DEFAULT
-        CPPostcondition(.FALSE., cp_failure_level, routineP, error, failure)
+        CPABORT("")
     END SELECT
     IF (potential%confinement) THEN
       WRITE(iw,'(/,T10,A,T51,F12.6," * (R /",F6.2,")**",F6.2)') &
@@ -705,12 +654,10 @@ CONTAINS
 !> \brief ...
 !> \param gthpot ...
 !> \param iunit ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE atom_write_pseudo_param (gthpot,iunit,error)
+  SUBROUTINE atom_write_pseudo_param (gthpot,iunit)
     TYPE(atom_gthpot_type), INTENT(INOUT)    :: gthpot
     INTEGER, INTENT(IN), OPTIONAL            :: iunit
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'atom_write_pseudo_param', &
       routineP = moduleN//':'//routineN
@@ -770,35 +717,29 @@ CONTAINS
 !> \brief ...
 !> \param atom ...
 !> \param iw ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE atom_print_orbitals(atom,iw,error)
+  SUBROUTINE atom_print_orbitals(atom,iw)
     TYPE(atom_type), POINTER                 :: atom
     INTEGER, INTENT(IN)                      :: iw
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'atom_print_orbitals', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-
     SELECT CASE (atom%method_type)
       CASE DEFAULT
-        CPPostcondition(.FALSE., cp_failure_level, routineP, error, failure)
+        CPABORT("")
       CASE (do_rks_atom)
-        CALL atom_print_orbitals_helper(atom,atom%orbitals%wfn,"",iw,error)
+        CALL atom_print_orbitals_helper(atom,atom%orbitals%wfn,"",iw)
       CASE (do_uks_atom)
-        CALL atom_print_orbitals_helper(atom,atom%orbitals%wfna,"Alpha",iw,error)
-        CALL atom_print_orbitals_helper(atom,atom%orbitals%wfnb,"Beta",iw,error)
+        CALL atom_print_orbitals_helper(atom,atom%orbitals%wfna,"Alpha",iw)
+        CALL atom_print_orbitals_helper(atom,atom%orbitals%wfnb,"Beta",iw)
       CASE (do_rhf_atom)
-        CALL atom_print_orbitals_helper(atom,atom%orbitals%wfn,"",iw,error)
+        CALL atom_print_orbitals_helper(atom,atom%orbitals%wfn,"",iw)
       CASE (do_uhf_atom)
-        CALL atom_print_orbitals_helper(atom,atom%orbitals%wfna,"Alpha",iw,error)
-        CALL atom_print_orbitals_helper(atom,atom%orbitals%wfnb,"Beta",iw,error)
+        CALL atom_print_orbitals_helper(atom,atom%orbitals%wfna,"Alpha",iw)
+        CALL atom_print_orbitals_helper(atom,atom%orbitals%wfnb,"Beta",iw)
       CASE (do_rohf_atom)
-        CPPostcondition(.FALSE., cp_failure_level, routineP, error, failure)
+        CPABORT("")
     END SELECT
 
   END SUBROUTINE atom_print_orbitals
@@ -811,15 +752,13 @@ CONTAINS
 !> \param wfn ...
 !> \param description ...
 !> \param iw ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE atom_print_orbitals_helper(atom,wfn,description,iw,error)
+  SUBROUTINE atom_print_orbitals_helper(atom,wfn,description,iw)
     TYPE(atom_type), POINTER                 :: atom
     REAL(KIND=dp), DIMENSION(:, :, 0:), &
       INTENT(INOUT)                          :: wfn
     CHARACTER(len=*), INTENT(IN)             :: description
     INTEGER, INTENT(IN)                      :: iw
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'atom_print_orbitals_helper', &
       routineP = moduleN//':'//routineN

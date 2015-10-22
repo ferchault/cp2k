@@ -10,7 +10,6 @@
 ! *****************************************************************************
 MODULE dbcsr_mp_methods
   USE dbcsr_error_handling,            ONLY: dbcsr_assert,&
-                                             dbcsr_error_type,&
                                              dbcsr_fatal_level,&
                                              dbcsr_internal_error
   USE dbcsr_methods,                   ONLY: dbcsr_mp_grid_remove,&
@@ -20,14 +19,12 @@ MODULE dbcsr_mp_methods
                                              mp_cart_sub,&
                                              mp_comm_free
 
-  !$ USE OMP_LIB
+  !$ USE OMP_LIB, ONLY: omp_get_max_threads, omp_get_thread_num, omp_get_num_threads
   IMPLICIT NONE
 
   PRIVATE
 
   CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'dbcsr_mp_methods'
-
-  INTEGER, PUBLIC, SAVE :: dbcsr_matrix_counter = 111111
 
   PUBLIC :: dbcsr_mp_new, dbcsr_mp_hold, dbcsr_mp_release,&
             dbcsr_mp_pgrid, dbcsr_mp_numnodes, dbcsr_mp_mynode, dbcsr_mp_group,&
@@ -148,7 +145,6 @@ CONTAINS
     INTEGER                                  :: ndims, tmp_group
     INTEGER, DIMENSION(2)                    :: dims, my_pos
     LOGICAL, DIMENSION(2)                    :: remain
-    TYPE(dbcsr_error_type)                   :: error
 
 !   ---------------------------------------------------------------------------
 
@@ -162,10 +158,10 @@ CONTAINS
             tmp_group)
        CALL dbcsr_assert (my_pos(1) .EQ. mp_env%mp%myprow,&
             dbcsr_fatal_level, dbcsr_internal_error, "mp_grid_setup",&
-            "Got different MPI process grid",__LINE__,error)
+            "Got different MPI process grid",__LINE__)
        CALL dbcsr_assert (my_pos(2) .EQ. mp_env%mp%mypcol,&
             dbcsr_fatal_level, dbcsr_internal_error, "mp_grid_setup",&
-            "Got different MPI process grid",__LINE__,error)
+            "Got different MPI process grid",__LINE__)
        !
        remain = (/.FALSE., .TRUE./)
        CALL mp_cart_sub (tmp_group, remain, mp_env%mp%prow_group)

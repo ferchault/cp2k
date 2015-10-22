@@ -18,6 +18,7 @@ MODULE kpoint_transitional
   USE cp_dbcsr_interface,              ONLY: cp_dbcsr_deallocate_matrix_set,&
                                              cp_dbcsr_p_type
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -47,7 +48,7 @@ CONTAINS
 
      IF(ASSOCIATED(this%ptr_1d)) THEN
         IF(SIZE(this%ptr_2d, 2) /= 1) &
-           CALL cp_unimplemented_error("kpoint_transitional","Method not implemented for k-points")
+           CPABORT("Method not implemented for k-points")
      ENDIF
 
      res => this%ptr_1d
@@ -115,18 +116,16 @@ CONTAINS
 ! *****************************************************************************
 !> \brief Release the matrix set, using the right pointer
 !> \param this ...
-!> \param error ...
 !> \author Ole Schuett
 ! *****************************************************************************
-  SUBROUTINE kpoint_transitional_release(this, error)
+  SUBROUTINE kpoint_transitional_release(this)
     TYPE(kpoint_transitional_type)           :: this
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     IF (ASSOCIATED(this%ptr_1d)) THEN
       IF (this%set_as_1d) THEN
-        CALL cp_dbcsr_deallocate_matrix_set(this%ptr_1d, error)
+        CALL cp_dbcsr_deallocate_matrix_set(this%ptr_1d)
       ELSE
-        CALL cp_dbcsr_deallocate_matrix_set(this%ptr_2d, error)
+        CALL cp_dbcsr_deallocate_matrix_set(this%ptr_2d)
       ENDIF
     ENDIF
     NULLIFY(this%ptr_1d, this%ptr_2d)

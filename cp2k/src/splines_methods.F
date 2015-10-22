@@ -19,6 +19,7 @@ MODULE splines_methods
                                              spline_factor_type
   USE termination,                     ONLY: stop_memory
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -56,14 +57,12 @@ CONTAINS
     spl % n = nn
 
     IF ( ASSOCIATED ( spl % y ) ) THEN
-       DEALLOCATE ( spl % y, STAT = err )
-       IF (err /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"spl%y")
+       DEALLOCATE ( spl % y)
        NULLIFY ( spl % y )
     END IF
 
     IF ( ASSOCIATED ( spl % y2 ) ) THEN
-       DEALLOCATE ( spl % y2, STAT = err )
-       IF (err /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"spl%y2")
+       DEALLOCATE ( spl % y2)
        NULLIFY ( spl % y2 )
     END IF
 
@@ -151,8 +150,7 @@ CONTAINS
     DO i = n-1, 1, -1
        spl%y2(i) = spl%y2(i) * spl%y2(i+1) + ww(i)
     END DO
-    DEALLOCATE (ww,STAT=err)
-    IF (err /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"ww")
+    DEALLOCATE (ww)
 
   END SUBROUTINE init_spline
 

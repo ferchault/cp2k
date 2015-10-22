@@ -13,6 +13,8 @@
 !> \author JGH
 ! *****************************************************************************
 MODULE timings
+  USE base_hooks,                      ONLY: timeset_hook,&
+                                             timestop_hook
   USE cuda_profiling,                  ONLY: cuda_mem_info,&
                                              cuda_nvtx_range_pop,&
                                              cuda_nvtx_range_push
@@ -39,6 +41,7 @@ MODULE timings
                                              m_flush,&
                                              m_memory,&
                                              m_walltime
+  USE message_passing,                 ONLY: mp_abort
   USE timings_base_type,               ONLY: call_stat_type,&
                                              callstack_entry_type,&
                                              routine_stat_type
@@ -47,8 +50,7 @@ MODULE timings
   IMPLICIT NONE
   PRIVATE
 
-  ! the famous routines
-  PUBLIC :: timeset, timestop, print_stack
+  PUBLIC :: print_stack, timings_register_hooks
 
   ! these routines are currently only used by environment.F and f77_interface.F
   PUBLIC :: add_timer_env, rm_timer_env, get_timer_env
@@ -59,7 +61,19 @@ MODULE timings
   CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'timings'
   TYPE(list_timerenv_type), SAVE, PRIVATE                  :: timers_stack
 
+  !API (via pointer assignment to hook, PR67982, not meant to be called directly)
+  PUBLIC :: timeset_handler, timestop_handler
+
   CONTAINS
+
+! *****************************************************************************
+!> \brief Registers handlers with base_hooks.F
+!> \author Ole Schuett
+! *****************************************************************************
+  SUBROUTINE timings_register_hooks()
+    timeset_hook => timeset_handler
+    timestop_hook => timestop_handler
+  END SUBROUTINE timings_register_hooks
 
 ! *****************************************************************************
 !> \brief adds the given timer_env to the top of the stack
@@ -77,7 +91,7 @@ MODULE timings
 
     IF(      PRESENT(timer_env)) timer_env_ => timer_env
     IF(.NOT. PRESENT(timer_env)) CALL timer_env_create(timer_env_)
-    IF(.NOT. ASSOCIATED(timer_env_)) STOP "add_timer_env: not associated"
+    IF(.NOT. ASSOCIATED(timer_env_)) CALL mp_abort("add_timer_env: not associated")
 
     CALL timer_env_retain(timer_env_)
     IF(.NOT. list_isready(timers_stack)) CALL list_init(timers_stack)
@@ -95,7 +109,7 @@ MODULE timings
     INTEGER                                  :: stat
 
     ALLOCATE(timer_env, stat=stat)
-    IF (stat/=0) STOP "timer_env_create: allocation failed"
+    IF (stat/=0) CALL mp_abort("timer_env_create: allocation failed")
     timer_env%ref_count   = 0
     timer_env%trace_max = -1 ! tracing disabled by default
     timer_env%trace_all = .FALSE.
@@ -140,8 +154,8 @@ MODULE timings
   SUBROUTINE timer_env_retain(timer_env)
     TYPE(timer_env_type), POINTER            :: timer_env
 
-    IF(.NOT. ASSOCIATED(timer_env)) STOP "timer_env_retain: not associated"
-    IF (timer_env%ref_count < 0) STOP "timer_env_retain: negativ ref_count"
+    IF(.NOT. ASSOCIATED(timer_env)) CALL mp_abort("timer_env_retain: not associated")
+    IF (timer_env%ref_count < 0) CALL mp_abort("timer_env_retain: negativ ref_count")
     timer_env%ref_count=timer_env%ref_count+1
   END SUBROUTINE timer_env_retain
 
@@ -158,8 +172,8 @@ MODULE timings
       DIMENSION(:), POINTER                  :: ct_items
     TYPE(routine_stat_type), POINTER         :: r_stat
 
-    IF(.NOT. ASSOCIATED(timer_env)) STOP "timer_env_release: not associated"
-    IF (timer_env%ref_count < 0) STOP "timer_env_release: negativ ref_count"
+    IF(.NOT. ASSOCIATED(timer_env)) CALL mp_abort("timer_env_release: not associated")
+    IF (timer_env%ref_count < 0) CALL mp_abort("timer_env_release: negativ ref_count")
     timer_env%ref_count = timer_env%ref_count - 1
     IF (timer_env%ref_count > 0) RETURN
 
@@ -192,7 +206,7 @@ MODULE timings
 !>      none
 !> \author JGH
 ! *****************************************************************************
-  SUBROUTINE timeset(routineN, handle)
+  SUBROUTINE timeset_handler(routineN, handle)
     CHARACTER(LEN=*), INTENT(IN)             :: routineN
     INTEGER, INTENT(OUT)                     :: handle
 
@@ -214,8 +228,7 @@ MODULE timings
     timer_env => list_peek(timers_stack)
 
     IF (LEN_TRIM(routineN) > default_string_length) THEN
-       PRINT *,"timings_timeset: routineN too long: '",TRIM(routineN),"'"
-       STOP 1
+       CALL mp_abort('timings_timeset: routineN too long: "'//TRIM(routineN)//"'")
     END IF
 
     routine_name_dsl = routineN ! converte to default_string_length
@@ -258,7 +271,7 @@ MODULE timings
 
 
 
-  END SUBROUTINE timeset
+  END SUBROUTINE timeset_handler
 
 ! *****************************************************************************
 !> \brief End timer
@@ -267,7 +280,7 @@ MODULE timings
 !>      none
 !> \author JGH
 ! *****************************************************************************
-  SUBROUTINE timestop(handle)
+  SUBROUTINE timestop_handler(handle)
     INTEGER, INTENT(in)                      :: handle
 
     CHARACTER(LEN=400)                       :: line, mystring
@@ -302,8 +315,7 @@ MODULE timings
     IF (handle /= cs_entry%routine_id) THEN
        PRINT *, "list_size(timer_env%callstack) ",list_size(timer_env%callstack), &
           " handle ",handle," list_size(timers_stack) ",list_size(timers_stack)
-       PRINT *, 'mismatched timestop '//TRIM(r_stat%routineN)//' in routine timestop'
-       STOP 1
+       CALL mp_abort('mismatched timestop '//TRIM(r_stat%routineN)//' in routine timestop')
     END IF
 
     ! add the elapsed time for this timeset/timestop to the time accumulator
@@ -364,7 +376,7 @@ MODULE timings
 !$OMP END CRITICAL(time_setstop)
 !$OMP END MASTER
 
-  END SUBROUTINE timestop
+  END SUBROUTINE timestop_handler
 
 ! *****************************************************************************
 !> \brief Set routine tracer
@@ -457,8 +469,7 @@ MODULE timings
 
     ! enforce space free timer names, to make the output of trace/timings of a fixed number fields
     IF (INDEX(routineN(1:LEN_TRIM(routineN)),' ') /= 0) THEN 
-       PRINT *, "timings_name2id: routineN contains spaces: "//routineN
-       STOP 1
+       CALL mp_abort("timings_name2id: routineN contains spaces: "//routineN)
     END IF
 
     ! register routine_name_dsl with new routine_id
@@ -466,7 +477,7 @@ MODULE timings
     CALL dict_set(timer_env%routine_names, routineN, routine_id)
 
     ALLOCATE(r_stat, stat=stat)
-    IF(stat /= 0) STOP "timings_name2id: allocation failed"
+    IF(stat /= 0) CALL mp_abort("timings_name2id: allocation failed")
     r_stat%routine_id = routine_id
     r_stat%routineN = routineN
     r_stat%active_calls = 0
@@ -479,7 +490,7 @@ MODULE timings
     r_stat%trace = .FALSE.
     CALL list_push(timer_env%routine_stats, r_stat)
     IF(list_size(timer_env%routine_stats) /= dict_size(timer_env%routine_names)) &
-       STOP "timings_name2id: assertion failed"
+       CALL mp_abort("timings_name2id: assertion failed")
  END FUNCTION routine_name2id
 
 END MODULE timings

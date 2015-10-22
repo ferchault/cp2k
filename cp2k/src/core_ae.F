@@ -38,11 +38,10 @@ MODULE core_ae
                                              neighbor_list_set_p_type,&
                                              nl_set_sub_iterator,&
                                              nl_sub_iterate
-  USE timings,                         ONLY: timeset,&
-                                             timestop
   USE virial_methods,                  ONLY: virial_pair_force
   USE virial_types,                    ONLY: virial_type
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -72,10 +71,9 @@ CONTAINS
 !> \param sac_ae ...
 !> \param nimages ...
 !> \param cell_to_index ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE build_core_ae(matrix_h, matrix_p, force, virial, calculate_forces, use_virial, nder,&
-             qs_kind_set, atomic_kind_set, particle_set, sab_orb, sac_ae, nimages, cell_to_index, error)
+             qs_kind_set, atomic_kind_set, particle_set, sab_orb, sac_ae, nimages, cell_to_index)
 
     TYPE(cp_dbcsr_p_type), DIMENSION(:, :), &
       POINTER                                :: matrix_h, matrix_p
@@ -95,7 +93,6 @@ CONTAINS
       DIMENSION(:), POINTER                  :: sab_orb, sac_ae
     INTEGER, INTENT(IN)                      :: nimages
     INTEGER, DIMENSION(:, :, :), POINTER     :: cell_to_index
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'build_core_ae', &
       routineP = moduleN//':'//routineN
@@ -103,14 +100,14 @@ CONTAINS
     INTEGER :: atom_a, atom_b, atom_c, handle, iatom, icol, ikind, img, &
       inode, irow, iset, jatom, jkind, jset, katom, kkind, ldai, ldsab, &
       maxco, maxder, maxl, maxnset, maxsgf, na_plus, natom, nb_plus, ncoa, &
-      ncob, nij, nkind, nseta, nsetb, sgfa, sgfb, stat
+      ncob, nij, nkind, nseta, nsetb, sgfa, sgfb
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: atom_of_kind
     INTEGER, DIMENSION(3)                    :: cellind
     INTEGER, DIMENSION(:), POINTER           :: la_max, la_min, lb_max, &
                                                 lb_min, npgfa, npgfb, nsgfa, &
                                                 nsgfb
     INTEGER, DIMENSION(:, :), POINTER        :: first_sgfa, first_sgfb
-    LOGICAL                                  :: dokp, failure, found
+    LOGICAL                                  :: dokp, found
     REAL(KIND=dp)                            :: alpha_c, core_charge, &
                                                 core_radius, dab, dac, dbc, &
                                                 f0, rab2, rac2, rbc2, zeta_c
@@ -132,7 +129,6 @@ CONTAINS
     TYPE(neighbor_list_iterator_p_type), &
       DIMENSION(:), POINTER                  :: ap_iterator, nl_iterator
 
-    failure = .FALSE.
     IF (calculate_forces) THEN
       CALL timeset(routineN//"_forces",handle)
     ELSE
@@ -144,17 +140,16 @@ CONTAINS
 
     dokp = (nimages > 1)
 
-    ALLOCATE (atom_of_kind(natom),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (atom_of_kind(natom))
     CALL get_atomic_kind_set(atomic_kind_set=atomic_kind_set,atom_of_kind=atom_of_kind)
 
     IF (calculate_forces) THEN
        IF (SIZE(matrix_p,1) == 2) THEN
           DO img=1,nimages
              CALL cp_dbcsr_add(matrix_p(1,img)%matrix, matrix_p(2,img)%matrix, &
-                         alpha_scalar= 1.0_dp, beta_scalar=1.0_dp,error=error)
+                         alpha_scalar= 1.0_dp, beta_scalar=1.0_dp)
              CALL cp_dbcsr_add(matrix_p(2,img)%matrix, matrix_p(1,img)%matrix, &
-                         alpha_scalar=-2.0_dp, beta_scalar=1.0_dp,error=error)
+                         alpha_scalar=-2.0_dp, beta_scalar=1.0_dp)
           END DO
        END IF
     END IF
@@ -168,22 +163,18 @@ CONTAINS
 
     ldsab = MAX(maxco,maxsgf)
     ldai = ncoset(maxl+nder+1)
-    ALLOCATE(hab(ldsab,ldsab,maxnset*maxnset),work(ldsab,ldsab),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE (verf(ldai,ldai,2*maxl+nder+1),vnuc(ldai,ldai,2*maxl+nder+1),ff(0:2*maxl+nder),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(hab(ldsab,ldsab,maxnset*maxnset),work(ldsab,ldsab))
+    ALLOCATE (verf(ldai,ldai,2*maxl+nder+1),vnuc(ldai,ldai,2*maxl+nder+1),ff(0:2*maxl+nder))
     IF (calculate_forces) THEN
-       ALLOCATE(pab(maxco,maxco,maxnset*maxnset),STAT=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       ALLOCATE(pab(maxco,maxco,maxnset*maxnset))
     END IF
 
     ! iterator for basis/potential list
     CALL neighbor_list_iterator_create(ap_iterator,sac_ae,search=.TRUE.)
 
-    ALLOCATE (basis_set_list(nkind),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (basis_set_list(nkind))
     DO ikind=1,nkind
-      CALL get_qs_kind(qs_kind_set(ikind),orb_basis_set=basis_set_a)
+      CALL get_qs_kind(qs_kind_set(ikind),basis_set=basis_set_a)
       IF (ASSOCIATED(basis_set_a)) THEN
         basis_set_list(ikind)%gto_basis_set => basis_set_a
       ELSE
@@ -253,7 +244,7 @@ CONTAINS
           NULLIFY(p_block)
           CALL cp_dbcsr_get_block_p(matrix=matrix_p(1,img)%matrix,&
                   row=irow,col=icol,BLOCK=p_block,found=found)
-          CPPostcondition(ASSOCIATED(p_block),cp_failure_level,routineP,error,failure)
+          CPASSERT(ASSOCIATED(p_block))
           ! *** Decontract density matrix block ***
           DO iset=1,nseta
              ncoa = npgfa(iset)*ncoset(la_max(iset))
@@ -318,8 +309,7 @@ CONTAINS
                    IF (calculate_forces) THEN
                       na_plus = npgfa(iset)*ncoset(la_max(iset)+nder)
                       nb_plus = npgfb(jset)*ncoset(lb_max(jset))
-                      ALLOCATE(habd(na_plus,nb_plus),STAT=stat)
-                      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+                      ALLOCATE(habd(na_plus,nb_plus))
                       habd = 0._dp
                       CALL verfc(&
                               la_max(iset)+nder,npgfa(iset),zeta(:,iset),rpgfa(:,iset),la_min(iset),&
@@ -333,10 +323,9 @@ CONTAINS
                       ! *** of the first derivatives                      ***
                       CALL verfc_force(habd,pab(:,:,nij),force_a,force_b,nder,&
                                       la_max(iset),la_min(iset),npgfa(iset),zeta(:,iset),&
-                                      lb_max(jset),lb_min(jset),npgfb(jset),zetb(:,jset),rab,error)
+                                      lb_max(jset),lb_min(jset),npgfb(jset),zetb(:,jset),rab)
 
-                      DEALLOCATE(habd,STAT=stat)
-                      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+                      DEALLOCATE(habd)
 
                       atom_c = atom_of_kind(katom)
                       force(ikind)%all_potential(1,atom_a) =force(ikind)%all_potential(1,atom_a) + f0*force_a(1)
@@ -355,8 +344,8 @@ CONTAINS
                                                             - f0*force_a(3) - f0*force_b(3)
 
                       IF (use_virial) THEN
-                         CALL virial_pair_force ( virial%pv_virial, f0, force_a, rac, error)
-                         CALL virial_pair_force ( virial%pv_virial, f0, force_b, rbc, error)
+                         CALL virial_pair_force ( virial%pv_virial, f0, force_a, rac)
+                         CALL virial_pair_force ( virial%pv_virial, f0, force_b, rbc)
                       END IF
                    ELSE
                       CALL verfc(&
@@ -400,14 +389,11 @@ CONTAINS
 
     CALL neighbor_list_iterator_release(ap_iterator)
 
-    DEALLOCATE (atom_of_kind,basis_set_list,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    DEALLOCATE(hab,work,verf,vnuc,ff,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE (atom_of_kind,basis_set_list)
+    DEALLOCATE(hab,work,verf,vnuc,ff)
 
     IF (calculate_forces) THEN
-       DEALLOCATE(pab,STAT=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE(pab)
     END IF
     IF (calculate_forces) THEN
        ! *** If LSD, then recover alpha density and beta density     ***
@@ -415,9 +401,9 @@ CONTAINS
        IF (SIZE(matrix_p,1) == 2) THEN
           DO img=1,nimages
              CALL cp_dbcsr_add(matrix_p(1,img)%matrix, matrix_p(2,img)%matrix, &
-                         alpha_scalar= 0.5_dp, beta_scalar=0.5_dp,error=error)
+                         alpha_scalar= 0.5_dp, beta_scalar=0.5_dp)
              CALL cp_dbcsr_add(matrix_p(2,img)%matrix, matrix_p(1,img)%matrix, &
-                         alpha_scalar=-1.0_dp, beta_scalar=1.0_dp,error=error)
+                         alpha_scalar=-1.0_dp, beta_scalar=1.0_dp)
           END DO
        END IF
     END IF
@@ -443,9 +429,8 @@ CONTAINS
 !> \param npgfb ...
 !> \param zetb ...
 !> \param rab ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE verfc_force(habd,pab,fa,fb,nder,la_max,la_min,npgfa,zeta,lb_max,lb_min,npgfb,zetb,rab,error)
+  SUBROUTINE verfc_force(habd,pab,fa,fb,nder,la_max,la_min,npgfa,zeta,lb_max,lb_min,npgfb,zetb,rab)
 
     REAL(KIND=dp), DIMENSION(:, :), &
       INTENT(IN)                             :: habd, pab
@@ -455,7 +440,6 @@ CONTAINS
     INTEGER, INTENT(IN)                      :: lb_max, lb_min, npgfb
     REAL(KIND=dp), DIMENSION(:), INTENT(IN)  :: zetb
     REAL(KIND=dp), DIMENSION(3), INTENT(IN)  :: rab
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'verfc_force', &
       routineP = moduleN//':'//routineN

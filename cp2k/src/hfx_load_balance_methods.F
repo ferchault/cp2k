@@ -38,10 +38,9 @@ MODULE hfx_load_balance_methods
                                              next_random_number,&
                                              rng_stream_type
   USE particle_types,                  ONLY: particle_type
-  USE timings,                         ONLY: timeset,&
-                                             timestop
   USE util,                            ONLY: sort
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -108,8 +107,6 @@ MODULE hfx_load_balance_methods
 !> \param eval_type ...
 !> \param pmax_block ...
 !> \param use_virial ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      06.2007 created [Manuel Guidon]
 !>      08.2007 new parallel scheme [Manuel Guidon]
@@ -138,7 +135,7 @@ MODULE hfx_load_balance_methods
                           load_balance_parameter, kind_of, basis_parameter, pmax_set, &
                           pmax_atom, i_thread, n_threads, cell, &
                           do_p_screening, map_atom_to_kind_atom, nkind, eval_type, &
-                          pmax_block, use_virial, error)
+                          pmax_block, use_virial)
     TYPE(hfx_type), POINTER                  :: x_data
     REAL(dp), INTENT(IN)                     :: eps_schwarz
     TYPE(particle_type), DIMENSION(:), &
@@ -164,7 +161,6 @@ MODULE hfx_load_balance_methods
     INTEGER, INTENT(IN)                      :: nkind, eval_type
     REAL(dp), DIMENSION(:, :), POINTER       :: pmax_block
     LOGICAL, INTENT(IN)                      :: use_virial
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'hfx_load_balance', &
       routineP = moduleN//':'//routineN
@@ -176,8 +172,7 @@ MODULE hfx_load_balance_methods
       katom_end, katom_start, latom_block, latom_end, latom_start, mepos, &
       my_process_id, n_processes, natom, nbins, nblocks, ncpu, new_iatom_end, &
       new_iatom_start, new_jatom_end, new_jatom_start, non_empty_blocks, &
-      objective_block_size, objective_nblocks, req(2), source, stat, &
-      total_blocks
+      objective_block_size, objective_nblocks, req(2), source, total_blocks
     INTEGER(int_8) :: atom_block, cost_per_bin, cost_per_core, current_cost, &
       distribution_counter_end, distribution_counter_start, &
       global_quartet_counter, local_quartet_counter, self_cost_per_block, &
@@ -194,7 +189,7 @@ MODULE hfx_load_balance_methods
                                                 tmp_pos, to_be_sorted
     INTEGER, DIMENSION(:), POINTER, SAVE     :: shm_distribution_vector
     INTEGER, SAVE                            :: shm_nblocks
-    LOGICAL                                  :: changed, failure, &
+    LOGICAL                                  :: changed, &
                                                 last_bin_needs_to_be_filled, &
                                                 optimized
     LOGICAL, DIMENSION(:, :), POINTER, SAVE  :: atomic_pair_list
@@ -221,7 +216,6 @@ MODULE hfx_load_balance_methods
 !$OMP END MASTER
 !$OMP BARRIER
 
-    failure=.FALSE.
 
     log10_eps_schwarz = LOG10(eps_schwarz)
     log_2 = LOG10(2.0_dp)
@@ -231,10 +225,8 @@ MODULE hfx_load_balance_methods
     natom=SIZE(particle_set)
 
     block_size = load_balance_parameter%block_size
-    ALLOCATE(set_list_ij((max_set*block_size)**2),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(set_list_kl((max_set*block_size)**2),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(set_list_ij((max_set*block_size)**2))
+    ALLOCATE(set_list_kl((max_set*block_size)**2))
 
 
     IF( .NOT. load_balance_parameter%blocks_initialized ) THEN
@@ -243,12 +235,9 @@ MODULE hfx_load_balance_methods
       CALL timeset(routineN//"_range",handle_range)
 
       nblocks = MAX((natom+block_size-1)/block_size,1)
-      ALLOCATE(blocks_guess(nblocks),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-      ALLOCATE(tmp_blocks(natom),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-      ALLOCATE(tmp_blocks2(natom),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(blocks_guess(nblocks))
+      ALLOCATE(tmp_blocks(natom))
+      ALLOCATE(tmp_blocks2(natom))
 
       pmax_blocks = 0.0_dp
       SELECT CASE(eval_type)
@@ -340,8 +329,7 @@ MODULE hfx_load_balance_methods
         END DO
       END DO
 
-      DEALLOCATE(tmp_blocks2, STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      DEALLOCATE(tmp_blocks2)
 
       ! ** count number of non empty blocks on each node
       non_empty_blocks = 0
@@ -350,8 +338,7 @@ MODULE hfx_load_balance_methods
         non_empty_blocks = non_empty_blocks + 1
       END DO
 
-      ALLOCATE(rcount(ncpu), STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(rcount(ncpu))
       rcount = 0
       rcount(para_env%mepos+1) = non_empty_blocks
       CALL mp_sum(rcount, para_env%group)
@@ -363,16 +350,14 @@ MODULE hfx_load_balance_methods
       END DO
 
       ! ** calculate offsets
-      ALLOCATE(rdispl(ncpu), STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(rdispl(ncpu))
       rcount(:) = rcount(:) * 3
       rdispl(1) = 0
       DO i = 2,ncpu
         rdispl(i) = rdispl(i-1) + rcount(i-1)
       END DO
 
-      ALLOCATE(buffer_in(3*non_empty_blocks), STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(buffer_in(3*non_empty_blocks))
 
 
       non_empty_blocks = 0
@@ -386,12 +371,10 @@ MODULE hfx_load_balance_methods
 
       nblocks = total_blocks
 
-      ALLOCATE(tmp_blocks2(nblocks), STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(tmp_blocks2(nblocks))
 
 
-      ALLOCATE(buffer_out(3*nblocks), STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(buffer_out(3*nblocks))
 
       ! ** Gather all three arrays
       CALL mp_allgather(buffer_in,buffer_out,rcount,rdispl,para_env%group)
@@ -403,10 +386,8 @@ MODULE hfx_load_balance_methods
       END DO
 
       ! ** Now we sort the blocks
-      ALLOCATE(to_be_sorted(nblocks),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-      ALLOCATE(tmp_index(nblocks),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(to_be_sorted(nblocks))
+      ALLOCATE(tmp_index(nblocks))
 
       DO atom_block = 1,nblocks
         to_be_sorted(atom_block) = tmp_blocks2(atom_block)%istart
@@ -414,8 +395,7 @@ MODULE hfx_load_balance_methods
 
       CALL sort(to_be_sorted,nblocks,tmp_index)
 
-      ALLOCATE(x_data%blocks(nblocks), STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(x_data%blocks(nblocks))
 
       DO atom_block = 1,nblocks
         x_data%blocks(atom_block) = tmp_blocks2(tmp_index(atom_block))
@@ -427,11 +407,9 @@ MODULE hfx_load_balance_methods
       ! ** Set nblocks in structure
       load_balance_parameter%nblocks = nblocks
 
-      DEALLOCATE(blocks_guess, tmp_blocks, tmp_blocks2, STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      DEALLOCATE(blocks_guess, tmp_blocks, tmp_blocks2)
 
-      DEALLOCATE(rcount, rdispl, buffer_in, buffer_out, to_be_sorted, tmp_index, STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      DEALLOCATE(rcount, rdispl, buffer_in, buffer_out, to_be_sorted, tmp_index)
 
       load_balance_parameter%blocks_initialized = .TRUE.
 
@@ -439,8 +417,7 @@ MODULE hfx_load_balance_methods
       load_balance_parameter%nblocks = shm_nblocks
       load_balance_parameter%blocks_initialized = .TRUE.
 
-      ALLOCATE(x_data%pmax_block(shm_nblocks,shm_nblocks),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(x_data%pmax_block(shm_nblocks,shm_nblocks))
       x_data%pmax_block = 0.0_dp
       pmax_block => x_data%pmax_block
       CALL timestop(handle_range)
@@ -448,8 +425,7 @@ MODULE hfx_load_balance_methods
 !$OMP BARRIER
 
       IF( .NOT. load_balance_parameter%blocks_initialized ) THEN
-        ALLOCATE(x_data%blocks(shm_nblocks), STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(x_data%blocks(shm_nblocks))
         x_data%blocks = shm_blocks
         load_balance_parameter%nblocks = shm_nblocks
         load_balance_parameter%blocks_initialized = .TRUE.
@@ -489,19 +465,17 @@ MODULE hfx_load_balance_methods
 
     !! If there is only 1 cpu skip the binning
     IF(n_processes == 1) THEN
-      ALLOCATE(tmp_dist(1),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(tmp_dist(1))
       tmp_dist(1)%number_of_atom_quartets = HUGE(tmp_dist(1)%number_of_atom_quartets)
       tmp_dist(1)%istart = 0_int_8
       ptr_to_tmp_dist => tmp_dist(:)
       SELECT CASE( eval_type)
       CASE (hfx_do_eval_energy)
-        CALL hfx_set_distr_energy(ptr_to_tmp_dist,x_data,error=error)
+        CALL hfx_set_distr_energy(ptr_to_tmp_dist,x_data)
       CASE (hfx_do_eval_forces)
-        CALL hfx_set_distr_forces(ptr_to_tmp_dist,x_data,error=error)
+        CALL hfx_set_distr_forces(ptr_to_tmp_dist,x_data)
       END SELECT
-      DEALLOCATE(tmp_dist,STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      DEALLOCATE(tmp_dist)
     ELSE
       !! Calculate total numbers of integrals that have to be calculated (wrt screening and symmetry)
 !$OMP BARRIER
@@ -592,8 +566,7 @@ END IF
 !$OMP END MASTER
 !$OMP BARRIER
 
-      ALLOCATE(binned_dist(nbins), STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(binned_dist(nbins))
       binned_dist(:)%istart = -1_int_8
       binned_dist(:)%number_of_atom_quartets = 0_int_8
       binned_dist(:)%cost = 0_int_8
@@ -722,18 +695,14 @@ END IF
                 "Number of local quartets (", shm_local_quartet_counter, &
                 ") and number of global quartets (", shm_global_quartet_counter,&
                 ") are different. Please send in a bug report."
-          CALL cp_assert(.FALSE.,cp_failure_level,cp_assertion_failed,routineP,&
-                         error_msg,&
-                         error,&
-                         only_ionode=.TRUE.)
+          CPABORT(error_msg)
         END IF
       END IF
 !$OMP END MASTER
 
 !$OMP BARRIER
 !$OMP MASTER
-      ALLOCATE(cost_matrix(ncpu*nbins*n_threads),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(cost_matrix(ncpu*nbins*n_threads))
       cost_matrix = 0
 !$OMP END MASTER
 !$OMP BARRIER
@@ -748,10 +717,8 @@ END IF
       ! sync before/after ring of isendrecv
       CALL mp_sync(para_env%group)
 
-      ALLOCATE(sendbuffer(nbins*n_threads),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-      ALLOCATE(recbuffer(nbins*n_threads),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(sendbuffer(nbins*n_threads))
+      ALLOCATE(recbuffer(nbins*n_threads))
 
       sendbuffer = cost_matrix(mepos*nbins*n_threads+1:mepos*nbins*n_threads+nbins*n_threads)
 
@@ -771,8 +738,7 @@ END IF
         sendbuffer=>recbuffer
         recbuffer=>swapbuffer
       ENDDO
-      DEALLOCATE(recbuffer, sendbuffer, STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      DEALLOCATE(recbuffer, sendbuffer)
 !$OMP END MASTER
 !$OMP BARRIER
 
@@ -785,22 +751,18 @@ END IF
 
       !! Find an optimal distribution i.e. assign each element of the cost matrix to a certain process
 !$OMP BARRIER
-      ALLOCATE(local_cost_matrix(SIZE(cost_matrix,1)),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(local_cost_matrix(SIZE(cost_matrix,1)))
       local_cost_matrix = cost_matrix
 !$OMP MASTER
-      ALLOCATE(shm_distribution_vector(ncpu*nbins*n_threads), STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(shm_distribution_vector(ncpu*nbins*n_threads))
 
       CALL optimize_distribution(ncpu*nbins*n_threads, ncpu*n_threads, local_cost_matrix, &
-                                 shm_distribution_vector, x_data%load_balance_parameter%do_randomize, &
-                                 error)
+                                 shm_distribution_vector, x_data%load_balance_parameter%do_randomize)
 
       CALL timestop(handle_inner)
       CALL timeset(routineN//"_redist",handle_inner)
       !! Collect local data to global array
-      ALLOCATE(full_dist(ncpu*n_threads,nbins),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(full_dist(ncpu*n_threads,nbins))
 
       full_dist(:,:)%istart = 0_int_8
       full_dist(:,:)%number_of_atom_quartets = 0_int_8
@@ -815,10 +777,8 @@ END IF
 
 !$OMP BARRIER
 !$OMP MASTER
-      ALLOCATE(sendbuffer(3*nbins*n_threads),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-      ALLOCATE(recbuffer(3*nbins*n_threads),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(sendbuffer(3*nbins*n_threads))
+      ALLOCATE(recbuffer(3*nbins*n_threads))
       mepos = para_env%mepos
       DO j=1,n_threads
         DO i=1,nbins
@@ -853,19 +813,16 @@ END IF
         sendbuffer=>recbuffer
         recbuffer=>swapbuffer
       ENDDO
-      DEALLOCATE(recbuffer, sendbuffer, STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      DEALLOCATE(recbuffer, sendbuffer)
 
       ! sync before/after ring of isendrecv
       CALL mp_sync(para_env%group)
 !$OMP END MASTER
 !$OMP BARRIER
       !! reorder the distribution according to the distribution vector
-      ALLOCATE(tmp_pos(ncpu*n_threads),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(tmp_pos(ncpu*n_threads))
       tmp_pos = 1
-      ALLOCATE(tmp_dist(nbins*ncpu*n_threads),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(tmp_dist(nbins*ncpu*n_threads))
 
       tmp_dist(:)%istart = 0_int_8
       tmp_dist(:)%number_of_atom_quartets = 0_int_8
@@ -890,23 +847,19 @@ END IF
       ptr_to_tmp_dist => tmp_dist(1:tmp_pos(mepos)-1)
       SELECT CASE (eval_type)
       CASE (hfx_do_eval_energy)
-        CALL hfx_set_distr_energy(ptr_to_tmp_dist,x_data,error=error)
+        CALL hfx_set_distr_energy(ptr_to_tmp_dist,x_data)
       CASE (hfx_do_eval_forces)
-        CALL hfx_set_distr_forces(ptr_to_tmp_dist,x_data,error=error)
+        CALL hfx_set_distr_forces(ptr_to_tmp_dist,x_data)
       END SELECT
 
 !$OMP BARRIER
 !$OMP MASTER
-      DEALLOCATE(full_dist,cost_matrix,shm_distribution_vector, STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      DEALLOCATE(full_dist,cost_matrix,shm_distribution_vector)
 !$OMP END MASTER
 !$OMP BARRIER
-      DEALLOCATE(tmp_dist, tmp_pos, STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-      DEALLOCATE(binned_dist, local_cost_matrix, STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-      DEALLOCATE(set_list_ij, set_list_kl, STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      DEALLOCATE(tmp_dist, tmp_pos)
+      DEALLOCATE(binned_dist, local_cost_matrix)
+      DEALLOCATE(set_list_ij, set_list_kl)
 
 !$OMP BARRIER
 !$OMP MASTER
@@ -1567,8 +1520,6 @@ END SUBROUTINE hfx_permute_binning
 !> \param i_thread current thread ID
 !> \param n_threads Total Number of threads
 !> \param eval_type ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      12.2007 created [Manuel Guidon]
 !>      02.2009 optimize Memory Usage [Manuel Guidon]
@@ -1579,20 +1530,19 @@ END SUBROUTINE hfx_permute_binning
 ! *****************************************************************************
   SUBROUTINE hfx_update_load_balance(x_data, para_env, &
                                 load_balance_parameter, &
-                                i_thread, n_threads, eval_type, error)
+                                i_thread, n_threads, eval_type)
 
     TYPE(hfx_type), POINTER                  :: x_data
     TYPE(cp_para_env_type), POINTER          :: para_env
     TYPE(hfx_load_balance_type)              :: load_balance_parameter
     INTEGER, INTENT(IN)                      :: i_thread, n_threads, eval_type
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'hfx_update_load_balance', &
       routineP = moduleN//':'//routineN
 
     INTEGER :: data_from, dest, end_idx, handle, i, ibin, icpu, iprocess, j, &
       mepos, my_bin_size, my_global_start_idx, my_process_id, n_processes, &
-      nbins, ncpu, req(2), source, start_idx, stat
+      nbins, ncpu, req(2), source, start_idx
     INTEGER(int_8), DIMENSION(:), POINTER    :: local_cost_matrix, recbuffer, &
                                                 sendbuffer, swapbuffer
     INTEGER(int_8), DIMENSION(:), POINTER, &
@@ -1603,14 +1553,11 @@ END SUBROUTINE hfx_permute_binning
       SAVE                                   :: bin_histogram
     INTEGER, DIMENSION(:), POINTER, SAVE     :: shm_distribution_vector
     INTEGER, SAVE                            :: max_bin_size
-    LOGICAL                                  :: failure
     TYPE(hfx_distribution), DIMENSION(:), &
       POINTER                                :: binned_dist, ptr_to_tmp_dist, &
                                                 tmp_dist
     TYPE(hfx_distribution), &
       DIMENSION(:, :), POINTER, SAVE         :: full_dist
-
-    failure=.FALSE.
 
 !$OMP BARRIER
 !$OMP MASTER
@@ -1622,26 +1569,23 @@ END SUBROUTINE hfx_permute_binning
     n_processes = ncpu * n_threads
     !! If there is only 1 cpu skip the binning
     IF(n_processes == 1) THEN
-      ALLOCATE(tmp_dist(1),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(tmp_dist(1))
       tmp_dist(1)%number_of_atom_quartets = HUGE(tmp_dist(1)%number_of_atom_quartets)
       tmp_dist(1)%istart = 0_int_8
       ptr_to_tmp_dist => tmp_dist(:)
       SELECT CASE (eval_type)
       CASE (hfx_do_eval_energy)
-        CALL hfx_set_distr_energy(ptr_to_tmp_dist,x_data,error=error)
+        CALL hfx_set_distr_energy(ptr_to_tmp_dist,x_data)
       CASE (hfx_do_eval_forces)
-        CALL hfx_set_distr_forces(ptr_to_tmp_dist,x_data,error=error)
+        CALL hfx_set_distr_forces(ptr_to_tmp_dist,x_data)
       END SELECT
-      DEALLOCATE(tmp_dist,STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      DEALLOCATE(tmp_dist)
     ELSE
       mepos = para_env%mepos
       my_process_id = para_env%mepos*n_threads + i_thread
       nbins = load_balance_parameter%nbins
 !$OMP MASTER
-      ALLOCATE(bin_histogram(n_processes,2),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(bin_histogram(n_processes,2))
       bin_histogram = 0
 !$OMP END MASTER
 !$OMP BARRIER
@@ -1664,8 +1608,7 @@ END SUBROUTINE hfx_permute_binning
       CALL mp_max(max_bin_size, para_env%group)
 !$OMP END MASTER
 !$OMP BARRIER
-      ALLOCATE(binned_dist(my_bin_size), STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(binned_dist(my_bin_size))
       !! Use old binned_dist, but with timings cost
       SELECT CASE (eval_type)
       CASE (hfx_do_eval_energy)
@@ -1694,13 +1637,10 @@ END SUBROUTINE hfx_permute_binning
 !$OMP BARRIER
 !$OMP MASTER
       !! store all local results in a big cost matrix
-      ALLOCATE(cost_matrix(ncpu*nbins*n_threads),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(cost_matrix(ncpu*nbins*n_threads))
       cost_matrix = 0
-      ALLOCATE(sendbuffer(max_bin_size*n_threads),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-      ALLOCATE(recbuffer(max_bin_size*n_threads),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(sendbuffer(max_bin_size*n_threads))
+      ALLOCATE(recbuffer(max_bin_size*n_threads))
 !$OMP END MASTER
 !$OMP BARRIER
       my_global_start_idx = bin_histogram(my_process_id+1,2)- my_bin_size
@@ -1712,8 +1652,7 @@ END SUBROUTINE hfx_permute_binning
       mepos = para_env%mepos
 !$OMP BARRIER
 !$OMP MASTER
-      ALLOCATE(bins_per_rank(ncpu), STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(bins_per_rank(ncpu))
       bins_per_rank = 0
       DO icpu=1,ncpu
         bins_per_rank(icpu) = SUM(bin_histogram((icpu-1)*n_threads+1:(icpu-1)*n_threads+n_threads,1))
@@ -1742,24 +1681,19 @@ END SUBROUTINE hfx_permute_binning
         sendbuffer=>recbuffer
         recbuffer=>swapbuffer
       ENDDO
-      DEALLOCATE(recbuffer, sendbuffer, STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      DEALLOCATE(recbuffer, sendbuffer)
       ! sync before/after ring of isendrecv
       CALL mp_sync(para_env%group)
 !$OMP END MASTER
 !$OMP BARRIER
-      ALLOCATE(local_cost_matrix(SIZE(cost_matrix,1)),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(local_cost_matrix(SIZE(cost_matrix,1)))
       local_cost_matrix = cost_matrix
 !$OMP MASTER
-      ALLOCATE(shm_distribution_vector(ncpu*nbins*n_threads), STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(shm_distribution_vector(ncpu*nbins*n_threads))
       CALL optimize_distribution(ncpu*nbins*n_threads, ncpu*n_threads, local_cost_matrix, &
-                                 shm_distribution_vector, x_data%load_balance_parameter%do_randomize, &
-                                 error)
+                                 shm_distribution_vector, x_data%load_balance_parameter%do_randomize)
 
-      ALLOCATE(full_dist(ncpu*n_threads,max_bin_size),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(full_dist(ncpu*n_threads,max_bin_size))
 
       full_dist(:,:)%istart = 0_int_8
       full_dist(:,:)%number_of_atom_quartets = 0_int_8
@@ -1774,10 +1708,8 @@ END SUBROUTINE hfx_permute_binning
       full_dist((mepos-1)*n_threads+i_thread+1,1:my_bin_size) = binned_dist(1:my_bin_size)
 !$OMP BARRIER
 !$OMP MASTER
-      ALLOCATE(sendbuffer(3*max_bin_size*n_threads),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-      ALLOCATE(recbuffer(3*max_bin_size*n_threads),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(sendbuffer(3*max_bin_size*n_threads))
+      ALLOCATE(recbuffer(3*max_bin_size*n_threads))
       mepos = para_env%mepos
       DO j=1,n_threads
         DO i=1,max_bin_size
@@ -1812,17 +1744,14 @@ END SUBROUTINE hfx_permute_binning
         recbuffer=>swapbuffer
       ENDDO
       ! sync before/after ring of isendrecv
-      DEALLOCATE(recbuffer, sendbuffer, STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      DEALLOCATE(recbuffer, sendbuffer)
       CALL mp_sync(para_env%group)
 !$OMP END MASTER
 !$OMP BARRIER
       !! reorder the distribution according to the distribution vector
-      ALLOCATE(tmp_pos(ncpu*n_threads),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(tmp_pos(ncpu*n_threads))
       tmp_pos = 1
-      ALLOCATE(tmp_dist(nbins*ncpu*n_threads),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(tmp_dist(nbins*ncpu*n_threads))
 
       tmp_dist(:)%istart = 0_int_8
       tmp_dist(:)%number_of_atom_quartets = 0_int_8
@@ -1847,23 +1776,19 @@ END SUBROUTINE hfx_permute_binning
       ptr_to_tmp_dist => tmp_dist(1:tmp_pos(mepos)-1)
       SELECT CASE (eval_type)
       CASE (hfx_do_eval_energy)
-        CALL hfx_set_distr_energy(ptr_to_tmp_dist,x_data,error=error)
+        CALL hfx_set_distr_energy(ptr_to_tmp_dist,x_data)
       CASE (hfx_do_eval_forces)
-        CALL hfx_set_distr_forces(ptr_to_tmp_dist,x_data,error=error)
+        CALL hfx_set_distr_forces(ptr_to_tmp_dist,x_data)
       END SELECT
 
 !$OMP BARRIER
 !$OMP MASTER
-      DEALLOCATE(full_dist, cost_matrix, shm_distribution_vector, STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-      DEALLOCATE(bins_per_rank,bin_histogram, STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      DEALLOCATE(full_dist, cost_matrix, shm_distribution_vector)
+      DEALLOCATE(bins_per_rank,bin_histogram)
 !$OMP END MASTER
 !$OMP BARRIER
-      DEALLOCATE(tmp_dist,  tmp_pos, STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-      DEALLOCATE(binned_dist, local_cost_matrix, STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      DEALLOCATE(tmp_dist,  tmp_pos)
+      DEALLOCATE(binned_dist, local_cost_matrix)
     END IF
 !$OMP BARRIER
 !$OMP MASTER
@@ -1950,45 +1875,34 @@ END SUBROUTINE hfx_permute_binning
 !> \param bin_costs costs per bin
 !> \param distribution_vector will contain the final distribution
 !> \param do_randomize ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      03.2009 created from a hack by Joost [Manuel Guidon]
 !> \author Manuel Guidon
 ! *****************************************************************************
   SUBROUTINE optimize_distribution(total_number_of_bins, number_of_processes, bin_costs, &
-                                   distribution_vector, do_randomize, error)
+                                   distribution_vector, do_randomize)
     INTEGER                                  :: total_number_of_bins, &
                                                 number_of_processes
     INTEGER(int_8), DIMENSION(:), POINTER    :: bin_costs
     INTEGER, DIMENSION(:), POINTER           :: distribution_vector
     LOGICAL, INTENT(IN)                      :: do_randomize
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'optimize_distribution', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, itmp, j, nstep, stat
+    INTEGER                                  :: i, itmp, j, nstep
     INTEGER(int_8), DIMENSION(:), POINTER    :: my_cost_cpu, tmp_cost, &
                                                 tmp_cpu_cost
     INTEGER, DIMENSION(:), POINTER           :: tmp_cpu_index, tmp_index
-    LOGICAL                                  :: failure
     TYPE(rng_stream_type), POINTER           :: rng_stream
-
-    failure = .FALSE.
 
     nstep=MAX(1,INT(number_of_processes)/2)
 
-    ALLOCATE(tmp_cost(total_number_of_bins),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(tmp_index(total_number_of_bins),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(tmp_cpu_cost(number_of_processes),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(tmp_cpu_index(number_of_processes),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(my_cost_cpu(number_of_processes),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(tmp_cost(total_number_of_bins))
+    ALLOCATE(tmp_index(total_number_of_bins))
+    ALLOCATE(tmp_cpu_cost(number_of_processes))
+    ALLOCATE(tmp_cpu_index(number_of_processes))
+    ALLOCATE(my_cost_cpu(number_of_processes))
     tmp_cost=bin_costs
 
     CALL sort(tmp_cost,total_number_of_bins,tmp_index)
@@ -2005,14 +1919,14 @@ END SUBROUTINE hfx_permute_binning
       NULLIFY(rng_stream)
       CALL create_rng_stream(rng_stream=rng_stream,&
                              name="uniform_rng",&
-                             distribution_type=UNIFORM,error=error)
+                             distribution_type=UNIFORM)
     END IF
 
     DO i=total_number_of_bins,1,-nstep
        tmp_cpu_cost=my_cost_cpu
        CALL sort(tmp_cpu_cost,INT(number_of_processes),tmp_cpu_index)
        IF( do_randomize ) THEN
-         CALL reshuffle(MIN(i,nstep), tmp_cpu_index(1:MIN(i,nstep)),rng_stream, error)
+         CALL reshuffle(MIN(i,nstep), tmp_cpu_index(1:MIN(i,nstep)),rng_stream)
        END IF
        DO j=1,MIN(i,nstep)
           itmp=tmp_cpu_index(j)
@@ -2022,13 +1936,11 @@ END SUBROUTINE hfx_permute_binning
     ENDDO
 
     IF( do_randomize ) THEN
-      CALL delete_rng_stream(rng_stream,error=error)
+      CALL delete_rng_stream(rng_stream)
     END IF
 
-    DEALLOCATE(tmp_cost,tmp_index,tmp_cpu_cost,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    DEALLOCATE(tmp_cpu_index,my_cost_cpu,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(tmp_cost,tmp_index,tmp_cpu_cost)
+    DEALLOCATE(tmp_cpu_index,my_cost_cpu)
   END SUBROUTINE optimize_distribution
 
 ! *****************************************************************************
@@ -2484,22 +2396,20 @@ END SUBROUTINE hfx_permute_binning
 !> \param n_threads ...
 !> \param i_thread ...
 !> \param eval_type ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE  collect_load_balance_info(para_env, x_data, iw, n_threads, i_thread, &
-                                        eval_type, error)
+                                        eval_type)
 
     TYPE(cp_para_env_type), POINTER          :: para_env
     TYPE(hfx_type), POINTER                  :: x_data
     INTEGER, INTENT(IN)                      :: iw, n_threads, i_thread, &
                                                 eval_type
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'collect_load_balance_info', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: i, j, k, my_rank, nbins, &
-                                                nranks, stat, total_bins
+                                                nranks, total_bins
     INTEGER(int_8)                           :: avg_bin, avg_rank, max_bin, &
                                                 max_rank, min_bin, min_rank, &
                                                 sum_bin, sum_rank
@@ -2511,10 +2421,6 @@ END SUBROUTINE hfx_permute_binning
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: bins_per_rank, rdispl, &
                                                 sort_idx
     INTEGER, ALLOCATABLE, DIMENSION(:), SAVE :: shm_bins_per_rank, shm_displ
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-
 
     SELECT CASE (eval_type)
     CASE (hfx_do_eval_energy)
@@ -2524,10 +2430,8 @@ END SUBROUTINE hfx_permute_binning
     END SELECT
 
 !$OMP MASTER
-    ALLOCATE(shm_bins_per_rank(n_threads),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(shm_displ(n_threads+1),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(shm_bins_per_rank(n_threads))
+    ALLOCATE(shm_displ(n_threads+1))
 !$OMP END MASTER
 !$OMP BARRIER
 
@@ -2542,8 +2446,7 @@ END SUBROUTINE hfx_permute_binning
 
 !$OMP BARRIER
 !$OMP MASTER
-    ALLOCATE(bins_per_rank(nranks),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(bins_per_rank(nranks))
     bins_per_rank = 0
 
     bins_per_rank(my_rank+1) = nbins
@@ -2555,8 +2458,7 @@ END SUBROUTINE hfx_permute_binning
       total_bins = total_bins + bins_per_rank(i)
     END DO
 
-    ALLOCATE(shm_cost_vector(2*total_bins),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(shm_cost_vector(2*total_bins))
     shm_cost_vector = -1_int_8
     shm_displ(1) = 1
     DO i = 2,n_threads
@@ -2583,18 +2485,15 @@ END SUBROUTINE hfx_permute_binning
 !$OMP BARRIER
 !$OMP MASTER
     ! ** calculate offsets
-    ALLOCATE(rdispl(nranks), STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(rdispl(nranks))
     bins_per_rank(:) = bins_per_rank(:) * 2
     rdispl(1) = 0
     DO i = 2,nranks
       rdispl(i) = rdispl(i-1) + bins_per_rank(i-1)
     END DO
 
-    ALLOCATE(buffer_in(2*nbins), STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(buffer_out(2*total_bins), STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(buffer_in(2*nbins))
+    ALLOCATE(buffer_out(2*total_bins))
 
     DO i=1,nbins
       buffer_in(2*(i-1)+1) = shm_cost_vector(2*(i-1)+1)
@@ -2605,8 +2504,7 @@ END SUBROUTINE hfx_permute_binning
 
     IF( iw>0 ) THEN
 
-      ALLOCATE(summary(2*nranks),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(summary(2*nranks))
       summary = 0_int_8
 
       WRITE(iw,'( /, 1X, 79("-") )' )
@@ -2664,10 +2562,8 @@ END SUBROUTINE hfx_permute_binning
       WRITE(iw,FMT="(T3,A,T35,F19.8,/)") "Avg rank", REAL(avg_rank,dp)/10000.0_dp
 
 
-      ALLOCATE(buffer(nranks),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-      ALLOCATE(sort_idx(nranks),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(buffer(nranks))
+      ALLOCATE(sort_idx(nranks))
 
       DO i=1,nranks
         buffer(i) = summary(2*i)
@@ -2680,18 +2576,15 @@ END SUBROUTINE hfx_permute_binning
         WRITE(iw,FMT="(T6,I5,T27,I16,T55,F19.8)") sort_idx(i)-1, summary(2*(sort_idx(i)-1)+1),REAL(buffer(i),dp)/10000.0_dp
       END DO
 
-      DEALLOCATE(summary, buffer, sort_idx, STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      DEALLOCATE(summary, buffer, sort_idx)
 
     END IF
 
-    DEALLOCATE(buffer_in, buffer_out, rdispl, STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(buffer_in, buffer_out, rdispl)
 
     CALL mp_sync(para_env%group)
 
-    DEALLOCATE(shm_bins_per_rank, shm_displ, shm_cost_vector, STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(shm_bins_per_rank, shm_displ, shm_cost_vector)
 !$OMP END MASTER
 !$OMP BARRIER
 
@@ -2702,21 +2595,19 @@ END SUBROUTINE hfx_permute_binning
 !> \param size ...
 !> \param array ...
 !> \param rng_stream ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE reshuffle(size, array, rng_stream, error)
+  SUBROUTINE reshuffle(size, array, rng_stream)
     INTEGER                                  :: size
     INTEGER, DIMENSION(size)                 :: array
     TYPE(rng_stream_type), POINTER           :: rng_stream
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     INTEGER                                  :: i, idx1, idx2, tmp
     REAL(dp)                                 :: x
 
     DO i = 1,size*10
-      x = next_random_number(rng_stream,error=error)
+      x = next_random_number(rng_stream)
       idx1 = INT(x*(size+1-1))+1
-      x = next_random_number(rng_stream,error=error)
+      x = next_random_number(rng_stream)
       idx2 = INT(x*(size+1-1))+1
 
 

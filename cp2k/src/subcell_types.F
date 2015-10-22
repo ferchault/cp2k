@@ -17,6 +17,7 @@ MODULE subcell_types
   USE kinds,                           ONLY: dp
   USE util,                            ONLY: sort
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -45,36 +46,31 @@ CONTAINS
 !> \param nsubcell ...
 !> \param maxatom ...
 !> \param cell ...
-!> \param error ...
 !> \date    12.06.2003
 !> \author MK
 !> \version 1.0
 ! *****************************************************************************
-  SUBROUTINE allocate_subcell(subcell,nsubcell,maxatom,cell,error)
+  SUBROUTINE allocate_subcell(subcell,nsubcell,maxatom,cell)
 
     TYPE(subcell_type), DIMENSION(:, :, :), &
       POINTER                                :: subcell
     INTEGER, DIMENSION(3), INTENT(IN)        :: nsubcell
     INTEGER, INTENT(IN), OPTIONAL            :: maxatom
     TYPE(cell_type), OPTIONAL, POINTER       :: cell
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'allocate_subcell', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, j, k, na, nb, nc, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: i, j, k, na, nb, nc
     REAL(dp)                                 :: a_max, a_min, b_max, b_min, &
                                                 c_max, c_min, delta_a, &
                                                 delta_b, delta_c
 
-    failure = .FALSE.
     na = nsubcell(1)
     nb = nsubcell(2)
     nc = nsubcell(3)
 
-    ALLOCATE (subcell(na,nb,nc),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (subcell(na,nb,nc))
 
     delta_a = 1.0_dp/REAL(na,dp)
     delta_b = 1.0_dp/REAL(nb,dp)
@@ -108,8 +104,7 @@ CONTAINS
              CALL scaled_to_real(subcell(i,j,k)%corners(:,8),(/a_max,b_max,c_max/),cell)
           END IF
           IF (PRESENT(maxatom)) THEN
-             ALLOCATE (subcell(i,j,k)%atom_list(maxatom),STAT=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+             ALLOCATE (subcell(i,j,k)%atom_list(maxatom))
           END IF
           a_min = a_max
         END DO
@@ -123,39 +118,33 @@ CONTAINS
 ! *****************************************************************************
 !> \brief   Deallocate a subcell grid structure.
 !> \param subcell ...
-!> \param error ...
 !> \date    16.06.2003
 !> \author  MK
 !> \version 1.0
 ! *****************************************************************************
-  SUBROUTINE deallocate_subcell(subcell,error)
+  SUBROUTINE deallocate_subcell(subcell)
 
     TYPE(subcell_type), DIMENSION(:, :, :), &
       POINTER                                :: subcell
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'deallocate_subcell', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, j, k, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: i, j, k
 
-    failure = .FALSE.
     IF (ASSOCIATED(subcell)) THEN
 
        DO k=1,SIZE(subcell,3)
           DO j=1,SIZE(subcell,2)
              DO i=1,SIZE(subcell,1)
-                DEALLOCATE (subcell(i,j,k)%atom_list,STAT=stat)
-                CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+                DEALLOCATE (subcell(i,j,k)%atom_list)
              END DO
           END DO
        END DO
 
-       DEALLOCATE (subcell,STAT=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE (subcell)
     ELSE
-       CPAssert(.FALSE.,cp_failure_level,routineP,error,failure)
+       CPABORT("")
     END IF
 
   END SUBROUTINE deallocate_subcell

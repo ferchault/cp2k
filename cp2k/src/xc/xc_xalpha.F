@@ -19,8 +19,6 @@ MODULE xc_xalpha
   USE input_section_types,             ONLY: section_vals_type,&
                                              section_vals_val_get
   USE kinds,                           ONLY: dp
-  USE timings,                         ONLY: timeset,&
-                                             timestop
   USE xc_derivative_set_types,         ONLY: xc_derivative_set_type,&
                                              xc_dset_get_derivative
   USE xc_derivative_types,             ONLY: xc_derivative_get,&
@@ -30,6 +28,7 @@ MODULE xc_xalpha
   USE xc_rho_set_types,                ONLY: xc_rho_set_get,&
                                              xc_rho_set_type
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -82,17 +81,15 @@ CONTAINS
 !> \param max_deriv ...
 !> \param xa_parameter ...
 !> \param scaling ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE xalpha_info ( lsd, reference, shortform, needs, max_deriv, &
-       xa_parameter,scaling,error)
+       xa_parameter,scaling)
     LOGICAL, INTENT(in)                      :: lsd
     CHARACTER(LEN=*), INTENT(OUT), OPTIONAL  :: reference, shortform
     TYPE(xc_rho_cflags_type), &
       INTENT(inout), OPTIONAL                :: needs
     INTEGER, INTENT(out), OPTIONAL           :: max_deriv
     REAL(KIND=dp), INTENT(in), OPTIONAL      :: xa_parameter, scaling
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     REAL(KIND=dp)                            :: my_scaling, my_xparam
 
@@ -147,22 +144,19 @@ ELSE
 !> \param order ...
 !> \param xa_params ...
 !> \param xa_parameter ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE xalpha_lda_eval(rho_set,deriv_set,order,xa_params,xa_parameter,error)
+  SUBROUTINE xalpha_lda_eval(rho_set,deriv_set,order,xa_params,xa_parameter)
     TYPE(xc_rho_set_type), POINTER           :: rho_set
     TYPE(xc_derivative_set_type), POINTER    :: deriv_set
     INTEGER, INTENT(in)                      :: order
     TYPE(section_vals_type), POINTER         :: xa_params
     REAL(KIND=dp), INTENT(in), OPTIONAL      :: xa_parameter
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'xalpha_lda_eval', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, npoints
     INTEGER, DIMENSION(:, :), POINTER        :: bo
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: epsilon_rho, sx
     REAL(KIND=dp), DIMENSION(:, :, :), &
       POINTER                                :: e_0, e_rho, e_rho_rho, &
@@ -170,56 +164,50 @@ ELSE
     TYPE(xc_derivative_type), POINTER        :: deriv
 
     CALL timeset(routineN,handle)
-    failure=.FALSE.
     NULLIFY(bo)
 
-    CALL section_vals_val_get(xa_params,"scale_x",r_val=sx,error=error)
+    CALL section_vals_val_get(xa_params,"scale_x",r_val=sx)
 
-    CPPrecondition(ASSOCIATED(rho_set),cp_failure_level,routineP,error,failure)
-    CPPrecondition(rho_set%ref_count>0,cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(deriv_set),cp_failure_level,routineP,error,failure)
-    CPPrecondition(deriv_set%ref_count>0,cp_failure_level,routineP,error,failure)
-    IF (.NOT. failure) THEN
-       CALL xc_rho_set_get(rho_set,rho_1_3=r13,rho=rho,&
-            local_bounds=bo,rho_cutoff=epsilon_rho,&
-            error=error)
-       npoints=(bo(2,1)-bo(1,1)+1)*(bo(2,2)-bo(1,2)+1)*(bo(2,3)-bo(1,3)+1)
-       CALL xalpha_init(epsilon_rho,xa_parameter)
+    CPASSERT(ASSOCIATED(rho_set))
+    CPASSERT(rho_set%ref_count>0)
+    CPASSERT(ASSOCIATED(deriv_set))
+    CPASSERT(deriv_set%ref_count>0)
+    CALL xc_rho_set_get(rho_set,rho_1_3=r13,rho=rho,&
+         local_bounds=bo,rho_cutoff=epsilon_rho)
+    npoints=(bo(2,1)-bo(1,1)+1)*(bo(2,2)-bo(1,2)+1)*(bo(2,3)-bo(1,3)+1)
+    CALL xalpha_init(epsilon_rho,xa_parameter)
 
-       IF ( order>=0 ) THEN
-          deriv => xc_dset_get_derivative(deriv_set,"",&
-               allocate_deriv=.TRUE., error=error)
-          CALL xc_derivative_get(deriv,deriv_data=e_0,error=error)
+    IF ( order>=0 ) THEN
+       deriv => xc_dset_get_derivative(deriv_set,"",&
+            allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=e_0)
 
-          CALL xalpha_lda_0 ( npoints, rho, r13, e_0, sx )
+       CALL xalpha_lda_0 ( npoints, rho, r13, e_0, sx )
 
-       END IF
-       IF ( order>=1.OR.order==-1 ) THEN
-          deriv => xc_dset_get_derivative(deriv_set,"(rho)",&
-               allocate_deriv=.TRUE.,error=error)
-          CALL xc_derivative_get(deriv,deriv_data=e_rho,error=error)
+    END IF
+    IF ( order>=1.OR.order==-1 ) THEN
+       deriv => xc_dset_get_derivative(deriv_set,"(rho)",&
+            allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=e_rho)
 
-          CALL xalpha_lda_1 ( npoints, rho, r13, e_rho, sx )
-       END IF
-       IF ( order>=2.OR.order==-2 ) THEN
-          deriv => xc_dset_get_derivative(deriv_set,"(rho)(rho)",&
-               allocate_deriv=.TRUE.,error=error)
-          CALL xc_derivative_get(deriv,deriv_data=e_rho_rho,error=error)
+       CALL xalpha_lda_1 ( npoints, rho, r13, e_rho, sx )
+    END IF
+    IF ( order>=2.OR.order==-2 ) THEN
+       deriv => xc_dset_get_derivative(deriv_set,"(rho)(rho)",&
+            allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=e_rho_rho)
 
-          CALL xalpha_lda_2 ( npoints, rho, r13, e_rho_rho, sx )
-       END IF
-       IF ( order>=3.OR.order==-3 ) THEN
-          deriv => xc_dset_get_derivative(deriv_set,"(rho)(rho)(rho)",&
-               allocate_deriv=.TRUE.,error=error)
-          CALL xc_derivative_get(deriv,deriv_data=e_rho_rho_rho,error=error)
+       CALL xalpha_lda_2 ( npoints, rho, r13, e_rho_rho, sx )
+    END IF
+    IF ( order>=3.OR.order==-3 ) THEN
+       deriv => xc_dset_get_derivative(deriv_set,"(rho)(rho)(rho)",&
+            allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=e_rho_rho_rho)
 
-          CALL xalpha_lda_3 ( npoints, rho, r13, e_rho_rho_rho, sx )
-       END IF
-       IF ( order>3.OR.order<-3) THEN
-          CALL cp_unimplemented_error(fromWhere=routineP, &
-               message="derivatives bigger than 3 not implemented", &
-               error=error, error_level=cp_failure_level)
-       END IF
+       CALL xalpha_lda_3 ( npoints, rho, r13, e_rho_rho_rho, sx )
+    END IF
+    IF ( order>3.OR.order<-3) THEN
+       CPABORT("derivatives bigger than 3 not implemented")
     END IF
     CALL timestop(handle)
 
@@ -232,15 +220,13 @@ ELSE
 !> \param order ...
 !> \param xa_params ...
 !> \param xa_parameter ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE xalpha_lsd_eval (rho_set,deriv_set,order,xa_params,xa_parameter,error)
+  SUBROUTINE xalpha_lsd_eval (rho_set,deriv_set,order,xa_params,xa_parameter)
     TYPE(xc_rho_set_type), POINTER           :: rho_set
     TYPE(xc_derivative_set_type), POINTER    :: deriv_set
     INTEGER, INTENT(in)                      :: order
     TYPE(section_vals_type), POINTER         :: xa_params
     REAL(KIND=dp), INTENT(in), OPTIONAL      :: xa_parameter
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'xalpha_lsd_eval', &
       routineP = moduleN//':'//routineN
@@ -249,7 +235,6 @@ ELSE
 
     INTEGER                                  :: handle, i, ispin, npoints
     INTEGER, DIMENSION(:, :), POINTER        :: bo
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: epsilon_rho, sx
     REAL(KIND=dp), DIMENSION(:, :, :), &
       POINTER                                :: e_0, e_rho, e_rho_rho, &
@@ -258,67 +243,62 @@ ELSE
     TYPE(xc_derivative_type), POINTER        :: deriv
 
     CALL timeset(routineN,handle)
-    failure=.FALSE.
     NULLIFY(deriv, bo)
     DO i=1,2
        NULLIFY(rho(i)%array, rho_1_3(i)%array)
     END DO
 
-    CALL section_vals_val_get(xa_params,"scale_x",r_val=sx,error=error)
+    CALL section_vals_val_get(xa_params,"scale_x",r_val=sx)
 
-    CPPrecondition(ASSOCIATED(rho_set),cp_failure_level,routineP,error,failure)
-    CPPrecondition(rho_set%ref_count>0,cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(deriv_set),cp_failure_level,routineP,error,failure)
-    CPPrecondition(deriv_set%ref_count>0,cp_failure_level,routineP,error,failure)
-    IF (.NOT. failure) THEN
-       CALL xc_rho_set_get(rho_set,rhoa_1_3=rho_1_3(1)%array,&
-            rhob_1_3=rho_1_3(2)%array,rhoa=rho(1)%array,&
-            rhob=rho(2)%array, rho_cutoff=epsilon_rho,&
-            local_bounds=bo, error=error)
-       npoints=(bo(2,1)-bo(1,1)+1)*(bo(2,2)-bo(1,2)+1)*(bo(2,3)-bo(1,3)+1)
-       CALL xalpha_init(epsilon_rho,xa_parameter)
+    CPASSERT(ASSOCIATED(rho_set))
+    CPASSERT(rho_set%ref_count>0)
+    CPASSERT(ASSOCIATED(deriv_set))
+    CPASSERT(deriv_set%ref_count>0)
+    CALL xc_rho_set_get(rho_set,rhoa_1_3=rho_1_3(1)%array,&
+         rhob_1_3=rho_1_3(2)%array,rhoa=rho(1)%array,&
+         rhob=rho(2)%array, rho_cutoff=epsilon_rho,&
+         local_bounds=bo)
+    npoints=(bo(2,1)-bo(1,1)+1)*(bo(2,2)-bo(1,2)+1)*(bo(2,3)-bo(1,3)+1)
+    CALL xalpha_init(epsilon_rho,xa_parameter)
 
-       DO ispin=1,2
-          IF ( order>=0 ) THEN
-             deriv => xc_dset_get_derivative(deriv_set,"",&
-                  allocate_deriv=.TRUE., error=error)
-             CALL xc_derivative_get(deriv, deriv_data=e_0,error=error)
+    DO ispin=1,2
+       IF ( order>=0 ) THEN
+          deriv => xc_dset_get_derivative(deriv_set,"",&
+               allocate_deriv=.TRUE.)
+          CALL xc_derivative_get(deriv, deriv_data=e_0)
 
-             CALL xalpha_lsd_0 ( npoints,rho(ispin)%array, rho_1_3(ispin)%array,&
-                  e_0, sx )
-          END IF
-          IF ( order>=1.OR.order==-1 ) THEN
-             deriv => xc_dset_get_derivative(deriv_set,rho_spin_name(ispin),&
-                  allocate_deriv=.TRUE.,error=error)
-             CALL xc_derivative_get(deriv,deriv_data=e_rho,error=error)
+          CALL xalpha_lsd_0 ( npoints,rho(ispin)%array, rho_1_3(ispin)%array,&
+               e_0, sx )
+       END IF
+       IF ( order>=1.OR.order==-1 ) THEN
+          deriv => xc_dset_get_derivative(deriv_set,rho_spin_name(ispin),&
+               allocate_deriv=.TRUE.)
+          CALL xc_derivative_get(deriv,deriv_data=e_rho)
 
-             CALL xalpha_lsd_1( npoints, rho(ispin)%array, rho_1_3(ispin)%array,&
-                  e_rho, sx )
-          END IF
-          IF ( order>=2.OR.order==-2 ) THEN
-             deriv => xc_dset_get_derivative(deriv_set,rho_spin_name(ispin)//&
-                  rho_spin_name(ispin),allocate_deriv=.TRUE.,error=error)
-             CALL xc_derivative_get(deriv,deriv_data=e_rho_rho,error=error)
+          CALL xalpha_lsd_1( npoints, rho(ispin)%array, rho_1_3(ispin)%array,&
+               e_rho, sx )
+       END IF
+       IF ( order>=2.OR.order==-2 ) THEN
+          deriv => xc_dset_get_derivative(deriv_set,rho_spin_name(ispin)//&
+               rho_spin_name(ispin),allocate_deriv=.TRUE.)
+          CALL xc_derivative_get(deriv,deriv_data=e_rho_rho)
 
-             CALL xalpha_lsd_2( npoints, rho(ispin)%array, rho_1_3(ispin)%array,&
-                  e_rho_rho, sx )
-          END IF
-          IF ( order>=3 .OR. order==-3 ) THEN
-             deriv => xc_dset_get_derivative(deriv_set,rho_spin_name(ispin)//&
-                  rho_spin_name(ispin)//rho_spin_name(ispin),&
-                  allocate_deriv=.TRUE.,error=error)
-             CALL xc_derivative_get(deriv,deriv_data=e_rho_rho_rho,error=error)
+          CALL xalpha_lsd_2( npoints, rho(ispin)%array, rho_1_3(ispin)%array,&
+               e_rho_rho, sx )
+       END IF
+       IF ( order>=3 .OR. order==-3 ) THEN
+          deriv => xc_dset_get_derivative(deriv_set,rho_spin_name(ispin)//&
+               rho_spin_name(ispin)//rho_spin_name(ispin),&
+               allocate_deriv=.TRUE.)
+          CALL xc_derivative_get(deriv,deriv_data=e_rho_rho_rho)
 
-             CALL xalpha_lsd_3( npoints, rho(ispin)%array, rho_1_3(ispin)%array,&
-                  e_rho_rho_rho, sx )
-          END IF
-          IF ( order>3.OR.order<-3) THEN
-             CALL cp_unimplemented_error(fromWhere=routineP, &
-                  message="derivatives bigger than 3 not implemented", &
-                  error=error, error_level=cp_failure_level)
-          END IF
-       END DO
-    END IF
+          CALL xalpha_lsd_3( npoints, rho(ispin)%array, rho_1_3(ispin)%array,&
+               e_rho_rho_rho, sx )
+       END IF
+       IF ( order>3.OR.order<-3) THEN
+          CPABORT("derivatives bigger than 3 not implemented")
+       END IF
+    END DO
     CALL timestop(handle)
   END SUBROUTINE xalpha_lsd_eval
 

@@ -80,8 +80,8 @@ MODULE integrator
                                              update_particle_set
   USE physcon,                         ONLY: bohr,&
                                              femtoseconds
-  USE qmmm_update,                     ONLY: qmmm_update_force_mixing_env
   USE qmmm_util,                       ONLY: apply_qmmm_walls_reflective
+  USE qmmmx_update,                    ONLY: qmmmx_update_force_env
   USE qs_environment_types,            ONLY: get_qs_env
   USE reftraj_types,                   ONLY: reftraj_type
   USE reftraj_util,                    ONLY: compute_msd_reftraj
@@ -90,7 +90,6 @@ MODULE integrator
   USE rt_propagation_types,            ONLY: rt_prop_type
   USE shell_opt,                       ONLY: optimize_shell_core
   USE simpar_types,                    ONLY: simpar_type
-  USE termination,                     ONLY: stop_program
   USE thermal_region_types,            ONLY: thermal_region_type,&
                                              thermal_regions_type
   USE thermostat_methods,              ONLY: apply_thermostat_baro,&
@@ -100,6 +99,7 @@ MODULE integrator
   USE virial_methods,                  ONLY: virial_evaluate
   USE virial_types,                    ONLY: virial_type
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -116,7 +116,6 @@ CONTAINS
 ! *****************************************************************************
 !> \brief Langevin integrator for particle positions & momenta (Brownian dynamics)
 !> \param md_env ...
-!> \param error ...
 !> \par Literature
 !>      - A. Ricci and G. Ciccotti, Mol. Phys. 101, 1927-1931 (2003)
 !>      - For langevin regions:
@@ -128,18 +127,16 @@ CONTAINS
 !>     (01.12.2013, LT)
 !> \author Matthias Krack
 ! *****************************************************************************
-  SUBROUTINE langevin(md_env,error)
+  SUBROUTINE langevin(md_env)
 
     TYPE(md_environment_type), POINTER       :: md_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'langevin', &
       routineP = moduleN//':'//routineN
 
     INTEGER :: iparticle, iparticle_kind, iparticle_local, iparticle_reg, &
-      ireg, nparticle, nparticle_kind, nparticle_local, nshell, stat
+      ireg, nparticle, nparticle_kind, nparticle_local, nshell
     INTEGER, POINTER                         :: itimes
-    LOGICAL                                  :: failure
     LOGICAL, ALLOCATABLE, DIMENSION(:)       :: do_langevin
     REAL(KIND=dp)                            :: c, c1, c2, c3, c4, dm, dt, &
                                                 gam, mass, reg_temp, sigma
@@ -172,8 +169,6 @@ CONTAINS
     TYPE(thermal_regions_type), POINTER      :: thermal_regions
     TYPE(virial_type), POINTER               :: virial
 
-    failure = .FALSE.
-
     NULLIFY(cell, para_env, gci, force_env)
     NULLIFY(atomic_kinds, local_particles,subsys,local_molecules,molecule_kinds,molecules)
     NULLIFY(molecule_kind_set,molecule_set,particles,particle_set,rng_stream,simpar,virial)
@@ -181,16 +176,16 @@ CONTAINS
 
     CALL get_md_env(md_env=md_env, simpar=simpar, force_env=force_env,&
          para_env=para_env, thermal_regions=thermal_regions, &
-         itimes=itimes, error=error)
+         itimes=itimes)
 
     dt = simpar%dt
     gam = simpar%gamma+simpar%shadow_gamma
     nshell = 0
 
-    CALL force_env_get(force_env=force_env,subsys=subsys,cell=cell,error=error)
+    CALL force_env_get(force_env=force_env,subsys=subsys,cell=cell)
 
     ! Do some checks on coordinates and box
-    CALL apply_qmmm_walls_reflective(force_env, error=error)
+    CALL apply_qmmm_walls_reflective(force_env)
 
     CALL cp_subsys_get(subsys=subsys,&
                        atomic_kinds=atomic_kinds,&
@@ -201,11 +196,9 @@ CONTAINS
                        molecule_kinds_new=molecule_kinds,&
                        nshell=nshell,&
                        particles=particles,&
-                       virial=virial,&
-                       error=error)
-    CALL cp_assert((nshell == 0),cp_failure_level,cp_assertion_failed,routineP,&
-                   "Langevin dynamics is not yet implemented for core-shell models",&
-                   error,failure)
+                       virial=virial)
+    IF(nshell /= 0)&
+       CPABORT("Langevin dynamics is not yet implemented for core-shell models")
 
     nparticle_kind = atomic_kinds%n_els
     atomic_kind_set => atomic_kinds%els
@@ -216,8 +209,7 @@ CONTAINS
     molecule_set => molecules%els
 
     ! Setup the langevin regions information
-    ALLOCATE(do_langevin(nparticle), STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(do_langevin(nparticle))
     IF (simpar%do_thermal_region) THEN
        DO iparticle = 1, nparticle
           do_langevin(iparticle) = thermal_regions%do_langevin(iparticle)
@@ -231,8 +223,7 @@ CONTAINS
     ! atoms because of the possiblity of Langevin regions, and var_w
     ! for each region should depend on the temperature defined in the
     ! region
-    ALLOCATE(var_w(nparticle), STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(var_w(nparticle))
     var_w(1:nparticle) = simpar%var_w
     IF (simpar%do_thermal_region) THEN
        DO ireg = 1, thermal_regions%nregions
@@ -246,20 +237,17 @@ CONTAINS
     END IF
 
     ! Allocate work storage
-    ALLOCATE (pos(3,nparticle),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (pos(3,nparticle))
     pos(:,:) = 0.0_dp
 
-    ALLOCATE (vel(3,nparticle),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (vel(3,nparticle))
     vel(:,:) = 0.0_dp
 
-    ALLOCATE (w(3,nparticle),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (w(3,nparticle))
     w(:,:) = 0.0_dp
 
     IF (simpar%constraint) CALL getold(gci,local_molecules,molecule_set,&
-         molecule_kind_set, particle_set,cell,error)
+         molecule_kind_set, particle_set,cell)
 
     ! Generate random variables
     DO iparticle_kind=1,nparticle_kind
@@ -272,18 +260,17 @@ CONTAINS
              sigma = var_w(iparticle)*mass
              rng_stream => local_particles%local_particle_set(iparticle_kind)%&
                    rng(iparticle_local)%stream
-             w(1,iparticle) = next_random_number(rng_stream,variance=sigma,error=error)
-             w(2,iparticle) = next_random_number(rng_stream,variance=sigma,error=error)
-             w(3,iparticle) = next_random_number(rng_stream,variance=sigma,error=error)
+             w(1,iparticle) = next_random_number(rng_stream,variance=sigma)
+             w(2,iparticle) = next_random_number(rng_stream,variance=sigma)
+             w(3,iparticle) = next_random_number(rng_stream,variance=sigma)
           END IF
        END DO
     END DO
 
-    DEALLOCATE(var_w,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(var_w)
 
     ! Apply fix atom constraint
-    CALL fix_atom_control(force_env,error,w)
+    CALL fix_atom_control(force_env,w)
 
     ! Velocity Verlet (first part)
     c = EXP(-0.25_dp*dt*gam)
@@ -319,25 +306,24 @@ CONTAINS
     IF (simpar%constraint) THEN
        ! Possibly update the target values
        CALL shake_update_targets(gci, local_molecules, molecule_set, &
-            molecule_kind_set, dt, force_env%root_section, error)
+            molecule_kind_set, dt, force_env%root_section)
 
        CALL shake_control(gci,local_molecules,molecule_set,molecule_kind_set,&
             particle_set,pos,vel,dt,simpar%shake_tol,&
             simpar%info_constraint,simpar%lagrange_multipliers,&
-            simpar%dump_lm,cell,para_env%group,local_particles, error)
+            simpar%dump_lm,cell,para_env%group,local_particles)
     END IF
 
     ! Broadcast the new particle positions
-    CALL update_particle_set(particle_set,para_env%group,pos=pos,error=error)
+    CALL update_particle_set(particle_set,para_env%group,pos=pos)
 
-    DEALLOCATE(pos,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(pos)
 
     ! Update forces
-    CALL force_env_calc_energy_force(force_env,error=error)
+    CALL force_env_calc_energy_force(force_env)
 
     ! Metadynamics
-    CALL metadyn_integrator(force_env, itimes, vel, error=error)
+    CALL metadyn_integrator(force_env, itimes, vel)
 
     ! Update Verlet (second part)
     DO iparticle_kind=1,nparticle_kind
@@ -367,27 +353,24 @@ CONTAINS
        CALL rattle_control(gci,local_molecules,molecule_set,molecule_kind_set,&
             particle_set,vel,dt,simpar%shake_tol,&
             simpar%info_constraint,simpar%lagrange_multipliers,&
-            simpar%dump_lm,cell,para_env%group,local_particles, error)
+            simpar%dump_lm,cell,para_env%group,local_particles)
     END IF
 
     ! Broadcast the new particle velocities
-    CALL update_particle_set(particle_set,para_env%group,vel=vel,error=error)
+    CALL update_particle_set(particle_set,para_env%group,vel=vel)
 
-    DEALLOCATE(vel,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(vel)
 
-    DEALLOCATE(w,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(w)
 
-    DEALLOCATE(do_langevin,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(do_langevin)
 
     ! Update virial
     IF (simpar%constraint) CALL pv_constraint(gci,local_molecules,molecule_set,&
        molecule_kind_set, particle_set,virial,para_env%group)
 
     CALL virial_evaluate(atomic_kind_set,particle_set,local_particles,&
-         virial,para_env%group, error=error)
+         virial,para_env%group)
 
   END SUBROUTINE langevin
 
@@ -395,17 +378,15 @@ CONTAINS
 !> \brief nve integrator for particle positions & momenta
 !> \param md_env ...
 !> \param globenv ...
-!> \param error ...
 !> \par History
 !>   - the local particle lists are used instead of pnode (Sep. 2003,MK)
 !>   - usage of fragments retrieved from the force environment (Oct. 2003,MK)
 !> \author CJM
 ! *****************************************************************************
-  SUBROUTINE nve ( md_env, globenv, error)
+  SUBROUTINE nve ( md_env, globenv)
 
     TYPE(md_environment_type), POINTER       :: md_env
     TYPE(global_environment_type), POINTER   :: globenv
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'nve', &
       routineP = moduleN//':'//routineN
@@ -457,16 +438,16 @@ CONTAINS
             core_particle_set, thermostat_shell, dft_control, itimes)
     CALL get_md_env(md_env=md_env,simpar=simpar,force_env=force_env,&
          thermostat_coeff=thermostat_coeff,thermostat_shell=thermostat_shell,&
-         para_env=para_env, ehrenfest_md=ehrenfest_md, itimes=itimes, error=error)
+         para_env=para_env, ehrenfest_md=ehrenfest_md, itimes=itimes)
     dt = simpar%dt
-    CALL force_env_get(force_env=force_env, subsys=subsys,cell=cell, error=error)
+    CALL force_env_get(force_env=force_env, subsys=subsys,cell=cell)
 
     ! Do some checks on coordinates and box
-    CALL apply_qmmm_walls_reflective(force_env, error=error)
+    CALL apply_qmmm_walls_reflective(force_env)
 
     CALL cp_subsys_get(subsys=subsys,atomic_kinds=atomic_kinds,local_particles=local_particles,&
          particles=particles,local_molecules_new=local_molecules,molecules_new=molecules, &
-         molecule_kinds_new=molecule_kinds,gci=gci,virial=virial,error=error)
+         molecule_kinds_new=molecule_kinds,gci=gci,virial=virial)
 
     nparticle_kind = atomic_kinds%n_els
     atomic_kind_set => atomic_kinds%els
@@ -482,7 +463,7 @@ CONTAINS
 
     IF(shell_present) THEN
        CALL cp_subsys_get(subsys=subsys,shell_particles=shell_particles,&
-            core_particles=core_particles, error=error)
+            core_particles=core_particles)
        shell_particle_set =>  shell_particles%els
        nshell = SIZE(shell_particles%els)
 
@@ -491,44 +472,44 @@ CONTAINS
        END IF
     END IF
 
-    CALL allocate_tmp(md_env, tmp, nparticle,nshell,shell_adiabatic,error=error)
+    CALL allocate_tmp(md_env, tmp, nparticle,nshell,shell_adiabatic)
 
     ! Apply thermostat over the full set of shells if required
     IF(shell_adiabatic) THEN
        CALL apply_thermostat_shells(thermostat_shell, atomic_kind_set, particle_set,&
             local_particles, para_env%group, shell_particle_set=shell_particle_set,&
-            core_particle_set=core_particle_set, error=error)
+            core_particle_set=core_particle_set)
     END IF
 
     IF (simpar%constraint) CALL getold(gci,local_molecules, molecule_set,  &
-         molecule_kind_set, particle_set, cell, error)
+         molecule_kind_set, particle_set, cell)
 
     ! Velocity Verlet (first part)
     CALL vv_first(tmp,atomic_kind_set, local_particles, particle_set, &
-         core_particle_set, shell_particle_set, nparticle_kind, shell_adiabatic, dt, error=error)
+         core_particle_set, shell_particle_set, nparticle_kind, shell_adiabatic, dt)
 
     IF(simpar%variable_dt) CALL variable_timestep(md_env,tmp, dt, simpar, para_env, atomic_kind_set,&
          local_particles, particle_set, core_particle_set, shell_particle_set,&
-         nparticle_kind, shell_adiabatic, error=error)
+         nparticle_kind, shell_adiabatic)
 
     IF (simpar%constraint) THEN
        ! Possibly update the target values
        CALL shake_update_targets(gci, local_molecules, molecule_set, &
-           molecule_kind_set, dt, force_env%root_section, error)
+           molecule_kind_set, dt, force_env%root_section)
 
        CALL shake_control(gci,local_molecules, molecule_set,&
            molecule_kind_set, particle_set, tmp%pos, tmp%vel, dt,simpar%shake_tol, &
            simpar%info_constraint,simpar%lagrange_multipliers,simpar%dump_lm,&
-           cell,para_env%group,local_particles, error )
+           cell,para_env%group,local_particles)
     END IF
 
     ! Broadcast the new particle positions and deallocate pos part of temporary
     CALL update_dealloc_tmp ( tmp, particle_set, shell_particle_set, &
-         core_particle_set, para_env, shell_adiabatic, pos=.TRUE.,  error=error )
+         core_particle_set, para_env, shell_adiabatic, pos=.TRUE.)
 
     IF(shell_adiabatic .AND. shell_check_distance) THEN
         CALL optimize_shell_core(force_env,  particle_set,&
-             shell_particle_set, core_particle_set, globenv, tmp=tmp, check=.TRUE., error=error)
+             shell_particle_set, core_particle_set, globenv, tmp=tmp, check=.TRUE.)
     END IF
 
     ! Update forces
@@ -537,12 +518,12 @@ CONTAINS
        ALLOCATE(v_old(3,SIZE(tmp%vel,2)))
        v_old(:,:)=tmp%vel
        CALL vv_second(tmp, atomic_kind_set, local_particles, particle_set, &
-            core_particle_set, shell_particle_set, nparticle_kind, shell_adiabatic, dt, error=error )
+            core_particle_set, shell_particle_set, nparticle_kind, shell_adiabatic, dt)
        CALL update_dealloc_tmp ( tmp, particle_set, shell_particle_set, &
             core_particle_set, para_env, shell_adiabatic, vel=.TRUE.,&
-            should_deall_vel=.FALSE.,error=error )
+            should_deall_vel=.FALSE.)
        tmp%vel=v_old
-       CALL get_qs_env(force_env%qs_env, dft_control=dft_control, error=error)
+       CALL get_qs_env(force_env%qs_env, dft_control=dft_control)
        n_iter=dft_control%rtp_control%max_iter
     ELSE
        n_iter=1
@@ -551,37 +532,36 @@ CONTAINS
     DO i_iter=1,n_iter
     
        IF(ehrenfest_md)THEN
-          CALL get_qs_env(qs_env=force_env%qs_env,rtp=rtp,error=error)
+          CALL get_qs_env(qs_env=force_env%qs_env,rtp=rtp)
           rtp%iter=i_iter
           tmp%vel=v_old
-          CALL propagation_step(force_env%qs_env, rtp, dft_control%rtp_control, error=error)
+          CALL propagation_step(force_env%qs_env, rtp, dft_control%rtp_control)
        END IF
 
        ![NB] let nve work with force mixing which does not have consistent energies and forces
-       CALL force_env_calc_energy_force(force_env,require_consistent_energy_force=.FALSE.,error=error)
-       
+       CALL force_env_calc_energy_force(force_env,require_consistent_energy_force=.FALSE.)
+
        IF(ehrenfest_md)THEN
-          CALL rt_prop_output(force_env%qs_env,ehrenfest,delta_iter=force_env%qs_env%rtp%delta_iter,error=error)
+          CALL rt_prop_output(force_env%qs_env,ehrenfest,delta_iter=force_env%qs_env%rtp%delta_iter)
        ENDIF
 
        ! Metadynamics
-       CALL metadyn_integrator(force_env, itimes, tmp%vel, error=error)
+       CALL metadyn_integrator(force_env, itimes, tmp%vel)
 
        ! Velocity Verlet (second part)
        CALL vv_second(tmp, atomic_kind_set, local_particles, particle_set, &
-            core_particle_set, shell_particle_set, nparticle_kind, shell_adiabatic, dt, error=error )
+            core_particle_set, shell_particle_set, nparticle_kind, shell_adiabatic, dt)
 
        IF (simpar%constraint) CALL rattle_control(gci,local_molecules, molecule_set, &
             molecule_kind_set, particle_set, tmp%vel, dt,simpar%shake_tol,&
             simpar%info_constraint,simpar%lagrange_multipliers,simpar%dump_lm,&
-            cell,para_env%group,local_particles, error )
+            cell,para_env%group,local_particles)
 
        ! Apply thermostat over the full set of shell if required
        IF (shell_adiabatic) THEN
           CALL apply_thermostat_shells(thermostat_shell,atomic_kind_set, particle_set,&
                local_particles, para_env%group, vel=tmp%vel, &
-               shell_vel=tmp%shell_vel, core_vel=tmp%core_vel,&
-               error=error)
+               shell_vel=tmp%shell_vel, core_vel=tmp%core_vel)
        END IF
 
        IF (simpar%annealing) THEN
@@ -597,7 +577,7 @@ CONTAINS
        ! Broadcast the new particle velocities and deallocate the full temporary
        CALL update_dealloc_tmp ( tmp, particle_set, shell_particle_set, &
             core_particle_set, para_env, shell_adiabatic, vel=.TRUE.,&
-            should_deall_vel=deallocate_vel,error=error )
+            should_deall_vel=deallocate_vel)
        IF(ehrenfest_md)THEN
           IF(force_env%qs_env%rtp%converged)EXIT
        END IF
@@ -609,14 +589,13 @@ CONTAINS
          molecule_set,molecule_kind_set,particle_set, virial,para_env%group )
 
     CALL virial_evaluate ( atomic_kind_set, particle_set,  &
-         local_particles, virial, para_env%group  ,error=error)
+         local_particles, virial, para_env%group)
 
   END SUBROUTINE nve
 
 ! *****************************************************************************
 !> \brief simplest version of the isokinetic gaussian thermostat
 !> \param md_env ...
-!> \param error ...
 !> \par History
 !>   - Created [2004-07]
 !> \author Joost VandeVondele
@@ -628,10 +607,9 @@ CONTAINS
 !>         - Zhang F. , JCP 106, 6102 (1997)
 !>         - Minary P. et al, JCP 118, 2510 (2003)
 ! *****************************************************************************
-  SUBROUTINE isokin ( md_env, error )
+  SUBROUTINE isokin ( md_env)
 
     TYPE(md_environment_type), POINTER       :: md_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'isokin', &
       routineP = moduleN//':'//routineN
@@ -639,8 +617,7 @@ CONTAINS
     INTEGER                                  :: nparticle, nparticle_kind, &
                                                 nshell
     INTEGER, POINTER                         :: itimes
-    LOGICAL                                  :: failure, shell_adiabatic, &
-                                                shell_present
+    LOGICAL                                  :: shell_adiabatic, shell_present
     REAL(KIND=dp)                            :: dt
     TYPE(atomic_kind_list_type), POINTER     :: atomic_kinds
     TYPE(atomic_kind_type), DIMENSION(:), &
@@ -658,31 +635,28 @@ CONTAINS
     TYPE(simpar_type), POINTER               :: simpar
     TYPE(tmp_variables_type), POINTER        :: tmp
 
-    failure = .FALSE.
-
     NULLIFY(force_env, tmp, simpar, itimes)
     NULLIFY(atomic_kinds,para_env,subsys,local_particles)
     NULLIFY(core_particles,particles,shell_particles)
     NULLIFY(core_particle_set,particle_set,shell_particle_set)
 
     CALL get_md_env(md_env=md_env,simpar=simpar,force_env=force_env,&
-         para_env=para_env, itimes=itimes, error=error)
+         para_env=para_env, itimes=itimes)
 
     dt = simpar%dt
 
-    CALL force_env_get(force_env=force_env,subsys=subsys,error=error)
+    CALL force_env_get(force_env=force_env,subsys=subsys)
 
     ! Do some checks on coordinates and box
-    CALL apply_qmmm_walls_reflective(force_env, error=error)
+    CALL apply_qmmm_walls_reflective(force_env)
 
     IF (simpar%constraint) THEN
-       CALL stop_program(routineN,moduleN,__LINE__,&
-                         "Constraints not yet implemented",para_env)
+       CPABORT("Constraints not yet implemented")
     END IF
 
     CALL cp_subsys_get(subsys=subsys,atomic_kinds=atomic_kinds,&
          local_particles=local_particles,&
-         particles=particles ,error=error)
+         particles=particles)
 
     nparticle_kind = atomic_kinds%n_els
     atomic_kind_set => atomic_kinds%els
@@ -694,7 +668,7 @@ CONTAINS
 
     IF(shell_present) THEN
        CALL cp_subsys_get(subsys=subsys,shell_particles=shell_particles,&
-            core_particles=core_particles, error=error)
+            core_particles=core_particles)
        shell_particle_set =>  shell_particles%els
        nshell = SIZE(shell_particles%els)
 
@@ -703,7 +677,7 @@ CONTAINS
        END IF
     END IF
 
-    CALL allocate_tmp (md_env,tmp, nparticle, nshell, shell_adiabatic, error=error)
+    CALL allocate_tmp (md_env,tmp, nparticle, nshell, shell_adiabatic)
 
     ! compute s,ds
     CALL get_s_ds(tmp, nparticle_kind, atomic_kind_set, local_particles, particle_set,&
@@ -714,21 +688,21 @@ CONTAINS
     tmp%poly_v(1:3) = 2.0_dp*tmp%s/SQRT(tmp%ds)/dt
     CALL vv_first(tmp, atomic_kind_set, local_particles, particle_set, &
          core_particle_set, shell_particle_set, nparticle_kind,&
-         shell_adiabatic, dt, error=error)
+         shell_adiabatic, dt)
 
 
     IF(simpar%variable_dt) CALL variable_timestep(md_env,tmp, dt, simpar,para_env,atomic_kind_set, &
       local_particles, particle_set, core_particle_set, shell_particle_set,&
-      nparticle_kind, shell_adiabatic,error=error)
+      nparticle_kind, shell_adiabatic)
 
     ! Broadcast the new particle positions and deallocate the pos components of temporary
     CALL update_dealloc_tmp ( tmp, particle_set, shell_particle_set, &
-         core_particle_set, para_env, shell_adiabatic, pos=.TRUE.,  error=error )
+         core_particle_set, para_env, shell_adiabatic, pos=.TRUE.)
 
-    CALL force_env_calc_energy_force(force_env,error=error)
+    CALL force_env_calc_energy_force(force_env)
 
     ! Metadynamics
-    CALL metadyn_integrator(force_env, itimes, tmp%vel, error=error)
+    CALL metadyn_integrator(force_env, itimes, tmp%vel)
 
     ! compute s,ds
     CALL get_s_ds(tmp, nparticle_kind, atomic_kind_set,  local_particles, particle_set,&
@@ -739,38 +713,36 @@ CONTAINS
     tmp%poly_v(1:3) = 2.0_dp*tmp%s/SQRT(tmp%ds)/dt
     CALL vv_second(tmp, atomic_kind_set, local_particles, particle_set, &
          core_particle_set, shell_particle_set, nparticle_kind,&
-         shell_adiabatic, dt, error=error)
+         shell_adiabatic, dt)
 
     IF (simpar%annealing)  tmp%vel(:,:)=tmp%vel(:,:)*simpar%f_annealing
 
     !  Broadcast the new particle velocities and deallocate the temporary
     CALL update_dealloc_tmp ( tmp, particle_set, shell_particle_set, &
-         core_particle_set, para_env, shell_adiabatic, vel=.TRUE.,  error=error )
+         core_particle_set, para_env, shell_adiabatic, vel=.TRUE.)
 
   END SUBROUTINE isokin
 ! *****************************************************************************
 !> \brief nvt adiabatic integrator for particle positions & momenta
 !> \param md_env ...
 !> \param globenv ...
-!> \param error ...
 !> \par History
 !>   - the local particle lists are used instead of pnode (Sep. 2003,MK)
 !>   - usage of fragments retrieved from the force environment (Oct. 2003,MK)
 !> \author CJM
 ! *****************************************************************************
-  SUBROUTINE nvt_adiabatic ( md_env, globenv, error)
+  SUBROUTINE nvt_adiabatic ( md_env, globenv)
 
     TYPE(md_environment_type), POINTER       :: md_env
     TYPE(global_environment_type), POINTER   :: globenv
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'nvt_adiabatic', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: istat, ivar, nparticle, &
+    INTEGER                                  :: ivar, nparticle, &
                                                 nparticle_kind, nshell
     INTEGER, POINTER                         :: itimes
-    LOGICAL                                  :: failure, shell_adiabatic, &
+    LOGICAL                                  :: shell_adiabatic, &
                                                 shell_check_distance, &
                                                 shell_present
     REAL(KIND=dp)                            :: dt
@@ -806,9 +778,6 @@ CONTAINS
     TYPE(tmp_variables_type), POINTER        :: tmp
     TYPE(virial_type), POINTER               :: virial
 
-    failure = .FALSE.
-
-
     NULLIFY(gci, force_env, thermostat_coeff, tmp, &
          thermostat_fast, thermostat_slow, thermostat_shell, cell, shell_particles, &
          shell_particle_set, core_particles, core_particle_set, rand)
@@ -819,17 +788,17 @@ CONTAINS
     CALL get_md_env(md_env=md_env,simpar=simpar,force_env=force_env,&
          thermostat_fast=thermostat_fast, thermostat_slow=thermostat_slow,&
          thermostat_coeff=thermostat_coeff, thermostat_shell=thermostat_shell, &
-         para_env=para_env, itimes=itimes, error=error)
+         para_env=para_env, itimes=itimes)
     dt = simpar%dt
 
-    CALL force_env_get(force_env=force_env, subsys=subsys, cell=cell,error=error)
+    CALL force_env_get(force_env=force_env, subsys=subsys, cell=cell)
 
     ! Do some checks on coordinates and box
-    CALL apply_qmmm_walls_reflective(force_env, error=error)
+    CALL apply_qmmm_walls_reflective(force_env)
 
     CALL cp_subsys_get(subsys=subsys,atomic_kinds=atomic_kinds,local_particles=local_particles,&
          particles=particles,local_molecules_new=local_molecules,molecules_new=molecules,&
-         molecule_kinds_new=molecule_kinds,gci=gci,virial=virial,error=error)
+         molecule_kinds_new=molecule_kinds,gci=gci,virial=virial)
 
     nparticle_kind  = atomic_kinds%n_els
     atomic_kind_set => atomic_kinds%els
@@ -846,8 +815,7 @@ CONTAINS
     IF (ASSOCIATED(force_env%meta_env)) THEN
        ! Allocate random number for Langevin Thermostat acting on COLVARS
        IF(force_env%meta_env%langevin) THEN
-          ALLOCATE (rand(force_env%meta_env%n_colvar),STAT=istat)
-          CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+          ALLOCATE (rand(force_env%meta_env%n_colvar))
           rand(:) = 0.0_dp
        ENDIF
     ENDIF
@@ -855,7 +823,7 @@ CONTAINS
     !  Allocate work storage for positions and velocities
     IF(shell_present) THEN
        CALL cp_subsys_get(subsys=subsys,shell_particles=shell_particles,&
-            core_particles=core_particles, error=error)
+            core_particles=core_particles)
        shell_particle_set =>  shell_particles%els
        nshell = SIZE(shell_particles%els)
 
@@ -864,108 +832,106 @@ CONTAINS
        END IF
     END IF
 
-    CALL allocate_tmp(md_env, tmp, nparticle,nshell,shell_adiabatic,error=error)
+    CALL allocate_tmp(md_env, tmp, nparticle,nshell,shell_adiabatic)
 
     ! Apply Thermostat over the full set of particles
     IF(shell_adiabatic) THEN
 !       CALL apply_thermostat_particles(thermostat_part, molecule_kind_set, molecule_set,&
 !            particle_set, local_molecules, para_env%group, shell_adiabatic=shell_adiabatic,&
-!            shell_particle_set=shell_particle_set, core_particle_set=core_particle_set,&
-!            error=error)
+!            shell_particle_set=shell_particle_set, core_particle_set=core_particle_set)
 
        CALL apply_thermostat_shells(thermostat_shell, atomic_kind_set, particle_set,&
             local_particles, para_env%group, shell_particle_set=shell_particle_set,&
-            core_particle_set=core_particle_set, error=error)
+            core_particle_set=core_particle_set)
     ELSE
        CALL apply_thermostat_particles(thermostat_fast, force_env, molecule_kind_set, molecule_set,&
-            particle_set, local_molecules, local_particles, para_env%group ,error=error)
+            particle_set, local_molecules, local_particles, para_env%group)
 
        CALL apply_thermostat_particles(thermostat_slow, force_env, molecule_kind_set, molecule_set,&
-            particle_set, local_molecules, local_particles, para_env%group ,error=error)
+            particle_set, local_molecules, local_particles, para_env%group)
     END IF
 
     IF (simpar%constraint) CALL getold( gci, local_molecules, molecule_set,  &
-         molecule_kind_set, particle_set, cell, error)
+         molecule_kind_set, particle_set, cell)
 
     !    *** Velocity Verlet for Langeving *** v(t)--> v(t+1/2)
     IF (ASSOCIATED(force_env%meta_env)) THEN
        IF(force_env%meta_env%langevin) THEN
           DO ivar = 1 , force_env%meta_env%n_colvar
              rng_stream => force_env%meta_env%rng(ivar)%stream
-             rand(ivar)=next_random_number(rng_stream,error=error)
+             rand(ivar)=next_random_number(rng_stream)
           ENDDO
-          CALL metadyn_velocities_colvar(force_env,rand,error=error)
+          CALL metadyn_velocities_colvar(force_env,rand)
        ENDIF
     ENDIF
 
    ! Velocity Verlet (first part)
     CALL vv_first(tmp, atomic_kind_set, local_particles, particle_set, &
-         core_particle_set, shell_particle_set, nparticle_kind, shell_adiabatic, dt, error=error)
+         core_particle_set, shell_particle_set, nparticle_kind, shell_adiabatic, dt)
 
     IF(simpar%variable_dt) CALL variable_timestep(md_env,tmp, dt, simpar,para_env,atomic_kind_set,&
       local_particles, particle_set, core_particle_set, shell_particle_set,&
-      nparticle_kind, shell_adiabatic,error=error)
+      nparticle_kind, shell_adiabatic)
 
     IF (simpar%constraint) THEN
        ! Possibly update the target values
        CALL shake_update_targets(gci, local_molecules, molecule_set, &
-           molecule_kind_set, dt, force_env%root_section, error)
+           molecule_kind_set, dt, force_env%root_section)
 
        CALL shake_control( gci, local_molecules, molecule_set,   &
            molecule_kind_set, particle_set,tmp%pos, tmp%vel, dt,simpar%shake_tol,&
            simpar%info_constraint,simpar%lagrange_multipliers,simpar%dump_lm,&
-           cell, para_env%group,local_particles,error )
+           cell, para_env%group,local_particles)
     END IF
 
     ! Broadcast the new particle positions and deallocate pos components of temporary
     CALL update_dealloc_tmp ( tmp, particle_set, shell_particle_set, &
-         core_particle_set, para_env, shell_adiabatic, pos=.TRUE.,  error=error )
+         core_particle_set, para_env, shell_adiabatic, pos=.TRUE.)
 
     IF(shell_adiabatic .AND. shell_check_distance) THEN
         CALL optimize_shell_core(force_env,  particle_set,&
-             shell_particle_set, core_particle_set, globenv, tmp=tmp, check=.TRUE., error=error)
+             shell_particle_set, core_particle_set, globenv, tmp=tmp, check=.TRUE.)
     END IF
 
     ! Update forces
-    CALL force_env_calc_energy_force(force_env,error=error)
+    CALL force_env_calc_energy_force(force_env)
 
     ! Metadynamics
-    CALL metadyn_integrator(force_env, itimes, tmp%vel, rand=rand, error=error)
+    CALL metadyn_integrator(force_env, itimes, tmp%vel, rand=rand)
 
     ! Velocity Verlet (second part)
     CALL vv_second(tmp, atomic_kind_set, local_particles, particle_set, &
-         core_particle_set, shell_particle_set, nparticle_kind, shell_adiabatic, dt, error=error)
+         core_particle_set, shell_particle_set, nparticle_kind, shell_adiabatic, dt)
 
     IF (simpar%constraint) CALL rattle_control( gci, local_molecules, molecule_set, &
          molecule_kind_set, particle_set, tmp%vel, dt,simpar%shake_tol,&
          simpar%info_constraint,simpar%lagrange_multipliers,simpar%dump_lm,&
-         cell,para_env%group,local_particles, error )
+         cell,para_env%group,local_particles)
 
     ! Apply Thermostat over the full set of particles
     IF (shell_adiabatic) THEN
      !  CALL apply_thermostat_particles(thermostat_part,molecule_kind_set, molecule_set, &
      !       particle_set, local_molecules, para_env%group, shell_adiabatic=shell_adiabatic,&
-     !       vel= tmp%vel, shell_vel= tmp%shell_vel, core_vel= tmp%core_vel, error=error)
+     !       vel= tmp%vel, shell_vel= tmp%shell_vel, core_vel= tmp%core_vel)
 
        CALL apply_thermostat_shells(thermostat_shell,atomic_kind_set, particle_set,&
             local_particles, para_env%group, vel= tmp%vel, shell_vel= tmp%shell_vel, &
-            core_vel= tmp%core_vel, error=error)
+            core_vel= tmp%core_vel)
     ELSE
        CALL apply_thermostat_particles(thermostat_slow, force_env,molecule_kind_set, molecule_set, &
-            particle_set, local_molecules, local_particles, para_env%group, vel= tmp%vel, error=error)
+            particle_set, local_molecules, local_particles, para_env%group, vel= tmp%vel)
 
        CALL apply_thermostat_particles(thermostat_fast, force_env,molecule_kind_set, molecule_set, &
-            particle_set, local_molecules, local_particles, para_env%group, vel= tmp%vel, error=error)
+            particle_set, local_molecules, local_particles, para_env%group, vel= tmp%vel)
     END IF
 
     ! Broadcast the new particle velocities and deallocate temporary
     CALL update_dealloc_tmp ( tmp, particle_set, shell_particle_set, &
-         core_particle_set, para_env, shell_adiabatic, vel=.TRUE.,  error=error )
+         core_particle_set, para_env, shell_adiabatic, vel=.TRUE.)
 
     IF (ASSOCIATED(force_env%meta_env)) THEN
        IF(force_env%meta_env%langevin) THEN
-          DEALLOCATE(rand,STAT=istat)
-          CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+          DEALLOCATE(rand)
        ENDIF
     ENDIF
 
@@ -975,7 +941,7 @@ CONTAINS
 
     !     **  Evaluate Virial
     CALL virial_evaluate ( atomic_kind_set, particle_set,  &
-         local_particles, virial, para_env%group, error=error)
+         local_particles, virial, para_env%group)
 
   END SUBROUTINE nvt_adiabatic
 
@@ -984,25 +950,23 @@ CONTAINS
 !> \brief nvt integrator for particle positions & momenta
 !> \param md_env ...
 !> \param globenv ...
-!> \param error ...
 !> \par History
 !>   - the local particle lists are used instead of pnode (Sep. 2003,MK)
 !>   - usage of fragments retrieved from the force environment (Oct. 2003,MK)
 !> \author CJM
 ! *****************************************************************************
-  SUBROUTINE nvt ( md_env, globenv, error)
+  SUBROUTINE nvt ( md_env, globenv)
 
     TYPE(md_environment_type), POINTER       :: md_env
     TYPE(global_environment_type), POINTER   :: globenv
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'nvt', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: istat, ivar, nparticle, &
+    INTEGER                                  :: ivar, nparticle, &
                                                 nparticle_kind, nshell
     INTEGER, POINTER                         :: itimes
-    LOGICAL                                  :: failure, shell_adiabatic, &
+    LOGICAL                                  :: shell_adiabatic, &
                                                 shell_check_distance, &
                                                 shell_present
     REAL(KIND=dp)                            :: dt
@@ -1037,8 +1001,6 @@ CONTAINS
     TYPE(tmp_variables_type), POINTER        :: tmp
     TYPE(virial_type), POINTER               :: virial
 
-    failure = .FALSE.
-
     NULLIFY(gci, force_env, thermostat_coeff, tmp, &
          thermostat_part, thermostat_shell, cell, shell_particles, &
          shell_particle_set, core_particles, core_particle_set, rand)
@@ -1049,17 +1011,17 @@ CONTAINS
     CALL get_md_env(md_env=md_env,simpar=simpar,force_env=force_env,&
          thermostat_part=thermostat_part, thermostat_coeff=thermostat_coeff,&
          thermostat_shell=thermostat_shell,para_env=para_env,&
-         itimes=itimes, error=error)
+         itimes=itimes)
     dt = simpar%dt
 
-    CALL force_env_get(force_env=force_env, subsys=subsys, cell=cell,error=error)
+    CALL force_env_get(force_env=force_env, subsys=subsys, cell=cell)
 
     ! Do some checks on coordinates and box
-    CALL apply_qmmm_walls_reflective(force_env, error=error)
+    CALL apply_qmmm_walls_reflective(force_env)
 
     CALL cp_subsys_get(subsys=subsys,atomic_kinds=atomic_kinds,local_particles=local_particles,&
          particles=particles,local_molecules_new=local_molecules,molecules_new=molecules,&
-         molecule_kinds_new=molecule_kinds,gci=gci,virial=virial,error=error)
+         molecule_kinds_new=molecule_kinds,gci=gci,virial=virial)
 
     nparticle_kind  = atomic_kinds%n_els
     atomic_kind_set => atomic_kinds%els
@@ -1076,8 +1038,7 @@ CONTAINS
     IF (ASSOCIATED(force_env%meta_env)) THEN
        ! Allocate random number for Langevin Thermostat acting on COLVARS
        IF(force_env%meta_env%langevin) THEN
-          ALLOCATE (rand(force_env%meta_env%n_colvar),STAT=istat)
-          CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+          ALLOCATE (rand(force_env%meta_env%n_colvar))
           rand(:) = 0.0_dp
        ENDIF
     ENDIF
@@ -1085,7 +1046,7 @@ CONTAINS
     !  Allocate work storage for positions and velocities
     IF(shell_present) THEN
        CALL cp_subsys_get(subsys=subsys,shell_particles=shell_particles,&
-            core_particles=core_particles, error=error)
+            core_particles=core_particles)
        shell_particle_set =>  shell_particles%els
        nshell = SIZE(shell_particles%els)
 
@@ -1094,76 +1055,75 @@ CONTAINS
        END IF
     END IF
 
-    CALL allocate_tmp(md_env, tmp, nparticle,nshell,shell_adiabatic,error=error)
+    CALL allocate_tmp(md_env, tmp, nparticle,nshell,shell_adiabatic)
 
     ! Apply Thermostat over the full set of particles
     IF(shell_adiabatic) THEN
        CALL apply_thermostat_particles(thermostat_part, force_env, molecule_kind_set, molecule_set,&
             particle_set, local_molecules, local_particles, para_env%group, shell_adiabatic=shell_adiabatic,&
-            shell_particle_set=shell_particle_set, core_particle_set=core_particle_set,&
-            error=error)
+            shell_particle_set=shell_particle_set, core_particle_set=core_particle_set)
 
        CALL apply_thermostat_shells(thermostat_shell, atomic_kind_set, particle_set,&
             local_particles, para_env%group, shell_particle_set=shell_particle_set,&
-            core_particle_set=core_particle_set, error=error)
+            core_particle_set=core_particle_set)
     ELSE
        CALL apply_thermostat_particles(thermostat_part, force_env, molecule_kind_set, molecule_set,&
-            particle_set, local_molecules, local_particles, para_env%group ,error=error)
+            particle_set, local_molecules, local_particles, para_env%group)
     END IF
 
     IF (simpar%constraint) CALL getold( gci, local_molecules, molecule_set,  &
-         molecule_kind_set, particle_set, cell, error)
+         molecule_kind_set, particle_set, cell)
 
     !    *** Velocity Verlet for Langeving *** v(t)--> v(t+1/2)
     IF (ASSOCIATED(force_env%meta_env)) THEN
        IF(force_env%meta_env%langevin) THEN
           DO ivar = 1 , force_env%meta_env%n_colvar
              rng_stream => force_env%meta_env%rng(ivar)%stream
-             rand(ivar)=next_random_number(rng_stream,error=error)
+             rand(ivar)=next_random_number(rng_stream)
           ENDDO
-          CALL metadyn_velocities_colvar(force_env,rand,error=error)
+          CALL metadyn_velocities_colvar(force_env,rand)
        ENDIF
     ENDIF
 
    ! Velocity Verlet (first part)
     CALL vv_first(tmp, atomic_kind_set, local_particles, particle_set, &
-         core_particle_set, shell_particle_set, nparticle_kind, shell_adiabatic, dt, error=error)
+         core_particle_set, shell_particle_set, nparticle_kind, shell_adiabatic, dt)
 
     IF(simpar%variable_dt) CALL variable_timestep(md_env,tmp, dt, simpar,para_env,atomic_kind_set,&
       local_particles, particle_set, core_particle_set, shell_particle_set,&
-      nparticle_kind, shell_adiabatic,error=error)
+      nparticle_kind, shell_adiabatic)
 
     IF (simpar%constraint) THEN
        ! Possibly update the target values
        CALL shake_update_targets(gci, local_molecules, molecule_set, &
-           molecule_kind_set, dt, force_env%root_section, error)
+           molecule_kind_set, dt, force_env%root_section)
 
        CALL shake_control( gci, local_molecules, molecule_set,   &
            molecule_kind_set, particle_set,tmp%pos, tmp%vel, dt,simpar%shake_tol,&
            simpar%info_constraint,simpar%lagrange_multipliers,simpar%dump_lm,&
-           cell, para_env%group,local_particles,error )
+           cell, para_env%group,local_particles)
     END IF
 
     ! Broadcast the new particle positions and deallocate pos components of temporary
     CALL update_dealloc_tmp ( tmp, particle_set, shell_particle_set, &
-         core_particle_set, para_env, shell_adiabatic, pos=.TRUE.,  error=error )
+         core_particle_set, para_env, shell_adiabatic, pos=.TRUE.)
 
     IF(shell_adiabatic .AND. shell_check_distance) THEN
         CALL optimize_shell_core(force_env,  particle_set,&
-             shell_particle_set, core_particle_set, globenv, tmp=tmp, check=.TRUE., error=error)
+             shell_particle_set, core_particle_set, globenv, tmp=tmp, check=.TRUE.)
     END IF
 
     ![ADAPT] update input structure with new coordinates, make new labels
-    CALL qmmm_update_force_mixing_env(force_env, force_env%root_section, error=error)
+    CALL qmmmx_update_force_env(force_env, force_env%root_section)
 
     ![NB] recreate pointers changed by creation of new subsys in qmmm_update_force_mixing_env
     ![NB] ugly hack, which is why adaptivity isn't implemented in most other ensembles
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    CALL force_env_get(force_env=force_env, subsys=subsys, cell=cell,error=error)
+    CALL force_env_get(force_env=force_env, subsys=subsys, cell=cell)
 
     CALL cp_subsys_get(subsys=subsys,atomic_kinds=atomic_kinds,local_particles=local_particles,&
        particles=particles,local_molecules_new=local_molecules,molecules_new=molecules,&
-       molecule_kinds_new=molecule_kinds,gci=gci,virial=virial,error=error)
+       molecule_kinds_new=molecule_kinds,gci=gci,virial=virial)
 
     nparticle_kind  = atomic_kinds%n_els
     atomic_kind_set => atomic_kinds%els
@@ -1180,7 +1140,7 @@ CONTAINS
     !  Allocate work storage for positions and velocities
     IF(shell_present) THEN
      CALL cp_subsys_get(subsys=subsys,shell_particles=shell_particles,&
-          core_particles=core_particles, error=error)
+          core_particles=core_particles)
      shell_particle_set =>  shell_particles%els
      nshell = SIZE(shell_particles%els)
 
@@ -1192,42 +1152,41 @@ CONTAINS
 
     ! Update forces
     ![NB] let nvt work with force mixing which does not have consistent energies and forces
-    CALL force_env_calc_energy_force(force_env,require_consistent_energy_force=.FALSE.,error=error)
+    CALL force_env_calc_energy_force(force_env,require_consistent_energy_force=.FALSE.)
 
     ! Metadynamics
-    CALL metadyn_integrator(force_env, itimes, tmp%vel, rand=rand, error=error)
+    CALL metadyn_integrator(force_env, itimes, tmp%vel, rand=rand)
 
     ! Velocity Verlet (second part)
     CALL vv_second(tmp, atomic_kind_set, local_particles, particle_set, &
-         core_particle_set, shell_particle_set, nparticle_kind, shell_adiabatic, dt, error=error)
+         core_particle_set, shell_particle_set, nparticle_kind, shell_adiabatic, dt)
 
     IF (simpar%constraint) CALL rattle_control( gci, local_molecules, molecule_set, &
          molecule_kind_set, particle_set, tmp%vel, dt,simpar%shake_tol,&
          simpar%info_constraint,simpar%lagrange_multipliers,simpar%dump_lm,&
-         cell,para_env%group,local_particles, error )
+         cell,para_env%group,local_particles)
 
     ! Apply Thermostat over the full set of particles
     IF (shell_adiabatic) THEN
        CALL apply_thermostat_particles(thermostat_part, force_env,molecule_kind_set, molecule_set, &
             particle_set, local_molecules, local_particles, para_env%group, shell_adiabatic=shell_adiabatic,&
-            vel= tmp%vel, shell_vel= tmp%shell_vel, core_vel= tmp%core_vel, error=error)
+            vel= tmp%vel, shell_vel= tmp%shell_vel, core_vel= tmp%core_vel)
 
        CALL apply_thermostat_shells(thermostat_shell,atomic_kind_set, particle_set,&
             local_particles, para_env%group, vel= tmp%vel, shell_vel= tmp%shell_vel, &
-            core_vel= tmp%core_vel, error=error)
+            core_vel= tmp%core_vel)
     ELSE
        CALL apply_thermostat_particles(thermostat_part, force_env,molecule_kind_set, molecule_set, &
-            particle_set, local_molecules, local_particles, para_env%group, vel= tmp%vel, error=error)
+            particle_set, local_molecules, local_particles, para_env%group, vel= tmp%vel)
     END IF
 
     ! Broadcast the new particle velocities and deallocate temporary
     CALL update_dealloc_tmp ( tmp, particle_set, shell_particle_set, &
-         core_particle_set, para_env, shell_adiabatic, vel=.TRUE.,  error=error )
+         core_particle_set, para_env, shell_adiabatic, vel=.TRUE.)
 
     IF (ASSOCIATED(force_env%meta_env)) THEN
        IF(force_env%meta_env%langevin) THEN
-          DEALLOCATE(rand,STAT=istat)
-          CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+          DEALLOCATE(rand)
        ENDIF
     ENDIF
 
@@ -1237,7 +1196,7 @@ CONTAINS
 
     !     **  Evaluate Virial
     CALL virial_evaluate ( atomic_kind_set, particle_set,  &
-         local_particles, virial, para_env%group, error=error)
+         local_particles, virial, para_env%group)
 
   END SUBROUTINE nvt
 
@@ -1246,16 +1205,14 @@ CONTAINS
 !>      isotropic box changes
 !> \param md_env ...
 !> \param globenv ...
-!> \param error ...
 !> \par History
 !>      none
 !> \author CJM
 ! *****************************************************************************
-  SUBROUTINE npt_i ( md_env, globenv, error )
+  SUBROUTINE npt_i ( md_env, globenv)
 
     TYPE(md_environment_type), POINTER       :: md_env
     TYPE(global_environment_type), POINTER   :: globenv
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'npt_i', &
       routineP = moduleN//':'//routineN
@@ -1264,11 +1221,10 @@ CONTAINS
                                                 e6 = e4/42.0_dp, &
                                                 e8 = e6/72.0_dp
 
-    INTEGER                                  :: iroll, istat, ivar, &
-                                                nparticle, nparticle_kind, &
-                                                nshell
+    INTEGER                                  :: iroll, ivar, nparticle, &
+                                                nparticle_kind, nshell
     INTEGER, POINTER                         :: itimes
-    LOGICAL                                  :: failure, first, first_time, &
+    LOGICAL                                  :: first, first_time, &
                                                 shell_adiabatic, &
                                                 shell_check_distance, &
                                                 shell_present
@@ -1310,8 +1266,6 @@ CONTAINS
     TYPE(tmp_variables_type), POINTER        :: tmp
     TYPE(virial_type), POINTER               :: virial
 
-    failure = .FALSE.
-
     NULLIFY(gci,thermostat_baro,thermostat_part,thermostat_shell,force_env)
     NULLIFY(atomic_kinds,cell,para_env,subsys,local_molecules,local_particles)
     NULLIFY(molecule_kinds,molecules,molecule_kind_set,npt)
@@ -1322,18 +1276,18 @@ CONTAINS
     CALL get_md_env(md_env=md_env,simpar=simpar,force_env=force_env,&
          thermostat_part=thermostat_part, thermostat_baro=thermostat_baro,&
          thermostat_shell=thermostat_shell, npt=npt, first_time=first_time,&
-         para_env=para_env, itimes=itimes, error=error)
+         para_env=para_env, itimes=itimes)
     dt = simpar%dt
     infree = 1.0_dp / REAL ( simpar%nfree,KIND=dp)
 
-    CALL force_env_get(force_env=force_env, subsys=subsys, cell=cell, error=error)
+    CALL force_env_get(force_env=force_env, subsys=subsys, cell=cell)
 
     ! Do some checks on coordinates and box
-    CALL apply_qmmm_walls_reflective(force_env, error=error)
+    CALL apply_qmmm_walls_reflective(force_env)
 
     CALL cp_subsys_get(subsys=subsys,atomic_kinds=atomic_kinds,local_particles=local_particles,&
          particles=particles,local_molecules_new=local_molecules,molecules_new=molecules, &
-         gci=gci,molecule_kinds_new=molecule_kinds,virial=virial,error=error)
+         gci=gci,molecule_kinds_new=molecule_kinds,virial=virial)
 
     nparticle_kind = atomic_kinds%n_els
     atomic_kind_set => atomic_kinds%els
@@ -1349,25 +1303,23 @@ CONTAINS
 
     IF ( first_time ) THEN
        CALL virial_evaluate ( atomic_kind_set, particle_set,  &
-            local_particles, virial, para_env%group, error=error)
+            local_particles, virial, para_env%group)
     END IF
 
     ! Allocate work storage for positions and velocities
-    CALL allocate_old ( old, particle_set, npt, error=error )
+    CALL allocate_old ( old, particle_set, npt)
 
     IF (ASSOCIATED(force_env%meta_env)) THEN
        ! Allocate random number for Langevin Thermostat acting on COLVARS
        IF(force_env%meta_env%langevin) THEN
-          ALLOCATE (rand(force_env%meta_env%n_colvar),STAT=istat)
-          CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+          ALLOCATE (rand(force_env%meta_env%n_colvar))
           rand(:) = 0.0_dp
        ENDIF
     ENDIF
 
     IF(shell_present) THEN
        CALL cp_subsys_get(subsys=subsys,&
-            shell_particles=shell_particles, core_particles=core_particles,&
-            error=error)
+            shell_particles=shell_particles, core_particles=core_particles)
        shell_particle_set =>  shell_particles%els
        nshell = SIZE(shell_particles%els)
        IF(shell_adiabatic) THEN
@@ -1375,37 +1327,36 @@ CONTAINS
        END IF
     END IF
 
-    CALL allocate_tmp(md_env, tmp, nparticle, nshell, shell_adiabatic, error=error)
+    CALL allocate_tmp(md_env, tmp, nparticle, nshell, shell_adiabatic)
 
     ! Initialize eps_0 the first time through
     IF ( first_time ) eps_0 = npt (1,1)%eps
 
     ! Apply thermostat to  barostat
-    CALL apply_thermostat_baro( thermostat_baro, npt, para_env%group, error)
+    CALL apply_thermostat_baro( thermostat_baro, npt, para_env%group)
 
     ! Apply Thermostat over the full set of particles
     IF(simpar% ensemble /= npe_i_ensemble) THEN
       IF(shell_adiabatic) THEN
         CALL apply_thermostat_particles(thermostat_part, force_env, molecule_kind_set, molecule_set,&
              particle_set, local_molecules, local_particles, para_env%group,shell_adiabatic=shell_adiabatic,&
-             shell_particle_set=shell_particle_set, core_particle_set=core_particle_set,&
-             error=error)
+             shell_particle_set=shell_particle_set, core_particle_set=core_particle_set)
 
       ELSE
         CALL apply_thermostat_particles(thermostat_part, force_env, molecule_kind_set, molecule_set,&
-             particle_set, local_molecules, local_particles, para_env%group ,error=error)
+             particle_set, local_molecules, local_particles, para_env%group)
       END IF
     END IF
 
     ! Apply Thermostat over the core-shell motion
     CALL apply_thermostat_shells(thermostat_shell, atomic_kind_set, particle_set,&
          local_particles, para_env%group, shell_particle_set=shell_particle_set,&
-         core_particle_set=core_particle_set, error=error)
+         core_particle_set=core_particle_set)
 
     IF (simpar%constraint) THEN
        ! Possibly update the target values
        CALL shake_update_targets(gci, local_molecules, molecule_set, &
-            molecule_kind_set, dt, force_env%root_section, error)
+            molecule_kind_set, dt, force_env%root_section)
     END IF
 
     ! setting up for ROLL: saving old variables
@@ -1414,7 +1365,7 @@ CONTAINS
        iroll = 1
        CALL set ( old, atomic_kind_set, particle_set, local_particles, cell, npt, 'F' )
        CALL getold ( gci, local_molecules, molecule_set,  &
-            molecule_kind_set, particle_set, cell, error)
+            molecule_kind_set, particle_set, cell)
     ELSE
        roll_tol_thrs = EPSILON(0.0_dp)
     ENDIF
@@ -1425,9 +1376,9 @@ CONTAINS
        IF(force_env%meta_env%langevin) THEN
           DO ivar = 1 , force_env%meta_env%n_colvar
              rng_stream => force_env%meta_env%rng(ivar)%stream
-             rand(ivar)=next_random_number(rng_stream,error=error)
+             rand(ivar)=next_random_number(rng_stream)
           ENDDO
-          CALL metadyn_velocities_colvar(force_env,rand,error=error)
+          CALL metadyn_velocities_colvar(force_env,rand)
        ENDIF
     ENDIF
 
@@ -1460,11 +1411,11 @@ CONTAINS
        ! first half of velocity verlet
        CALL vv_first( tmp, atomic_kind_set, local_particles, particle_set, &
             core_particle_set, shell_particle_set, nparticle_kind,&
-            shell_adiabatic, dt, error=error )
+            shell_adiabatic, dt)
 
        IF(simpar%variable_dt) CALL  variable_timestep(md_env,tmp, dt, simpar,para_env,&
             atomic_kind_set, local_particles, particle_set, core_particle_set,&
-            shell_particle_set, nparticle_kind, shell_adiabatic, npt=npt,error=error)
+            shell_particle_set, nparticle_kind, shell_adiabatic, npt=npt)
 
 
        roll_tol = 0.0_dp
@@ -1474,7 +1425,7 @@ CONTAINS
        IF ( simpar%constraint ) CALL shake_roll_control( gci, local_molecules, &
             molecule_set, molecule_kind_set, particle_set, tmp%pos, tmp%vel, dt, simpar,  &
             roll_tol, iroll, vector_r, vector_v, para_env%group, cell=cell, &
-            local_particles=local_particles, error=error )
+            local_particles=local_particles)
     END DO SR
 
     ! Update eps:
@@ -1490,23 +1441,23 @@ CONTAINS
 
     ! Broadcast the new particle positions and deallocate the pos components of temporary
     CALL update_dealloc_tmp ( tmp, particle_set, shell_particle_set, &
-         core_particle_set, para_env, shell_adiabatic, pos=.TRUE.,  error=error )
+         core_particle_set, para_env, shell_adiabatic, pos=.TRUE.)
 
     IF(shell_adiabatic .AND. shell_check_distance) THEN
         CALL optimize_shell_core(force_env,  particle_set,&
-             shell_particle_set, core_particle_set, globenv, tmp=tmp, check=.TRUE., error=error)
+             shell_particle_set, core_particle_set, globenv, tmp=tmp, check=.TRUE.)
     END IF
 
     ! Update forces
-    CALL force_env_calc_energy_force(force_env,error=error)
+    CALL force_env_calc_energy_force(force_env)
 
     ! Metadynamics
-    CALL metadyn_integrator(force_env, itimes, tmp%vel, rand=rand, error=error)
+    CALL metadyn_integrator(force_env, itimes, tmp%vel, rand=rand)
 
     ! Velocity Verlet (second part)
     CALL vv_second(tmp, atomic_kind_set, local_particles, particle_set, &
          core_particle_set, shell_particle_set, nparticle_kind,&
-         shell_adiabatic, dt, error=error )
+         shell_adiabatic, dt)
 
     IF (simpar%constraint) THEN
        roll_tol_thrs = simpar%roll_tol
@@ -1523,7 +1474,7 @@ CONTAINS
        IF ( simpar%constraint ) CALL rattle_roll_setup ( old, gci, atomic_kind_set, &
             particle_set, local_particles, molecule_kind_set, molecule_set,  &
             local_molecules, tmp%vel, dt,  cell, npt, simpar, virial, vector_v,  &
-            roll_tol, iroll, infree, first, para_env,error=error)
+            roll_tol, iroll, infree, first, para_env)
 
        CALL update_pv ( gci, simpar, atomic_kind_set, tmp%vel, particle_set, &
             local_molecules, molecule_set, molecule_kind_set, &
@@ -1536,10 +1487,10 @@ CONTAINS
       IF (shell_adiabatic) THEN
         CALL apply_thermostat_particles(thermostat_part, force_env,molecule_kind_set, molecule_set, &
              particle_set, local_molecules, local_particles, para_env%group, shell_adiabatic=shell_adiabatic,&
-             vel=tmp%vel, shell_vel=tmp%shell_vel, core_vel=tmp%core_vel, error=error)
+             vel=tmp%vel, shell_vel=tmp%shell_vel, core_vel=tmp%core_vel)
       ELSE
         CALL apply_thermostat_particles(thermostat_part, force_env,molecule_kind_set, molecule_set, &
-             particle_set, local_molecules, local_particles, para_env%group, vel=tmp%vel, error=error)
+             particle_set, local_molecules, local_particles, para_env%group, vel=tmp%vel)
       END IF
     END IF
 
@@ -1548,11 +1499,11 @@ CONTAINS
     IF(ASSOCIATED(thermostat_shell)) THEN
       CALL apply_thermostat_shells(thermostat_shell,atomic_kind_set, particle_set,&
            local_particles, para_env%group, vel=tmp%vel, shell_vel=tmp%shell_vel, &
-           core_vel=tmp%core_vel, error=error)
+           core_vel=tmp%core_vel)
     END IF
 
     ! Apply Thermostat to Barostat
-    CALL apply_thermostat_baro( thermostat_baro, npt, para_env%group, error)
+    CALL apply_thermostat_baro( thermostat_baro, npt, para_env%group)
 
     ! Annealing of particle velocities is only possible when no thermostat is active
     IF (simpar% ensemble == npe_i_ensemble .AND. simpar%annealing) THEN
@@ -1570,28 +1521,27 @@ CONTAINS
 
     ! Broadcast the new particle velocities and deallocate temporary
     CALL update_dealloc_tmp ( tmp, particle_set, shell_particle_set, &
-         core_particle_set, para_env, shell_adiabatic, vel=.TRUE.,  error=error )
+         core_particle_set, para_env, shell_adiabatic, vel=.TRUE.)
 
     ! Update constraint virial
     IF ( simpar%constraint ) CALL pv_constraint ( gci, local_molecules, &
          molecule_set, molecule_kind_set, particle_set, virial, para_env%group )
 
     CALL virial_evaluate ( atomic_kind_set, particle_set,  &
-         local_particles, virial, para_env%group , error=error)
+         local_particles, virial, para_env%group)
 
     ! Deallocate old variables
-    CALL deallocate_old (old, error=error )
+    CALL deallocate_old (old)
 
     IF (ASSOCIATED(force_env%meta_env)) THEN
        IF(force_env%meta_env%langevin) THEN
-          DEALLOCATE(rand,STAT=istat)
-          CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+          DEALLOCATE(rand)
        ENDIF
     ENDIF
 
     IF (first_time) THEN
        first_time = .FALSE.
-       CALL set_md_env(md_env, first_time=first_time,error=error)
+       CALL set_md_env(md_env, first_time=first_time)
     END IF
 
   END SUBROUTINE npt_i
@@ -1599,16 +1549,14 @@ CONTAINS
 ! *****************************************************************************
 !> \brief uses coordinates in a file and generates frame after frame of these
 !> \param md_env ...
-!> \param error ...
 !> \par History
 !>   - 04.2005 created [Joost VandeVondele]
 !>   - modified to make it more general [MI]
 !> \note
 !>     it can be used to compute some properties on already available trajectories
 ! *****************************************************************************
-  SUBROUTINE reftraj ( md_env, error )
+  SUBROUTINE reftraj ( md_env)
     TYPE(md_environment_type), POINTER       :: md_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'reftraj', &
       routineP = moduleN//':'//routineN
@@ -1617,7 +1565,7 @@ CONTAINS
     INTEGER                                  :: cell_itimes, I, nparticle, &
                                                 Nread, trj_itimes
     INTEGER, POINTER                         :: itimes
-    LOGICAL                                  :: failure, init, my_end, test_ok
+    LOGICAL                                  :: init, my_end, test_ok
     REAL(KIND=dp)                            :: cell_time, h(3,3), trj_epot, &
                                                 trj_time, vol
     REAL(KIND=dp), POINTER                   :: time
@@ -1631,72 +1579,68 @@ CONTAINS
     TYPE(reftraj_type), POINTER              :: reftraj_env
     TYPE(simpar_type), POINTER               :: simpar
 
-    failure = .FALSE.
     NULLIFY(reftraj_env, particle_set, particles, force_env, subsys, simpar, para_env, cell, itimes, time)
     CALL get_md_env(md_env=md_env, init=init, reftraj=reftraj_env, force_env=force_env,&
-         para_env=para_env, simpar=simpar, error=error)
+         para_env=para_env, simpar=simpar)
 
-    CALL force_env_get(force_env=force_env, cell=cell, subsys=subsys, &
-         error=error)
+    CALL force_env_get(force_env=force_env, cell=cell, subsys=subsys)
     reftraj_env%isnap = reftraj_env%isnap + reftraj_env%info%stride
 
     ! Do some checks on coordinates and box
-    CALL apply_qmmm_walls_reflective(force_env, error=error)
-    CALL cp_subsys_get(subsys=subsys, particles=particles, error=error)
+    CALL apply_qmmm_walls_reflective(force_env)
+    CALL cp_subsys_get(subsys=subsys, particles=particles)
     nparticle    = particles%n_els
     particle_set => particles%els
 
     ! SnapShots read from an external file (parsers calls are buffered! please
     ! don't put any additional MPI call!) [tlaino]
-    CALL parser_read_line(reftraj_env%info%traj_parser,1,error=error)
+    CALL parser_read_line(reftraj_env%info%traj_parser,1)
     READ(reftraj_env%info%traj_parser%input_line,FMT="(I8)") nread
-    CPPostcondition(nread==nparticle,cp_failure_level,routineP,error,failure)
-    CALL parser_read_line(reftraj_env%info%traj_parser,1,error=error)
+    CPASSERT(nread==nparticle)
+    CALL parser_read_line(reftraj_env%info%traj_parser,1)
     test_ok = .FALSE.
     READ(reftraj_env%info%traj_parser%input_line,FMT="(T6,I8,T23,F12.3,T41,F20.10)",ERR=999)&
          trj_itimes, trj_time, trj_epot
     test_ok = .TRUE.
 999 IF (.NOT.test_ok) THEN
        ! Handling properly the error when reading the title of an XYZ
-       CALL get_md_env(md_env, itimes=itimes, error=error)
+       CALL get_md_env(md_env, itimes=itimes)
        trj_itimes = itimes
        trj_time   = 0.0_dp
        trj_epot   = 0.0_dp
     END IF
     DO i = 1,nread-1
-       CALL parser_read_line(reftraj_env%info%traj_parser,1,error=error)
+       CALL parser_read_line(reftraj_env%info%traj_parser,1)
        READ(reftraj_env%info%traj_parser%input_line(1:LEN_TRIM(reftraj_env%info%traj_parser%input_line)),*) AA,particle_set(i)%r
        particle_set(i)%r = particle_set(i)%r*bohr
     END DO
     ! End of file is properly addressed in the previous call..
     ! Let's check directly (providing some info) also for the last
     ! line of this frame..
-    CALL parser_read_line(reftraj_env%info%traj_parser,1,at_end=my_end,error=error)
+    CALL parser_read_line(reftraj_env%info%traj_parser,1,at_end=my_end)
     READ(unit=reftraj_env%info%traj_parser%input_line,fmt=*) AA,particle_set(i)%r
-    particle_set(i)%r(1) = cp_unit_to_cp2k(particle_set(i)%r(1),"angstrom",error=error)
-    particle_set(i)%r(2) = cp_unit_to_cp2k(particle_set(i)%r(2),"angstrom",error=error)
-    particle_set(i)%r(3) = cp_unit_to_cp2k(particle_set(i)%r(3),"angstrom",error=error)
+    particle_set(i)%r(1) = cp_unit_to_cp2k(particle_set(i)%r(1),"angstrom")
+    particle_set(i)%r(2) = cp_unit_to_cp2k(particle_set(i)%r(2),"angstrom")
+    particle_set(i)%r(3) = cp_unit_to_cp2k(particle_set(i)%r(3),"angstrom")
 
     ! Check if we reached the end of the file and provide some info..
     IF (my_end) THEN
-       CALL cp_assert(reftraj_env%isnap==(simpar%nsteps-1),cp_fatal_level,cp_assertion_failed,routineP,&
-            "Reached the end of the Trajectory  frames in the TRAJECTORY file. Number of "//&
-            "missing frames ("//cp_to_string((simpar%nsteps-1)-reftraj_env%isnap)//")."//&
-CPSourceFileRef,&
-            only_ionode=.TRUE.)
+       IF(reftraj_env%isnap/=(simpar%nsteps-1))&
+          CALL cp_abort(__LOCATION__,&
+               "Reached the end of the Trajectory  frames in the TRAJECTORY file. Number of "//&
+               "missing frames ("//cp_to_string((simpar%nsteps-1)-reftraj_env%isnap)//").")
     END IF
 
     IF(reftraj_env%info%variable_volume)THEN
-       CALL parser_get_next_line(reftraj_env%info%cell_parser,1,at_end=my_end,error=error)
-       CALL parse_cell_line(reftraj_env%info%cell_parser%input_line, cell_itimes, cell_time, h, vol, error)
-       CPPostcondition(trj_itimes==cell_itimes,cp_failure_level,routineP,error,failure)
+       CALL parser_get_next_line(reftraj_env%info%cell_parser,1,at_end=my_end)
+       CALL parse_cell_line(reftraj_env%info%cell_parser%input_line, cell_itimes, cell_time, h, vol)
+       CPASSERT(trj_itimes==cell_itimes)
        ! Check if we reached the end of the file and provide some info..
        IF (my_end) THEN
-          CALL cp_assert(reftraj_env%isnap==(simpar%nsteps-1),cp_fatal_level,cp_assertion_failed,routineP,&
-               "Reached the end of the cell info frames in the CELL file. Number of "//&
-               "missing frames ("//cp_to_string((simpar%nsteps-1)-reftraj_env%isnap)//")."//&
-CPSourceFileRef,&
-               only_ionode=.TRUE.)
+          IF(reftraj_env%isnap/=(simpar%nsteps-1))&
+             CALL cp_abort(__LOCATION__,&
+                  "Reached the end of the cell info frames in the CELL file. Number of "//&
+                  "missing frames ("//cp_to_string((simpar%nsteps-1)-reftraj_env%isnap)//").")
        END IF
     END IF
 
@@ -1711,7 +1655,7 @@ CPSourceFileRef,&
     reftraj_env%epot   = trj_epot
     reftraj_env%itimes = trj_itimes
     reftraj_env%time   = trj_time/femtoseconds
-    CALL get_md_env(md_env, t=time, error=error)
+    CALL get_md_env(md_env, t=time)
     time = reftraj_env%time
 
 
@@ -1721,27 +1665,27 @@ CPSourceFileRef,&
     END IF
 
     ![ADAPT] update input structure with new coordinates, make new labels
-    CALL qmmm_update_force_mixing_env(force_env, force_env%root_section, error=error)
+    CALL qmmmx_update_force_env(force_env, force_env%root_section)
     ! no pointers into force_env%subsys to update
 
     ! Task to perform on the reference trajectory
     ! Compute energy and forces
     ![NB] let reftraj work with force mixing which does not have consistent energies and forces
     CALL force_env_calc_energy_force(force_env,eval_energy_forces=reftraj_env%info%eval_EF,&
-         require_consistent_energy_force=.FALSE., error=error)
+         require_consistent_energy_force=.FALSE.)
 
     ! Metadynamics
-    CALL metadyn_integrator(force_env, trj_itimes, error=error)
+    CALL metadyn_integrator(force_env, trj_itimes)
 
     ! Compute MSD with respect to a reference configuration
     IF(reftraj_env%info%msd) THEN
-       CALL compute_msd_reftraj(reftraj_env,md_env, particle_set,error=error)
+       CALL compute_msd_reftraj(reftraj_env,md_env, particle_set)
     END IF
 
     ! Skip according the stride both Trajectory and Cell (if possible)
-    CALL parser_get_next_line(reftraj_env%info%traj_parser,(reftraj_env%info%stride-1)*(nparticle+2),error=error)
+    CALL parser_get_next_line(reftraj_env%info%traj_parser,(reftraj_env%info%stride-1)*(nparticle+2))
     IF(reftraj_env%info%variable_volume)THEN
-       CALL parser_get_next_line(reftraj_env%info%cell_parser,(reftraj_env%info%stride-1),error=error)
+       CALL parser_get_next_line(reftraj_env%info%cell_parser,(reftraj_env%info%stride-1))
     END IF
   END SUBROUTINE reftraj
 
@@ -1752,15 +1696,13 @@ CPSourceFileRef,&
 !>      due to a shock compression:
 !>      Reed et. al. Physical Review Letters 90, 235503 (2003).
 !> \param md_env ...
-!> \param error ...
 !> \par History
 !>      none
 !> \author CJM
 ! *****************************************************************************
-  SUBROUTINE nph_uniaxial ( md_env, error )
+  SUBROUTINE nph_uniaxial ( md_env)
 
     TYPE(md_environment_type), POINTER       :: md_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'nph_uniaxial', &
       routineP = moduleN//':'//routineN
@@ -1771,7 +1713,7 @@ CPSourceFileRef,&
     INTEGER                                  :: iroll, nparticle, &
                                                 nparticle_kind, nshell
     INTEGER, POINTER                         :: itimes
-    LOGICAL                                  :: failure, first, first_time, &
+    LOGICAL                                  :: first, first_time, &
                                                 shell_adiabatic, shell_present
     REAL(KIND=dp)                            :: dt, infree, kin, roll_tol, &
                                                 roll_tol_thrs
@@ -1805,8 +1747,6 @@ CPSourceFileRef,&
     TYPE(tmp_variables_type), POINTER        :: tmp
     TYPE(virial_type), POINTER               :: virial
 
-    failure = .FALSE.
-
     NULLIFY(gci, force_env)
     NULLIFY(atomic_kinds,cell,para_env,subsys,local_molecules,local_particles)
     NULLIFY(molecule_kinds,molecules,molecule_kind_set,npt)
@@ -1815,18 +1755,18 @@ CPSourceFileRef,&
     NULLIFY(simpar,virial,itimes)
 
     CALL get_md_env(md_env=md_env,simpar=simpar,force_env=force_env,npt = npt,&
-         first_time=first_time, para_env=para_env, itimes=itimes, error=error)
+         first_time=first_time, para_env=para_env, itimes=itimes)
     dt = simpar%dt
     infree = 1.0_dp / REAL ( simpar%nfree, dp )
 
-    CALL force_env_get(force_env, subsys=subsys, cell=cell ,error=error)
+    CALL force_env_get(force_env, subsys=subsys, cell=cell)
 
     ! Do some checks on coordinates and box
-    CALL apply_qmmm_walls_reflective(force_env, error=error)
+    CALL apply_qmmm_walls_reflective(force_env)
 
     CALL cp_subsys_get(subsys=subsys,atomic_kinds=atomic_kinds,local_particles=local_particles,&
          particles=particles,local_molecules_new=local_molecules, molecules_new=molecules, gci=gci,&
-         molecule_kinds_new=molecule_kinds,virial=virial,error=error)
+         molecule_kinds_new=molecule_kinds,virial=virial)
 
     nparticle_kind = atomic_kinds%n_els
     atomic_kind_set => atomic_kinds%els
@@ -1838,19 +1778,18 @@ CPSourceFileRef,&
 
     IF ( first_time ) THEN
        CALL virial_evaluate ( atomic_kind_set, particle_set,  &
-            local_particles, virial, para_env%group  ,error=error)
+            local_particles, virial, para_env%group)
     END IF
 
     CALL get_atomic_kind_set(atomic_kind_set=atomic_kind_set,&
          shell_present=shell_present,shell_adiabatic=shell_adiabatic)
 
     ! Allocate work storage for positions and velocities
-    CALL allocate_old ( old, particle_set, npt, error=error )
+    CALL allocate_old ( old, particle_set, npt)
 
     IF(shell_present) THEN
        CALL cp_subsys_get(subsys=subsys,&
-            shell_particles=shell_particles, core_particles=core_particles,&
-            error=error)
+            shell_particles=shell_particles, core_particles=core_particles)
        shell_particle_set =>  shell_particles%els
        nshell = SIZE(shell_particles%els)
        IF(shell_adiabatic) THEN
@@ -1858,12 +1797,12 @@ CPSourceFileRef,&
        END IF
     END IF
 
-    CALL allocate_tmp(md_env, tmp,nparticle, nshell, shell_adiabatic, error=error)
+    CALL allocate_tmp(md_env, tmp,nparticle, nshell, shell_adiabatic)
 
     IF (simpar%constraint) THEN
        ! Possibly update the target values
        CALL shake_update_targets(gci, local_molecules, molecule_set, &
-            molecule_kind_set, dt, force_env%root_section, error)
+            molecule_kind_set, dt, force_env%root_section)
     END IF
 
     ! setting up for ROLL: saving old variables
@@ -1872,7 +1811,7 @@ CPSourceFileRef,&
        iroll = 1
        CALL set ( old, atomic_kind_set, particle_set, local_particles, cell, npt, 'F' )
        CALL getold ( gci, local_molecules, molecule_set,  &
-            molecule_kind_set, particle_set, cell, error)
+            molecule_kind_set, particle_set, cell)
     ELSE
        roll_tol_thrs = EPSILON(0.0_dp)
     ENDIF
@@ -1919,11 +1858,11 @@ CPSourceFileRef,&
        ! first half of velocity verlet
        CALL vv_first( tmp, atomic_kind_set, local_particles, particle_set, &
             core_particle_set, shell_particle_set, nparticle_kind,&
-            shell_adiabatic, dt, error=error )
+            shell_adiabatic, dt)
 
        IF(simpar%variable_dt) CALL variable_timestep(md_env,tmp, dt, simpar,para_env,&
           atomic_kind_set, local_particles, particle_set, core_particle_set,&
-          shell_particle_set, nparticle_kind, shell_adiabatic, npt=npt, error=error)
+          shell_particle_set, nparticle_kind, shell_adiabatic, npt=npt)
 
 
        roll_tol = 0._dp
@@ -1934,7 +1873,7 @@ CPSourceFileRef,&
        IF ( simpar%constraint ) CALL shake_roll_control( gci, local_molecules, &
             molecule_set, molecule_kind_set, particle_set, tmp%pos, tmp%vel, dt, simpar,&
             roll_tol, iroll, vector_r, vector_v, para_env%group, cell=cell, &
-            local_particles=local_particles, error=error )
+            local_particles=local_particles)
     END DO SR
 
     ! Update h_mat
@@ -1945,18 +1884,18 @@ CPSourceFileRef,&
 
     ! Broadcast the new particle positions and deallocate the pos component of temporary
     CALL update_dealloc_tmp (tmp, particle_set, shell_particle_set, &
-         core_particle_set, para_env, shell_adiabatic, pos=.TRUE.,  error=error )
+         core_particle_set, para_env, shell_adiabatic, pos=.TRUE.)
 
     ! Update forces (and stress)
-    CALL force_env_calc_energy_force(force_env, error=error)
+    CALL force_env_calc_energy_force(force_env)
 
     ! Metadynamics
-    CALL metadyn_integrator(force_env, itimes, tmp%vel, error=error)
+    CALL metadyn_integrator(force_env, itimes, tmp%vel)
 
     ! Velocity Verlet (second part)
      CALL vv_second(tmp, atomic_kind_set, local_particles, particle_set, &
           core_particle_set, shell_particle_set, nparticle_kind,&
-          shell_adiabatic, dt, error=error )
+          shell_adiabatic, dt)
 
     IF (simpar%constraint) THEN
        roll_tol_thrs = simpar%roll_tol
@@ -1973,7 +1912,7 @@ CPSourceFileRef,&
        IF ( simpar%constraint ) CALL rattle_roll_setup ( old, gci, atomic_kind_set, &
             particle_set, local_particles, molecule_kind_set, molecule_set,  &
             local_molecules, tmp%vel, dt, cell, npt, simpar, virial, vector_v,  &
-            roll_tol, iroll, infree, first, para_env, error=error )
+            roll_tol, iroll, infree, first, para_env)
 
        CALL update_pv ( gci, simpar, atomic_kind_set, tmp%vel, particle_set, &
             local_molecules, molecule_set, molecule_kind_set, &
@@ -1985,21 +1924,21 @@ CPSourceFileRef,&
 
     ! Broadcast the new particle velocities and deallocate the temporary
     CALL update_dealloc_tmp (tmp, particle_set, shell_particle_set, &
-         core_particle_set, para_env, shell_adiabatic, vel=.TRUE.,  error=error )
+         core_particle_set, para_env, shell_adiabatic, vel=.TRUE.)
 
     ! Update constraint virial
     IF ( simpar%constraint ) CALL pv_constraint ( gci, local_molecules, &
          molecule_set,molecule_kind_set,particle_set, virial, para_env%group )
 
     CALL virial_evaluate ( atomic_kind_set, particle_set,  &
-         local_particles, virial, para_env%group, error=error)
+         local_particles, virial, para_env%group)
 
     ! Deallocate old variables
-    CALL deallocate_old ( old, error=error )
+    CALL deallocate_old ( old)
 
     IF (first_time) THEN
        first_time = .FALSE.
-       CALL set_md_env(md_env, first_time=first_time,error=error)
+       CALL set_md_env(md_env, first_time=first_time)
     END IF
 
   END SUBROUTINE nph_uniaxial
@@ -2012,15 +1951,13 @@ CPSourceFileRef,&
 !>      Reed et. al. Physical Review Letters 90, 235503 (2003).
 !>      Added damping (e.g. thermostat to barostat)
 !> \param md_env ...
-!> \param error ...
 !> \par History
 !>      none
 !> \author CJM
 ! *****************************************************************************
-  SUBROUTINE nph_uniaxial_damped ( md_env, error )
+  SUBROUTINE nph_uniaxial_damped ( md_env)
 
     TYPE(md_environment_type), POINTER       :: md_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'nph_uniaxial_damped', &
       routineP = moduleN//':'//routineN
@@ -2031,7 +1968,7 @@ CPSourceFileRef,&
     INTEGER                                  :: iroll, nparticle, &
                                                 nparticle_kind, nshell
     INTEGER, POINTER                         :: itimes
-    LOGICAL                                  :: failure, first, first_time, &
+    LOGICAL                                  :: first, first_time, &
                                                 shell_adiabatic, shell_present
     REAL(KIND=dp)                            :: aa, aax, dt, gamma1, infree, &
                                                 kin, roll_tol, roll_tol_thrs
@@ -2065,8 +2002,6 @@ CPSourceFileRef,&
     TYPE(tmp_variables_type), POINTER        :: tmp
     TYPE(virial_type), POINTER               :: virial
 
-    failure = .FALSE.
-
     NULLIFY(gci, force_env)
     NULLIFY(atomic_kinds,cell,para_env,subsys,local_molecules,local_particles)
     NULLIFY(molecule_kinds,molecules,molecule_kind_set,npt)
@@ -2075,16 +2010,16 @@ CPSourceFileRef,&
     NULLIFY(simpar,virial,itimes)
 
     CALL get_md_env(md_env=md_env,simpar=simpar,force_env=force_env,npt = npt,&
-         first_time=first_time, para_env=para_env, itimes=itimes, error=error)
+         first_time=first_time, para_env=para_env, itimes=itimes)
     dt = simpar%dt
     infree = 1.0_dp / REAL ( simpar%nfree, dp )
     gamma1 = simpar%gamma_nph
 
-    CALL force_env_get(force_env, subsys=subsys, cell = cell ,error=error)
+    CALL force_env_get(force_env, subsys=subsys, cell = cell)
 
     CALL cp_subsys_get(subsys=subsys,atomic_kinds=atomic_kinds,local_particles=local_particles,&
          particles=particles,local_molecules_new=local_molecules,molecules_new=molecules,gci=gci,&
-         molecule_kinds_new=molecule_kinds,virial=virial,error=error)
+         molecule_kinds_new=molecule_kinds,virial=virial)
 
     nparticle_kind = atomic_kinds%n_els
     atomic_kind_set => atomic_kinds%els
@@ -2096,19 +2031,18 @@ CPSourceFileRef,&
 
     IF ( first_time ) THEN
        CALL virial_evaluate ( atomic_kind_set, particle_set,  &
-            local_particles, virial, para_env%group , error=error)
+            local_particles, virial, para_env%group)
     END IF
 
     CALL get_atomic_kind_set(atomic_kind_set=atomic_kind_set,&
          shell_present=shell_present,shell_adiabatic=shell_adiabatic)
 
     ! Allocate work storage for positions and velocities
-    CALL allocate_old ( old, particle_set, npt, error=error )
+    CALL allocate_old ( old, particle_set, npt)
 
     IF(shell_present) THEN
        CALL cp_subsys_get(subsys=subsys,&
-            shell_particles=shell_particles, core_particles=core_particles,&
-            error=error)
+            shell_particles=shell_particles, core_particles=core_particles)
        shell_particle_set =>  shell_particles%els
        nshell = SIZE(shell_particles%els)
        IF(shell_adiabatic) THEN
@@ -2116,7 +2050,7 @@ CPSourceFileRef,&
        END IF
     END IF
 
-    CALL allocate_tmp(md_env, tmp,nparticle, nshell, shell_adiabatic, error=error)
+    CALL allocate_tmp(md_env, tmp,nparticle, nshell, shell_adiabatic)
 
     ! perform damping on velocities
     CALL damp_v ( molecule_kind_set, molecule_set, particle_set, local_molecules,&
@@ -2125,7 +2059,7 @@ CPSourceFileRef,&
     IF (simpar%constraint) THEN
        ! Possibly update the target values
        CALL shake_update_targets(gci, local_molecules, molecule_set, &
-            molecule_kind_set, dt, force_env%root_section, error)
+            molecule_kind_set, dt, force_env%root_section)
     END IF
 
     ! setting up for ROLL: saving old variables
@@ -2134,7 +2068,7 @@ CPSourceFileRef,&
        iroll = 1
        CALL set ( old, atomic_kind_set, particle_set, local_particles, cell, npt, 'F' )
        CALL getold ( gci, local_molecules, molecule_set,  &
-            molecule_kind_set, particle_set, cell, error)
+            molecule_kind_set, particle_set, cell)
     ELSE
        roll_tol_thrs = EPSILON(0.0_dp)
     ENDIF
@@ -2181,12 +2115,12 @@ CPSourceFileRef,&
        ! first half of velocity verlet
        CALL vv_first( tmp, atomic_kind_set, local_particles, particle_set, &
             core_particle_set, shell_particle_set, nparticle_kind,&
-            shell_adiabatic, dt, error=error )
+            shell_adiabatic, dt)
 
 
        IF(simpar%variable_dt)  CALL variable_timestep(md_env,tmp, dt, simpar,para_env,&
            atomic_kind_set, local_particles, particle_set, core_particle_set,&
-           shell_particle_set, nparticle_kind, shell_adiabatic, npt=npt, error=error)
+           shell_particle_set, nparticle_kind, shell_adiabatic, npt=npt)
 
 
        roll_tol = 0._dp
@@ -2197,7 +2131,7 @@ CPSourceFileRef,&
        IF ( simpar%constraint ) CALL shake_roll_control( gci, local_molecules, &
             molecule_set, molecule_kind_set, particle_set, tmp%pos,tmp%vel, dt, simpar,&
             roll_tol, iroll, vector_r, vector_v, para_env%group, cell=cell,&
-            local_particles=local_particles, error=error )
+            local_particles=local_particles)
     END DO SR
 
     ! Update h_mat
@@ -2208,18 +2142,18 @@ CPSourceFileRef,&
 
     ! Broadcast the new particle positions and deallocate the pos components of temporary
     CALL update_dealloc_tmp (tmp,particle_set, shell_particle_set, &
-         core_particle_set, para_env, shell_adiabatic, pos=.TRUE.,  error=error )
+         core_particle_set, para_env, shell_adiabatic, pos=.TRUE.)
 
     ! Update forces
-    CALL force_env_calc_energy_force(force_env, error=error)
+    CALL force_env_calc_energy_force(force_env)
 
     ! Metadynamics
-    CALL metadyn_integrator(force_env, itimes, tmp%vel, error=error)
+    CALL metadyn_integrator(force_env, itimes, tmp%vel)
 
     ! Velocity Verlet (second part)
     CALL vv_second(tmp, atomic_kind_set, local_particles, particle_set, &
          core_particle_set, shell_particle_set, nparticle_kind,&
-         shell_adiabatic, dt, error=error )
+         shell_adiabatic, dt)
 
     IF (simpar%constraint) THEN
        roll_tol_thrs = simpar%roll_tol
@@ -2236,7 +2170,7 @@ CPSourceFileRef,&
        IF ( simpar%constraint ) CALL rattle_roll_setup ( old, gci, atomic_kind_set, &
             particle_set, local_particles, molecule_kind_set, molecule_set, local_molecules,&
             tmp%vel, dt, cell, npt, simpar, virial, vector_v, roll_tol, iroll, infree, first,&
-            para_env, error=error)
+            para_env)
        ! perform damping on the barostat momentum
        CALL damp_veps ( npt ( 1, 1 ), gamma1, dt )
 
@@ -2258,21 +2192,21 @@ CPSourceFileRef,&
 
     ! Broadcast the new particle velocities and deallocate temporary
     CALL update_dealloc_tmp (tmp,particle_set, shell_particle_set, &
-         core_particle_set, para_env, shell_adiabatic, vel=.TRUE.,  error=error )
+         core_particle_set, para_env, shell_adiabatic, vel=.TRUE.)
 
     ! Update constraint virial
     IF ( simpar%constraint ) CALL pv_constraint ( gci, local_molecules, &
          molecule_set, molecule_kind_set, particle_set, virial, para_env%group )
 
     CALL virial_evaluate ( atomic_kind_set, particle_set,  &
-         local_particles, virial, para_env%group, error=error)
+         local_particles, virial, para_env%group)
 
     ! Deallocate old variables
-    CALL deallocate_old ( old, error=error)
+    CALL deallocate_old ( old)
 
     IF (first_time) THEN
        first_time = .FALSE.
-       CALL set_md_env(md_env, first_time=first_time,error=error)
+       CALL set_md_env(md_env, first_time=first_time)
     END IF
 
   END SUBROUTINE nph_uniaxial_damped
@@ -2281,16 +2215,14 @@ CPSourceFileRef,&
 !> \brief Velocity Verlet integrator for the NPT ensemble with fully flexible cell
 !> \param md_env ...
 !> \param globenv ...
-!> \param error ...
 !> \par History
 !>      none
 !> \author CJM
 ! *****************************************************************************
-  SUBROUTINE npt_f ( md_env, globenv, error )
+  SUBROUTINE npt_f ( md_env, globenv)
 
     TYPE(md_environment_type), POINTER       :: md_env
     TYPE(global_environment_type), POINTER   :: globenv
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'npt_f', &
       routineP = moduleN//':'//routineN
@@ -2302,7 +2234,7 @@ CPSourceFileRef,&
     INTEGER                                  :: i, iroll, j, nparticle, &
                                                 nparticle_kind, nshell
     INTEGER, POINTER                         :: itimes
-    LOGICAL                                  :: failure, first, first_time, &
+    LOGICAL                                  :: first, first_time, &
                                                 shell_adiabatic, &
                                                 shell_check_distance, &
                                                 shell_present
@@ -2342,7 +2274,6 @@ CPSourceFileRef,&
     TYPE(tmp_variables_type), POINTER        :: tmp
     TYPE(virial_type), POINTER               :: virial
 
-    failure = .FALSE.
     NULLIFY(gci,thermostat_baro,thermostat_part,thermostat_shell,force_env)
     NULLIFY(atomic_kinds,cell,para_env,subsys,local_molecules,local_particles)
     NULLIFY(molecule_kinds,molecules,molecule_kind_set,npt,barostat)
@@ -2353,18 +2284,18 @@ CPSourceFileRef,&
     CALL get_md_env(md_env=md_env,simpar=simpar,force_env=force_env,&
          thermostat_part=thermostat_part, thermostat_baro=thermostat_baro,&
          thermostat_shell=thermostat_shell, npt=npt, first_time=first_time,&
-         para_env=para_env, barostat=barostat, itimes=itimes, error=error)
+         para_env=para_env, barostat=barostat, itimes=itimes)
     dt = simpar%dt
     infree = 1.0_dp / REAL ( simpar%nfree,KIND=dp)
 
-    CALL force_env_get(force_env, subsys=subsys, cell=cell ,error=error)
+    CALL force_env_get(force_env, subsys=subsys, cell=cell)
 
     ! Do some checks on coordinates and box
-    CALL apply_qmmm_walls_reflective(force_env, error=error)
+    CALL apply_qmmm_walls_reflective(force_env)
 
     CALL cp_subsys_get(subsys=subsys,atomic_kinds=atomic_kinds, local_particles=local_particles,&
          particles=particles,local_molecules_new=local_molecules,molecules_new=molecules, &
-         gci=gci,molecule_kinds_new=molecule_kinds,virial=virial,error=error)
+         gci=gci,molecule_kinds_new=molecule_kinds,virial=virial)
 
     nparticle_kind = atomic_kinds%n_els
     atomic_kind_set => atomic_kinds%els
@@ -2380,16 +2311,15 @@ CPSourceFileRef,&
 
     IF ( first_time ) THEN
        CALL virial_evaluate ( atomic_kind_set, particle_set,  &
-            local_particles, virial, para_env%group  ,error=error)
+            local_particles, virial, para_env%group)
     END IF
 
     ! Allocate work storage for positions and velocities
-    CALL allocate_old ( old, particle_set, npt, error=error )
+    CALL allocate_old ( old, particle_set, npt)
 
     IF(shell_present) THEN
        CALL cp_subsys_get(subsys=subsys,&
-            shell_particles=shell_particles, core_particles=core_particles,&
-            error=error)
+            shell_particles=shell_particles, core_particles=core_particles)
        shell_particle_set =>  shell_particles%els
        nshell = SIZE(shell_particles%els)
        IF(shell_adiabatic) THEN
@@ -2397,33 +2327,32 @@ CPSourceFileRef,&
        END IF
     END IF
 
-    CALL allocate_tmp(md_env, tmp,nparticle, nshell, shell_adiabatic, error=error)
+    CALL allocate_tmp(md_env, tmp,nparticle, nshell, shell_adiabatic)
 
     ! Apply Thermostat to Barostat
-    CALL apply_thermostat_baro(thermostat_baro, npt, para_env%group, error)
+    CALL apply_thermostat_baro(thermostat_baro, npt, para_env%group)
 
     ! Apply Thermostat over the full set of particles
     IF(simpar% ensemble /= npe_f_ensemble) THEN
       IF(shell_adiabatic) THEN
         CALL apply_thermostat_particles(thermostat_part, force_env, molecule_kind_set, molecule_set,&
              particle_set, local_molecules, local_particles, para_env%group,shell_adiabatic=shell_adiabatic,&
-             shell_particle_set=shell_particle_set,core_particle_set=core_particle_set,&
-             error=error)
+             shell_particle_set=shell_particle_set,core_particle_set=core_particle_set)
       ELSE
         CALL apply_thermostat_particles(thermostat_part, force_env, molecule_kind_set, molecule_set,&
-             particle_set, local_molecules, local_particles, para_env%group ,error=error)
+             particle_set, local_molecules, local_particles, para_env%group)
       END IF
     END IF
 
     ! Apply Thermostat over the core-shell motion
     CALL apply_thermostat_shells(thermostat_shell, atomic_kind_set, particle_set,&
          local_particles, para_env%group, shell_particle_set=shell_particle_set,&
-         core_particle_set=core_particle_set, error=error)
+         core_particle_set=core_particle_set)
 
     IF (simpar%constraint) THEN
        ! Possibly update the target values
        CALL shake_update_targets(gci, local_molecules, molecule_set, &
-            molecule_kind_set, dt, force_env%root_section, error)
+            molecule_kind_set, dt, force_env%root_section)
     END IF
 
     ! setting up for ROLL: saving old variables
@@ -2432,7 +2361,7 @@ CPSourceFileRef,&
        iroll = 1
        CALL set ( old, atomic_kind_set, particle_set, local_particles, cell, npt, 'F' )
        CALL getold ( gci, local_molecules, molecule_set,  &
-            molecule_kind_set, particle_set, cell, error)
+            molecule_kind_set, particle_set, cell)
     ELSE
        roll_tol_thrs = EPSILON(0.0_dp)
     ENDIF
@@ -2471,11 +2400,11 @@ CPSourceFileRef,&
 
        CALL vv_first(tmp, atomic_kind_set, local_particles, particle_set, &
             core_particle_set, shell_particle_set, nparticle_kind,&
-            shell_adiabatic, dt, u=tmp%u, error=error)
+            shell_adiabatic, dt, u=tmp%u)
 
        IF(simpar%variable_dt) CALL  variable_timestep(md_env,tmp, dt, simpar,para_env,&
            atomic_kind_set, local_particles, particle_set, core_particle_set,&
-           shell_particle_set, nparticle_kind, shell_adiabatic,npt=npt,error=error)
+           shell_particle_set, nparticle_kind, shell_adiabatic,npt=npt)
 
        roll_tol = 0.0_dp
        vector_r = tmp%scale_r*tmp%poly_r
@@ -2485,7 +2414,7 @@ CPSourceFileRef,&
             molecule_set, molecule_kind_set, particle_set, tmp%pos, tmp%vel, dt,&
             simpar, roll_tol, iroll, vector_r, vector_v, &
             para_env%group, u=tmp%u, cell=cell,&
-            local_particles=local_particles, error=error )
+            local_particles=local_particles)
     END DO SR
 
     ! Update h_mat
@@ -2503,23 +2432,23 @@ CPSourceFileRef,&
 
     ! Broadcast the new particle positions and deallocate the pos components of temporary
     CALL update_dealloc_tmp (tmp,particle_set, shell_particle_set, &
-         core_particle_set, para_env, shell_adiabatic, pos=.TRUE., error=error )
+         core_particle_set, para_env, shell_adiabatic, pos=.TRUE.)
 
     IF(shell_adiabatic .AND. shell_check_distance) THEN
         CALL optimize_shell_core(force_env,  particle_set,&
-             shell_particle_set, core_particle_set, globenv, tmp=tmp, check=.TRUE., error=error)
+             shell_particle_set, core_particle_set, globenv, tmp=tmp, check=.TRUE.)
     END IF
 
     ! Update forces
-    CALL force_env_calc_energy_force(force_env,error=error)
+    CALL force_env_calc_energy_force(force_env)
 
     ! Metadynamics
-    CALL metadyn_integrator(force_env, itimes, tmp%vel, error=error)
+    CALL metadyn_integrator(force_env, itimes, tmp%vel)
 
     ! Velocity Verlet (second part)
     CALL vv_second (tmp, atomic_kind_set, local_particles, particle_set,&
          core_particle_set, shell_particle_set, nparticle_kind,&
-         shell_adiabatic, dt, tmp%u, error=error )
+         shell_adiabatic, dt, tmp%u)
 
     IF (simpar%constraint) THEN
        roll_tol_thrs = simpar%roll_tol
@@ -2536,7 +2465,7 @@ CPSourceFileRef,&
        IF ( simpar%constraint ) CALL rattle_roll_setup ( old, gci, atomic_kind_set, &
             particle_set, local_particles, molecule_kind_set, molecule_set,  &
             local_molecules, tmp%vel, dt, cell, npt, simpar, virial, vector_v,  &
-            roll_tol, iroll, infree, first, para_env, u=tmp%u, error=error)
+            roll_tol, iroll, infree, first, para_env, u=tmp%u)
 
        CALL update_pv ( gci, simpar, atomic_kind_set, tmp%vel, particle_set, &
             local_molecules, molecule_set, molecule_kind_set, &
@@ -2550,11 +2479,11 @@ CPSourceFileRef,&
       IF (shell_adiabatic) THEN
         CALL apply_thermostat_particles(thermostat_part, force_env,molecule_kind_set, molecule_set, &
              particle_set, local_molecules, local_particles, para_env%group,shell_adiabatic=shell_adiabatic,&
-             vel=tmp%vel, shell_vel=tmp%shell_vel, core_vel=tmp%core_vel, error=error)
+             vel=tmp%vel, shell_vel=tmp%shell_vel, core_vel=tmp%core_vel)
 
       ELSE
         CALL apply_thermostat_particles(thermostat_part, force_env,molecule_kind_set, molecule_set, &
-             particle_set, local_molecules, local_particles, para_env%group, vel=tmp%vel, error=error)
+             particle_set, local_molecules, local_particles, para_env%group, vel=tmp%vel)
       END IF
     END IF
 
@@ -2562,11 +2491,11 @@ CPSourceFileRef,&
     IF(ASSOCIATED(thermostat_shell)) THEN
        CALL apply_thermostat_shells(thermostat_shell,atomic_kind_set, particle_set,&
             local_particles, para_env%group, vel=tmp%vel, shell_vel=tmp%shell_vel, &
-            core_vel=tmp%core_vel, error=error)
+            core_vel=tmp%core_vel)
     END IF
 
     ! Apply Thermostat to Barostat
-    CALL apply_thermostat_baro( thermostat_baro, npt, para_env%group, error)
+    CALL apply_thermostat_baro( thermostat_baro, npt, para_env%group)
 
     ! Annealing of particle velocities is only possible when no thermostat is active
     IF (simpar% ensemble == npe_f_ensemble .AND. simpar%annealing) THEN
@@ -2583,7 +2512,7 @@ CPSourceFileRef,&
 
     ! Broadcast the new particle velocities and deallocate temporary
     CALL update_dealloc_tmp (tmp,particle_set, shell_particle_set, &
-         core_particle_set, para_env, shell_adiabatic, vel=.TRUE., error=error )
+         core_particle_set, para_env, shell_adiabatic, vel=.TRUE.)
 
     ! Update constraint virial
     IF ( simpar%constraint ) &
@@ -2591,14 +2520,14 @@ CPSourceFileRef,&
          molecule_kind_set, particle_set, virial, para_env%group )
 
     CALL virial_evaluate ( atomic_kind_set, particle_set,  &
-         local_particles, virial, para_env%group, error=error  )
+         local_particles, virial, para_env%group)
 
     ! Deallocate old variables
-    CALL deallocate_old ( old, error=error )
+    CALL deallocate_old ( old)
 
     IF (first_time) THEN
        first_time = .FALSE.
-       CALL set_md_env(md_env, first_time=first_time,error=error)
+       CALL set_md_env(md_env, first_time=first_time)
     END IF
 
   END SUBROUTINE npt_f
@@ -2606,21 +2535,18 @@ CPSourceFileRef,&
 ! *****************************************************************************
 !> \brief RESPA integrator for nve ensemble for particle positions & momenta
 !> \param md_env ...
-!> \param error ...
 !> \author FS
 ! *****************************************************************************
-  SUBROUTINE nve_respa ( md_env, error)
+  SUBROUTINE nve_respa ( md_env)
 
     TYPE(md_environment_type), POINTER       :: md_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'nve_respa', &
       routineP = moduleN//':'//routineN
 
     INTEGER :: i_step, iparticle, iparticle_kind, iparticle_local, &
-      n_time_steps, nparticle, nparticle_kind, nparticle_local, stat
+      n_time_steps, nparticle, nparticle_kind, nparticle_local
     INTEGER, POINTER                         :: itimes
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: dm, dt, mass
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :)                        :: pos, vel
@@ -2647,28 +2573,26 @@ CPSourceFileRef,&
                                                 particle_set_respa
     TYPE(simpar_type), POINTER               :: simpar
 
-    failure = .FALSE.
-
     NULLIFY (para_env,cell,subsys_respa,particles_respa, particle_set_respa, gci, force_env, atomic_kinds)
     NULLIFY (atomic_kind_set,simpar,subsys,particles,particle_set)
     NULLIFY (local_molecules,molecule_kinds, molecules,molecule_kind_set, local_particles,itimes)
     CALL get_md_env(md_env=md_env,simpar=simpar,force_env=force_env, &
-                    para_env=para_env, itimes=itimes, error=error)
+                    para_env=para_env, itimes=itimes)
     dt = simpar%dt
 
     n_time_steps=simpar%n_time_steps
 
-    CALL force_env_get(force_env,subsys=subsys,cell=cell,error=error)
-    CALL force_env_get(force_env%sub_force_env(1)%force_env,subsys=subsys_respa,error=error)
+    CALL force_env_get(force_env,subsys=subsys,cell=cell)
+    CALL force_env_get(force_env%sub_force_env(1)%force_env,subsys=subsys_respa)
 
     ! Do some checks on coordinates and box
-    CALL apply_qmmm_walls_reflective(force_env, error=error)
+    CALL apply_qmmm_walls_reflective(force_env)
 
     CALL cp_subsys_get(subsys=subsys,atomic_kinds=atomic_kinds,local_particles=local_particles,&
          particles=particles, local_molecules_new=local_molecules, molecules_new=molecules,&
-         gci=gci, molecule_kinds_new=molecule_kinds ,error=error)
+         gci=gci, molecule_kinds_new=molecule_kinds)
 
-    CALL cp_subsys_get (subsys=subsys_respa, particles=particles_respa,error=error)
+    CALL cp_subsys_get (subsys=subsys_respa, particles=particles_respa)
     particle_set_respa => particles_respa%els
 
     nparticle_kind = atomic_kinds%n_els
@@ -2680,14 +2604,12 @@ CPSourceFileRef,&
     molecule_set => molecules%els
 
     ! Allocate work storage for positions and velocities
-    ALLOCATE (pos(3,nparticle),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE (vel(3,nparticle),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (pos(3,nparticle))
+    ALLOCATE (vel(3,nparticle))
     vel(:,:) = 0.0_dp
 
     IF (simpar%constraint) CALL getold(gci, local_molecules, molecule_set,  &
-         molecule_kind_set, particle_set, cell, error)
+         molecule_kind_set, particle_set, cell)
 
     ! Multiple time step (first part)
     DO iparticle_kind=1,nparticle_kind
@@ -2723,25 +2645,25 @@ CPSourceFileRef,&
        IF (simpar%constraint) THEN
           ! Possibly update the target values
           CALL shake_update_targets(gci, local_molecules, molecule_set, &
-              molecule_kind_set, dt, force_env%root_section, error)
+              molecule_kind_set, dt, force_env%root_section)
 
           CALL shake_control( gci, local_molecules, molecule_set,&
               molecule_kind_set, particle_set,pos, vel, dt, simpar%shake_tol,&
               simpar%info_constraint, simpar%lagrange_multipliers,simpar%dump_lm, cell,&
-              para_env%group, local_particles, error )
+              para_env%group, local_particles)
        END IF
 
        ! Broadcast the new particle positions
-       CALL update_particle_set ( particle_set, para_env%group, pos = pos, error=error)
+       CALL update_particle_set ( particle_set, para_env%group, pos = pos)
        DO iparticle = 1, SIZE(particle_set)
           particle_set_respa(iparticle)%r = particle_set(iparticle)%r
        END DO
 
        ! Update forces
-       CALL force_env_calc_energy_force(force_env%sub_force_env(1)%force_env,error=error)
+       CALL force_env_calc_energy_force(force_env%sub_force_env(1)%force_env)
 
        ! Metadynamics
-       CALL metadyn_integrator(force_env, itimes, vel, error=error)
+       CALL metadyn_integrator(force_env, itimes, vel)
 
        ! Velocity Verlet (second part)
        DO iparticle_kind=1,nparticle_kind
@@ -2760,19 +2682,18 @@ CPSourceFileRef,&
        IF (simpar%constraint) CALL rattle_control( gci,local_molecules, molecule_set, &
             molecule_kind_set, particle_set, vel, dt,simpar%shake_tol,&
             simpar%info_constraint, simpar%lagrange_multipliers,&
-            simpar%dump_lm, cell, para_env%group,local_particles, error )
+            simpar%dump_lm, cell, para_env%group,local_particles)
 
        IF (simpar%annealing)  vel(:,:)=vel(:,:)*simpar%f_annealing
     END DO
-    DEALLOCATE (pos,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE (pos)
 
     ! Multiple time step (second part)
     ! Compute forces for respa force_env
-    CALL force_env_calc_energy_force(force_env,error=error)
+    CALL force_env_calc_energy_force(force_env)
 
     ! Metadynamics
-    CALL metadyn_integrator(force_env, itimes, vel, error=error)
+    CALL metadyn_integrator(force_env, itimes, vel)
 
     DO iparticle_kind=1,nparticle_kind
        atomic_kind => atomic_kind_set(iparticle_kind)
@@ -2788,10 +2709,9 @@ CPSourceFileRef,&
     END DO
 
     ! Broadcast the new particle velocities
-    CALL update_particle_set ( particle_set, para_env%group, vel = vel, error=error)
+    CALL update_particle_set ( particle_set, para_env%group, vel = vel)
 
-    DEALLOCATE (vel,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE (vel)
 
   END SUBROUTINE nve_respa
 

@@ -21,13 +21,13 @@ MODULE dm_ls_scf_types
   USE input_section_types,             ONLY: section_vals_release,&
                                              section_vals_type
   USE kinds,                           ONLY: dp
+  USE pao_types,                       ONLY: pao_env_type
   USE pexsi_types,                     ONLY: lib_pexsi_env,&
                                              lib_pexsi_finalize
   USE qs_density_mixing_types,         ONLY: mixing_storage_release,&
                                              mixing_storage_type
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -42,6 +42,8 @@ MODULE dm_ls_scf_types
      INTEGER :: cluster_type
      LOGICAL :: single_precision
      INTEGER, DIMENSION(:), ALLOCATABLE :: atom_to_molecule
+     TYPE(cp_dbcsr_type)                :: matrix_A
+     TYPE(cp_dbcsr_type)                :: matrix_B
   END TYPE
 
   TYPE ls_mat_history_type
@@ -140,6 +142,8 @@ MODULE dm_ls_scf_types
      TYPE(lib_pexsi_env) :: pexsi
 
      TYPE(cp_para_env_type), POINTER :: para_env
+     LOGICAL                 :: do_pao = .FALSE.
+     TYPE(pao_env_type)      :: pao_env
   END TYPE ls_scf_env_type
 
   PUBLIC :: ls_scf_release
@@ -149,61 +153,56 @@ CONTAINS
 ! *****************************************************************************
 !> \brief release the LS type.
 !> \param ls_scf_env ...
-!> \param error ...
 !> \par History
 !>       2012.11 created [Joost VandeVondele]
 !> \author Joost VandeVondele
 ! *****************************************************************************
-  SUBROUTINE ls_scf_release(ls_scf_env,error)
+  SUBROUTINE ls_scf_release(ls_scf_env)
     TYPE(ls_scf_env_type), POINTER           :: ls_scf_env
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'ls_scf_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: handle, ispin, istat, istore
-    LOGICAL                                  :: failure
+    INTEGER                                  :: handle, ispin, istore
 
     CALL timeset(routineN,handle)
-    failure=.FALSE.
 
-    CALL cp_para_env_release(ls_scf_env%para_env,error)
+    CALL cp_para_env_release(ls_scf_env%para_env)
 
-    DEALLOCATE(ls_scf_env%ls_mstruct%atom_to_molecule,stat=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(ls_scf_env%ls_mstruct%atom_to_molecule)
 
     ! set up the buffer for the history of matrices
     DO istore=1,MIN(ls_scf_env%scf_history%istore,ls_scf_env%scf_history%nstore)
        DO ispin=1,SIZE(ls_scf_env%scf_history%matrix,1)
-          CALL cp_dbcsr_release(ls_scf_env%scf_history%matrix(ispin,istore),error=error)
+          CALL cp_dbcsr_release(ls_scf_env%scf_history%matrix(ispin,istore))
        ENDDO
     ENDDO
-    DEALLOCATE(ls_scf_env%scf_history%matrix,stat=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(ls_scf_env%scf_history%matrix)
 
     IF (ASSOCIATED(ls_scf_env%chebyshev%print_key_dos)) &
-        CALL section_vals_release(ls_scf_env%chebyshev%print_key_dos,error=error)
+        CALL section_vals_release(ls_scf_env%chebyshev%print_key_dos)
     IF (ASSOCIATED(ls_scf_env%chebyshev%print_key_cube)) &
-        CALL section_vals_release(ls_scf_env%chebyshev%print_key_cube,error=error)
+        CALL section_vals_release(ls_scf_env%chebyshev%print_key_cube)
     IF (ASSOCIATED(ls_scf_env%chebyshev%min_energy)) THEN
-       DEALLOCATE(ls_scf_env%chebyshev%min_energy,stat=istat)
-       CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE(ls_scf_env%chebyshev%min_energy)
     ENDIF
     IF (ASSOCIATED(ls_scf_env%chebyshev%max_energy)) THEN
-       DEALLOCATE(ls_scf_env%chebyshev%max_energy,stat=istat)
-       CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE(ls_scf_env%chebyshev%max_energy)
     ENDIF
 
     IF (ASSOCIATED(ls_scf_env%mixing_store)) THEN
-      CALL mixing_storage_release(ls_scf_env%mixing_store,error)
+      CALL mixing_storage_release(ls_scf_env%mixing_store)
     ENDIF
 
     IF (ls_scf_env%purification_method .EQ. ls_scf_pexsi) THEN
-       CALL lib_pexsi_finalize(ls_scf_env%pexsi, error)
+       CALL lib_pexsi_finalize(ls_scf_env%pexsi)
     ENDIF
 
-    DEALLOCATE(ls_scf_env,stat=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+
+    IF(ls_scf_env%do_pao) &
+       CALL cp_dbcsr_release(ls_scf_env%pao_env%matrix_X)
+
+    DEALLOCATE(ls_scf_env)
 
     CALL timestop(handle)
 

@@ -36,6 +36,7 @@ MODULE ai_moments
                                              indco,&
                                              ncoset
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -1414,8 +1415,8 @@ CONTAINS
     REAL(KIND=dp), DIMENSION(:, :, :), &
       OPTIONAL, POINTER                      :: mab_ext
 
-    INTEGER                                  :: imom, istat, lda, lda_min, &
-                                                ldb, ldb_min, lmax
+    INTEGER                                  :: imom, lda, lda_min, ldb, &
+                                                ldb_min, lmax
     REAL(KIND=dp)                            :: dab, rab(3), rab2
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :, :)                     :: difmab_tmp
@@ -1437,7 +1438,7 @@ CONTAINS
       mab => mab_ext
     ELSE
       ALLOCATE(mab(npgfa*ncoset(la_max+1), npgfb*ncoset(lb_max+1),&
-             ncoset(order)-1),STAT =istat)
+             ncoset(order)-1))
       mab = 0.0_dp
 !     *** Calculate the primitive overlap integrals ***
       CALL moment(la_max+1,npgfa,zeta,rpgfa,lda_min,&
@@ -1485,12 +1486,11 @@ CONTAINS
 !> \param pab ...
 !> \param forcea ...
 !> \param forceb ...
-!> \param error ...
 !> \note
 ! *****************************************************************************
   SUBROUTINE dipole_force(la_max,npgfa,zeta,rpgfa,la_min,&
                     lb_max,npgfb,zetb,rpgfb,lb_min,&
-                    order,rac,rbc,pab,forcea,forceb,error)
+                    order,rac,rbc,pab,forcea,forceb)
 
     INTEGER, INTENT(IN)                      :: la_max, npgfa
     REAL(KIND=dp), DIMENSION(:), INTENT(IN)  :: zeta, rpgfa
@@ -1502,7 +1502,6 @@ CONTAINS
       INTENT(IN)                             :: pab
     REAL(KIND=dp), DIMENSION(:, :), &
       INTENT(INOUT)                          :: forcea, forceb
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'dipole_force', &
       routineP = moduleN//':'//routineN
@@ -1510,13 +1509,11 @@ CONTAINS
     INTEGER                                  :: i, imom, ipgf, j, jpgf, lda, &
                                                 lda_min, ldb, ldb_min, lmax, &
                                                 na, nb
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: dab, rab(3), rab2
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :, :)                     :: difmab, mab
 
-    failure = .FALSE.
-    CPPrecondition(order==1,cp_failure_level,routineP,error,failure)
+    CPASSERT(order==1)
 
     rab = rbc - rac
     rab2= SUM( rab**2 )

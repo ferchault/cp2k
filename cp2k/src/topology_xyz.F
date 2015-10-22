@@ -20,12 +20,10 @@ MODULE topology_xyz
   USE string_table,                    ONLY: id2str,&
                                              s2s,&
                                              str2id
-  USE termination,                     ONLY: stop_program
-  USE timings,                         ONLY: timeset,&
-                                             timestop
   USE topology_types,                  ONLY: atom_info_type,&
                                              topology_parameters_type
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -41,21 +39,19 @@ CONTAINS
 !> \param topology ...
 !> \param para_env ...
 !> \param subsys_section ...
-!> \param error ...
 !> \author Teodoro Laino
 ! *****************************************************************************
-  SUBROUTINE read_coordinate_xyz (topology,para_env,subsys_section,error)
+  SUBROUTINE read_coordinate_xyz (topology,para_env,subsys_section)
     TYPE(topology_parameters_type)           :: topology
     TYPE(cp_para_env_type), POINTER          :: para_env
     TYPE(section_vals_type), POINTER         :: subsys_section
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'read_coordinate_xyz', &
       routineP = moduleN//':'//routineN
 
     CHARACTER(LEN=default_string_length)     :: my_default_index, strtmp
     INTEGER                                  :: frame, handle, iw, j, natom
-    LOGICAL                                  :: failure, my_end
+    LOGICAL                                  :: my_end
     TYPE(atom_info_type), POINTER            :: atom_info
     TYPE(cp_logger_type), POINTER            :: logger
     TYPE(cp_parser_type), POINTER            :: parser
@@ -63,10 +59,9 @@ CONTAINS
     CALL timeset(routineN,handle)
 
     NULLIFY (parser,logger)
-    failure = .FALSE.
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
     iw = cp_print_key_unit_nr(logger,subsys_section,"PRINT%TOPOLOGY_INFO/XYZ_INFO",&
-                              extension=".subsysLog",error=error)
+                              extension=".subsysLog")
 
     atom_info => topology%atom_info
 
@@ -76,17 +71,17 @@ CONTAINS
     END IF
 
     CALL parser_create(parser,topology%coord_file_name, para_env=para_env,&
-                       parse_white_lines=.TRUE.,error=error)
+                       parse_white_lines=.TRUE.)
 
     ! Element is assigned on the basis of the atm_name
     topology%aa_element = .TRUE.
 
     natom = 0
     frame = 0
-    CALL parser_get_next_line(parser,1,error=error)
+    CALL parser_get_next_line(parser,1)
     Frames: DO
        ! Atom numbers
-       CALL parser_get_object(parser,natom,error=error)
+       CALL parser_get_object(parser,natom)
        frame = frame + 1
        IF (frame == 1) THEN
           CALL reallocate(atom_info%id_molname,1,natom)
@@ -100,11 +95,10 @@ CONTAINS
           CALL reallocate(atom_info%beta,1,natom)
           CALL reallocate(atom_info%id_element,1,natom)
        ELSE IF (natom > SIZE(atom_info%id_atmname)) THEN
-          CALL stop_program (routineN,moduleN,__LINE__,&
-                             "Atom number differs in different frames!")
+          CPABORT("Atom number differs in different frames!")
        END IF
        ! Dummy line
-       CALL parser_get_next_line(parser,2,error=error)
+       CALL parser_get_next_line(parser,2)
        DO j=1,natom
           ! Atom coordinates
           READ (parser%input_line,*) strtmp,&
@@ -128,25 +122,24 @@ CONTAINS
                atom_info%r(3,j),&
                ADJUSTL(TRIM(id2str(atom_info%id_molname(j))))
           END IF
-          atom_info%r(1,j) = cp_unit_to_cp2k(atom_info%r(1,j),"angstrom",error=error)
-          atom_info%r(2,j) = cp_unit_to_cp2k(atom_info%r(2,j),"angstrom",error=error)
-          atom_info%r(3,j) = cp_unit_to_cp2k(atom_info%r(3,j),"angstrom",error=error)
+          atom_info%r(1,j) = cp_unit_to_cp2k(atom_info%r(1,j),"angstrom")
+          atom_info%r(2,j) = cp_unit_to_cp2k(atom_info%r(2,j),"angstrom")
+          atom_info%r(3,j) = cp_unit_to_cp2k(atom_info%r(3,j),"angstrom")
           ! If there's a white line or end of file exit.. otherwise read other available
           ! snapshots
-          CALL parser_get_next_line(parser,1,at_end=my_end,error=error)
+          CALL parser_get_next_line(parser,1,at_end=my_end)
           my_end = my_end.OR.(LEN_TRIM(parser%input_line) == 0)
           IF (my_end) THEN
-             CALL cp_assert(j==natom,cp_fatal_level,cp_assertion_failed,routineP,&
-                  "Number of lines in XYZ format not equal to the number of atoms."//&
-                  " Error in XYZ format. Very probably the line with title is missing or is empty."//&
-                  " Please check the XYZ file and rerun your job!"//&
-CPSourceFileRef,&
-                  only_ionode=.TRUE.)
+             IF(j/=natom)&
+                CALL cp_abort(__LOCATION__,&
+                     "Number of lines in XYZ format not equal to the number of atoms."//&
+                     " Error in XYZ format. Very probably the line with title is missing or is empty."//&
+                     " Please check the XYZ file and rerun your job!")
              EXIT Frames
           END IF
        END DO
     END DO Frames
-    CALL parser_release(parser,error=error)
+    CALL parser_release(parser)
 
     IF (iw > 0) THEN
        WRITE (UNIT=iw,FMT="(T2,A)")&
@@ -157,8 +150,7 @@ CPSourceFileRef,&
     topology%molname_generated = .TRUE.
 
     CALL cp_print_key_finished_output(iw,logger,subsys_section,&
-                                      "PRINT%TOPOLOGY_INFO/XYZ_INFO",&
-                                      error=error)
+                                      "PRINT%TOPOLOGY_INFO/XYZ_INFO")
 
     CALL timestop(handle)
 

@@ -46,12 +46,11 @@ MODULE qs_ks_atom
                                              alist_pre_align_blk,&
                                              alist_type,&
                                              get_alist
-  USE timings,                         ONLY: timeset,&
-                                             timestop
   USE util,                            ONLY: get_limit
   USE virial_methods,                  ONLY: virial_pair_force
   USE virial_types,                    ONLY: virial_type
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -76,13 +75,12 @@ CONTAINS
 !> \param forces switch for the calculation of the forces on atoms
 !> \param tddft switch for TDDFT linear response
 !> \param p_env perturbation theory environment
-!> \param error cp_error_type
 !> \par History
 !>      created [MI]
 !>      the loop over the spins is done internally [03-05,MI]
 !>      Rewrite using new OCE matrices [08.02.09, jhu]
 ! *****************************************************************************
-  SUBROUTINE update_ks_atom(qs_env,ksmat,pmat,forces,tddft,p_env,error)
+  SUBROUTINE update_ks_atom(qs_env,ksmat,pmat,forces,tddft,p_env)
 
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(cp_dbcsr_p_type), DIMENSION(:, :), &
@@ -90,21 +88,19 @@ CONTAINS
     LOGICAL, INTENT(IN)                      :: forces
     LOGICAL, INTENT(IN), OPTIONAL            :: tddft
     TYPE(qs_p_env_type), OPTIONAL, POINTER   :: p_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'update_ks_atom', &
       routineP = moduleN//':'//routineN
 
     INTEGER :: bo(2), handle, ia_kind, iac, iat, iatom, ibc, ikind, img, ip, &
-      ispin, istat, ja_kind, jatom, jkind, ka_kind, kac, katom, kbc, kkind, &
-      lC_int, ldCPC, lPC, max_gau, max_nsgf, maxsoc, mepos, n_cont_a, &
-      n_cont_b, nat, natom, nimages, nkind, nsetc, nsgfa, nsgfb, nsoctot, &
-      nspins, num_pe
+      ispin, ja_kind, jatom, jkind, ka_kind, kac, katom, kbc, kkind, lC_int, &
+      ldCPC, lPC, max_gau, max_nsgf, maxsoc, mepos, n_cont_a, n_cont_b, nat, &
+      natom, nimages, nkind, nsetc, nsgfa, nsgfb, nsoctot, nspins, num_pe
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: atom_of_kind
     INTEGER, DIMENSION(3)                    :: cell_b
     INTEGER, DIMENSION(:), POINTER           :: atom_list, list_a, list_b
     INTEGER, DIMENSION(:, :, :), POINTER     :: cell_to_index
-    LOGICAL                                  :: dista, distb, failure, found, &
+    LOGICAL                                  :: dista, distb, found, &
                                                 my_tddft, paw_atom, use_virial
     REAL(dp), ALLOCATABLE, DIMENSION(:, :)   :: a_matrix, p_matrix
     REAL(dp), DIMENSION(3)                   :: rac, rbc
@@ -144,8 +140,6 @@ CONTAINS
     TYPE(rho_atom_type), POINTER             :: rho_at
     TYPE(virial_type), POINTER               :: virial
 
-    failure = .FALSE.
-
     CALL timeset(routineN,handle)
 
     NULLIFY(qs_kind_set,atomic_kind_set,force,oce,para_env,rho_atom,sab_orb)
@@ -160,8 +154,7 @@ CONTAINS
            rho_atom_set=rho_atom,&
            virial=virial,&
            sab_orb=sab_orb,&
-           dft_control=dft_control,&
-           error=error)
+           dft_control=dft_control)
 
     nspins = dft_control%nspins
     nimages = dft_control%nimages
@@ -171,14 +164,14 @@ CONTAINS
     factor = 1.0_dp
     IF (my_tddft) THEN
        IF (nspins == 1) factor = 2.0_dp
-       CPPostcondition(nimages==1,cp_failure_level,routineP,error,failure)
+       CPASSERT(nimages==1)
     END IF
 
     ! kpoint images
     NULLIFY(cell_to_index)
     IF (nimages>1) THEN
-       CALL get_qs_env(qs_env=qs_env,kpoints=kpoints,error=error)
-       CALL get_kpoint_info(kpoint=kpoints,cell_to_index=cell_to_index,error=error)
+       CALL get_qs_env(qs_env=qs_env,kpoints=kpoints)
+       CALL get_kpoint_info(kpoint=kpoints,cell_to_index=cell_to_index)
     END IF
 
     IF (my_tddft) THEN
@@ -191,29 +184,22 @@ CONTAINS
     CALL get_qs_kind_set(qs_kind_set,maxsgf=max_nsgf,maxgtops=max_gau)
 
     ALLOCATE (C_int_h(max_gau*max_nsgf),C_int_s(max_gau*max_nsgf),coc(max_gau*max_gau),&
-              a_matrix(max_gau,max_gau),p_matrix(max_nsgf,max_nsgf),STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+              a_matrix(max_gau,max_gau),p_matrix(max_nsgf,max_nsgf))
 
     lC_int = max_gau
-    ALLOCATE(mat_h(nspins),mat_p(nspins), STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(mat_h(nspins),mat_p(nspins))
     DO ispin = 1,nspins
       NULLIFY(mat_h(ispin)%array,mat_p(ispin)%array)
     END DO
 
     IF(forces) THEN
-      ALLOCATE (atom_of_kind(natom),STAT=istat)
-      CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE (atom_of_kind(natom))
       CALL get_atomic_kind_set(atomic_kind_set, atom_of_kind=atom_of_kind)
-      ALLOCATE(dCPC_h(max_gau,max_gau),STAT=istat)
-      CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
-      ALLOCATE(dCPC_s(max_gau,max_gau),STAT=istat)
-      CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(dCPC_h(max_gau,max_gau))
+      ALLOCATE(dCPC_s(max_gau,max_gau))
       ldCPC = max_gau
-      ALLOCATE(PC_h(max_nsgf,max_gau,nspins),STAT=istat)
-      CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
-      ALLOCATE(PC_s(max_nsgf,max_gau,nspins),STAT=istat)
-      CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(PC_h(max_nsgf,max_gau,nspins))
+      ALLOCATE(PC_s(max_nsgf,max_gau,nspins))
       lPC = max_nsgf
       use_virial = virial%pv_availability.AND.(.NOT.virial%pv_numer)
     END IF
@@ -233,9 +219,9 @@ CONTAINS
             iatom = atom_list(iat)
             DO ispin = 1,nspins
               CALL prj_gather(rho_atom(iatom)%ga_Vlocal_gb_h(ispin)%r_coef,&
-                              rho_atom(iatom)%cpc_h(ispin)%r_coef,qs_kind_set(ikind),error)
+                              rho_atom(iatom)%cpc_h(ispin)%r_coef,qs_kind_set(ikind))
               CALL prj_gather(rho_atom(iatom)%ga_Vlocal_gb_s(ispin)%r_coef,&
-                              rho_atom(iatom)%cpc_s(ispin)%r_coef,qs_kind_set(ikind),error)
+                              rho_atom(iatom)%cpc_s(ispin)%r_coef,qs_kind_set(ikind))
             END DO
          END DO
          ! broadcast the CPC arrays to all processors (replicated data)
@@ -252,10 +238,9 @@ CONTAINS
        END IF
     END DO
 
-    ALLOCATE (basis_set_list(nkind),STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (basis_set_list(nkind))
     DO ikind=1,nkind
-      CALL get_qs_kind(qs_kind_set(ikind),orb_basis_set=basis_set_a)
+      CALL get_qs_kind(qs_kind_set(ikind),basis_set=basis_set_a)
       IF (ASSOCIATED(basis_set_a)) THEN
         basis_set_list(ikind)%gto_basis_set => basis_set_a
       ELSE
@@ -274,7 +259,7 @@ CONTAINS
 
        IF(nimages>1) THEN
           img = cell_to_index(cell_b(1),cell_b(2),cell_b(3))
-          CPPostcondition(img > 0,cp_failure_level,routineP,error,failure)
+          CPASSERT(img > 0)
        ELSE
           img = 1
        END IF
@@ -301,7 +286,7 @@ CONTAINS
        END DO
 
        DO kkind=1,nkind
-         CALL get_qs_kind(qs_kind_set(kkind), orb_basis_set=orb_basis, paw_atom=paw_atom)
+         CALL get_qs_kind(qs_kind_set(kkind), basis_set=orb_basis, paw_atom=paw_atom)
 
          IF(.NOT. paw_atom)  CYCLE
 
@@ -312,8 +297,8 @@ CONTAINS
 
          IF (.NOT.ASSOCIATED(oce%intac(iac)%alist)) CYCLE
          IF (.NOT.ASSOCIATED(oce%intac(ibc)%alist)) CYCLE
-         CALL get_alist(oce%intac(iac), alist_ac, iatom, error)
-         CALL get_alist(oce%intac(ibc), alist_bc, jatom, error)
+         CALL get_alist(oce%intac(iac), alist_ac, iatom)
+         CALL get_alist(oce%intac(ibc), alist_bc, jatom)
          IF (.NOT.ASSOCIATED(alist_ac)) CYCLE
          IF (.NOT.ASSOCIATED(alist_bc)) CYCLE
 
@@ -354,7 +339,7 @@ CONTAINS
 
                CALL add_vhxca_to_ks(mat_h,C_coeff_hh_a,C_coeff_hh_b,C_coeff_ss_a,C_coeff_ss_b,&
                     rho_at,nspins,iatom,jatom,nsoctot,factor,&
-                    list_a,n_cont_a,list_b,n_cont_b,C_int_h,C_int_s,a_matrix,dista,distb,coc,error)
+                    list_a,n_cont_a,list_b,n_cont_b,C_int_h,C_int_s,a_matrix,dista,distb,coc)
 
                IF(forces)THEN
                  ia_kind = atom_of_kind(iatom)
@@ -365,7 +350,7 @@ CONTAINS
                  IF(iatom <= jatom) THEN
                     CALL add_vhxca_forces(mat_p,C_coeff_hh_a,C_coeff_hh_b,C_coeff_ss_a,C_coeff_ss_b,&
                          rho_at,force_tmp,nspins,iatom,jatom,nsoctot,&
-                         list_a,n_cont_a,list_b,n_cont_b,dCPC_h,dCPC_s,ldCPC,PC_h,PC_s,p_matrix,error)
+                         list_a,n_cont_a,list_b,n_cont_b,dCPC_h,dCPC_s,ldCPC,PC_h,PC_s,p_matrix)
 
                     force(kkind)%vhxc_atom(1:3,ka_kind) = &
                                       force(kkind)%vhxc_atom(1:3,ka_kind) + &
@@ -379,13 +364,13 @@ CONTAINS
                     IF (use_virial) THEN
                        rac = alist_ac%clist(kac)%rac
                        rbc = alist_bc%clist(kbc)%rac
-                       CALL virial_pair_force(virial%pv_virial,1._dp,force_tmp(1:3,1),rac,error)
-                       CALL virial_pair_force(virial%pv_virial,1._dp,force_tmp(1:3,2),rbc,error)
+                       CALL virial_pair_force(virial%pv_virial,1._dp,force_tmp(1:3,1),rac)
+                       CALL virial_pair_force(virial%pv_virial,1._dp,force_tmp(1:3,2),rbc)
                     END IF
                  ELSE
                     CALL add_vhxca_forces(mat_p,C_coeff_hh_b,C_coeff_hh_a,C_coeff_ss_b,C_coeff_ss_a,&
                          rho_at,force_tmp,nspins,jatom,iatom,nsoctot,&
-                         list_b,n_cont_b,list_a,n_cont_a,dCPC_h,dCPC_s,ldCPC,PC_h,PC_s,p_matrix,error)
+                         list_b,n_cont_b,list_a,n_cont_a,dCPC_h,dCPC_s,ldCPC,PC_h,PC_s,p_matrix)
 
                     force(kkind)%vhxc_atom(1:3,ka_kind) = &
                                       force(kkind)%vhxc_atom(1:3,ka_kind) + &
@@ -399,8 +384,8 @@ CONTAINS
                     IF (use_virial) THEN
                        rac = alist_ac%clist(kac)%rac
                        rbc = alist_bc%clist(kbc)%rac
-                       CALL virial_pair_force(virial%pv_virial,1._dp,force_tmp(1:3,2),rac,error)
-                       CALL virial_pair_force(virial%pv_virial,1._dp,force_tmp(1:3,1),rbc,error)
+                       CALL virial_pair_force(virial%pv_virial,1._dp,force_tmp(1:3,2),rac)
+                       CALL virial_pair_force(virial%pv_virial,1._dp,force_tmp(1:3,1),rbc)
                     END IF
                  END IF
                END IF
@@ -417,16 +402,12 @@ CONTAINS
       NULLIFY(mat_h(ispin)%array,mat_p(ispin)%array)
     END DO
 
-    DEALLOCATE(basis_set_list,STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
-    DEALLOCATE(mat_h,mat_p,C_int_h,C_int_s,a_matrix,p_matrix,coc,STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(basis_set_list)
+    DEALLOCATE(mat_h,mat_p,C_int_h,C_int_s,a_matrix,p_matrix,coc)
 
     IF(forces) THEN
-       DEALLOCATE (atom_of_kind,STAT=istat)
-       CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
-       DEALLOCATE(DCPC_h,dCPC_s,PC_h,PC_s,STAT=istat)
-       CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE (atom_of_kind)
+       DEALLOCATE(DCPC_h,dCPC_s,PC_h,PC_s)
     END IF
 
     CALL timestop(handle)
@@ -456,11 +437,10 @@ CONTAINS
 !> \param dista ...
 !> \param distb ...
 !> \param coc ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE add_vhxca_to_ks(mat_h,C_hh_a,C_hh_b,C_ss_a,C_ss_b,&
              rho_atom,nspins,ia,ja,nsp,factor,lista,nconta,listb,ncontb,&
-             C_int_h,C_int_s,a_matrix,dista,distb,coc,error)
+             C_int_h,C_int_s,a_matrix,dista,distb,coc)
 
     TYPE(cp_2d_r_p_type), DIMENSION(:), &
       POINTER                                :: mat_h
@@ -476,7 +456,6 @@ CONTAINS
     REAL(dp), DIMENSION(:, :)                :: a_matrix
     LOGICAL, INTENT(IN)                      :: dista, distb
     REAL(dp), DIMENSION(:)                   :: coc
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'add_vhxca_to_ks', &
       routineP = moduleN//':'//routineN
@@ -610,11 +589,10 @@ CONTAINS
 !> \param PC_h ...
 !> \param PC_s ...
 !> \param p_matrix ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE add_vhxca_forces(mat_p,C_hh_a,C_hh_b,C_ss_a,C_ss_b,&
              rho_atom,force,nspins,ia,ja,nsp,lista,nconta,listb,ncontb,&
-             dCPC_h,dCPC_s,ldCPC,PC_h,PC_s,p_matrix,error)
+             dCPC_h,dCPC_s,ldCPC,PC_h,PC_s,p_matrix)
 
     TYPE(cp_2d_r_p_type), DIMENSION(:), &
       POINTER                                :: mat_p
@@ -630,7 +608,6 @@ CONTAINS
     INTEGER, INTENT(IN)                      :: ldCPC
     REAL(KIND=dp), DIMENSION(:, :, :)        :: PC_h, PC_s
     REAL(KIND=dp), DIMENSION(:, :)           :: p_matrix
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'add_vhxca_forces', &
       routineP = moduleN//':'//routineN

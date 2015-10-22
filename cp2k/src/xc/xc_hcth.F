@@ -20,6 +20,7 @@ MODULE xc_hcth
   USE xc_rho_set_types,                ONLY: xc_rho_set_get,&
                                              xc_rho_set_type
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -38,17 +39,14 @@ CONTAINS
 !> \param needs the components needed by this functional are set to
 !>        true (does not set the unneeded components to false)
 !> \param max_deriv ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author fawzi
 ! *****************************************************************************
-  SUBROUTINE hcth_lda_info(iparset,reference,shortform, needs, max_deriv, error)
+  SUBROUTINE hcth_lda_info(iparset,reference,shortform, needs, max_deriv)
     INTEGER, INTENT(in)                      :: iparset
     CHARACTER(LEN=*), INTENT(OUT), OPTIONAL  :: reference, shortform
     TYPE(xc_rho_cflags_type), &
       INTENT(inout), OPTIONAL                :: needs
     INTEGER, INTENT(out), OPTIONAL           :: max_deriv
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'hcth_lda_info', &
       routineP = moduleN//':'//routineN
@@ -87,9 +85,7 @@ CONTAINS
           shortform = "HCTH/407 xc energy functional (LDA)"
        END IF
     CASE default
-       CALL cp_assert(.FALSE.,cp_failure_level,cp_assertion_failed,routineP,&
-            "Invalid HCTH parameter set requested ("//cp_to_string(iparset)//")",&
-            error)
+       CPABORT("Invalid HCTH parameter set requested ("//cp_to_string(iparset)//")")
     END SELECT
     IF (PRESENT(needs)) THEN
        needs%rho=.TRUE.
@@ -108,62 +104,53 @@ CONTAINS
 !> \param grad_deriv degree of the derivative that should be evalated,
 !>        if positive all the derivatives up to the given degree are evaluated,
 !>        if negative only the given degree is calculated
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author fawzi
 ! *****************************************************************************
-  SUBROUTINE hcth_lda_eval(iparset,rho_set,deriv_set,grad_deriv,error)
+  SUBROUTINE hcth_lda_eval(iparset,rho_set,deriv_set,grad_deriv)
     INTEGER, INTENT(in)                      :: iparset
     TYPE(xc_rho_set_type), POINTER           :: rho_set
     TYPE(xc_derivative_set_type), POINTER    :: deriv_set
     INTEGER, INTENT(in)                      :: grad_deriv
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'hcth_lda_eval', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: npoints
     INTEGER, DIMENSION(:, :), POINTER        :: bo
-    LOGICAL                                  :: failure
     REAL(kind=dp)                            :: epsilon_rho
     REAL(kind=dp), DIMENSION(:, :, :), &
       POINTER                                :: e_0, e_ndrho, e_rho, &
                                                 norm_drho, rho
     TYPE(xc_derivative_type), POINTER        :: deriv
 
-    failure=.FALSE.
     NULLIFY(bo,e_0, e_ndrho, e_rho, norm_drho, rho)
 
-    CPPrecondition(ASSOCIATED(rho_set),cp_failure_level,routineP,error,failure)
-    CPPrecondition(rho_set%ref_count>0,cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(deriv_set),cp_failure_level,routineP,error,failure)
-    CPPrecondition(deriv_set%ref_count>0,cp_failure_level,routineP,error,failure)
-    IF (.NOT. failure) THEN
-       CALL xc_rho_set_get(rho_set,rho=rho,&
-            norm_drho=norm_drho,local_bounds=bo,rho_cutoff=epsilon_rho,error=error)
-       npoints=(bo(2,1)-bo(1,1)+1)*(bo(2,2)-bo(1,2)+1)*(bo(2,3)-bo(1,3)+1)
+    CPASSERT(ASSOCIATED(rho_set))
+    CPASSERT(rho_set%ref_count>0)
+    CPASSERT(ASSOCIATED(deriv_set))
+    CPASSERT(deriv_set%ref_count>0)
+    CALL xc_rho_set_get(rho_set,rho=rho,&
+         norm_drho=norm_drho,local_bounds=bo,rho_cutoff=epsilon_rho)
+    npoints=(bo(2,1)-bo(1,1)+1)*(bo(2,2)-bo(1,2)+1)*(bo(2,3)-bo(1,3)+1)
 
-       IF (grad_deriv>=0) THEN
-          deriv => xc_dset_get_derivative(deriv_set,"",&
-               allocate_deriv=.TRUE., error=error)
-          CALL xc_derivative_get(deriv,deriv_data=e_0,error=error)
-       END IF
-       deriv => xc_dset_get_derivative(deriv_set,"(rho)",&
-            allocate_deriv=.TRUE.,error=error)
-       CALL xc_derivative_get(deriv,deriv_data=e_rho,error=error)
-       deriv => xc_dset_get_derivative(deriv_set,"(norm_drho)",&
-            allocate_deriv=.TRUE.,error=error)
-       CALL xc_derivative_get(deriv,deriv_data=e_ndrho,error=error)
-       IF (grad_deriv>1.OR.grad_deriv<-1) THEN
-          CALL cp_unimplemented_error(fromWhere=routineP, &
-               message="derivatives bigger than 1 not implemented", &
-               error=error, error_level=cp_failure_level)
-       END IF
-
-       CALL hcth_lda_calc(iparset=iparset,rho=rho, norm_drho=norm_drho,&
-            e_0=e_0,e_rho=e_rho,e_ndrho=e_ndrho,&
-            npoints=npoints,epsilon_rho=epsilon_rho,error=error)
+    IF (grad_deriv>=0) THEN
+       deriv => xc_dset_get_derivative(deriv_set,"",&
+            allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=e_0)
     END IF
+    deriv => xc_dset_get_derivative(deriv_set,"(rho)",&
+         allocate_deriv=.TRUE.)
+    CALL xc_derivative_get(deriv,deriv_data=e_rho)
+    deriv => xc_dset_get_derivative(deriv_set,"(norm_drho)",&
+         allocate_deriv=.TRUE.)
+    CALL xc_derivative_get(deriv,deriv_data=e_ndrho)
+    IF (grad_deriv>1.OR.grad_deriv<-1) THEN
+       CPABORT("derivatives bigger than 1 not implemented")
+    END IF
+
+    CALL hcth_lda_calc(iparset=iparset,rho=rho, norm_drho=norm_drho,&
+         e_0=e_0,e_rho=e_rho,e_ndrho=e_ndrho,&
+         npoints=npoints,epsilon_rho=epsilon_rho)
   END SUBROUTINE hcth_lda_eval
 
 ! *****************************************************************************
@@ -178,8 +165,6 @@ CONTAINS
 !> \param e_ndrho the derivative of the functional wrt. norm_drho
 !> \param epsilon_rho the cutoff on rho
 !> \param npoints ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author fawzi (copying from the routine of Matthias Krack in functionals.F)
 !> \note
 !>     Literature:- F. A. Hamprecht, A. J. Cohen, D. J. Tozer, and N. C. Handy,
@@ -192,14 +177,13 @@ CONTAINS
 !>                  Phys. Rev. B 45, 13244 (1992) -> PW92
 ! *****************************************************************************
   SUBROUTINE hcth_lda_calc(iparset,rho,norm_drho,e_0,e_rho,e_ndrho,&
-       epsilon_rho,npoints,error)
+       epsilon_rho,npoints)
     INTEGER, INTENT(IN)                      :: iparset
     REAL(KIND=dp), DIMENSION(*), INTENT(IN)  :: rho, norm_drho
     REAL(KIND=dp), DIMENSION(*), &
       INTENT(INOUT)                          :: e_0, e_rho, e_ndrho
     REAL(kind=dp), INTENT(in)                :: epsilon_rho
     INTEGER, INTENT(IN)                      :: npoints
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'hcth_lda_calc', &
       routineP = moduleN//':'//routineN
@@ -212,7 +196,6 @@ CONTAINS
       gamma_css = 0.200_dp, gamma_xss = 0.004_dp
 
     INTEGER                                  :: ii
-    LOGICAL                                  :: failure
     REAL(KIND=dp) :: cx_vwn_e, cx_vwn_v, dgcabddrho, dgcabdrho, dgcabds, &
       dgcssddrho, dgcssdrho, dgcssds, dgdrs, dgxssddrho, dgxssdrho, dgxssds, &
       drho, drhos, drsdrho, ecab, ecss, exss, g, gcab, gcss, gs2, gxss, &
@@ -220,7 +203,6 @@ CONTAINS
       s2, two13, u, vcab, vcss, vxss, x, y
     REAL(KIND=dp), DIMENSION(0:4)            :: ccab, ccss, cxss
 
-    failure=.FALSE.
     cx_vwn_e = -0.75_dp*(3.0_dp/pi)**f13
     cx_vwn_v = f43*cx_vwn_e
     rsfac = (f43*pi)**(-f13)
@@ -297,9 +279,7 @@ CONTAINS
        ccss(4) =  0.624798E+01_dp
        ccab(4) = -0.420052E+02_dp
     CASE DEFAULT
-       CALL cp_assert(.FALSE.,cp_failure_level,cp_assertion_failed,routineP,&
-            "Invalid HCTH parameter set requested ("//cp_to_string(iparset)//")",&
-            error)
+       CPABORT("Invalid HCTH parameter set requested ("//cp_to_string(iparset)//")")
     END SELECT
 
     !$omp parallel do default(none) shared(rho,norm_drho,cxss,ccss,&

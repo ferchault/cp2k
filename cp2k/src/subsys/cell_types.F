@@ -19,8 +19,8 @@ MODULE cell_types
   USE mathlib,                         ONLY: angle,&
                                              det_3x3,&
                                              inv_3x3
-  USE termination,                     ONLY: stop_program
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -76,9 +76,6 @@ MODULE cell_types
             cell_create, cell_retain, cell_release,&
             cell_clone, cell_copy, parse_cell_line, set_cell_param
 
-#if defined (__PLUMED_CP2K)
-#endif
-
 #if defined (__PLUMED_CP2K) || defined (__PLUMED2)
   PUBLIC :: pbc_cp2k_plumed_getset_cell
 #endif
@@ -96,21 +93,16 @@ CONTAINS
 !> \brief ...
 !> \param cell_in ...
 !> \param cell_out ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE cell_clone (cell_in, cell_out, error)
+  SUBROUTINE cell_clone (cell_in, cell_out)
 
     TYPE(cell_type), POINTER                 :: cell_in, cell_out
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cell_clone', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    CPPrecondition(ASSOCIATED(cell_in),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(cell_out),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(cell_in))
+    CPASSERT(ASSOCIATED(cell_out))
 
     cell_out%deth         = cell_in%deth
     cell_out%perd         = cell_in%perd
@@ -128,21 +120,16 @@ CONTAINS
 !> \brief ...
 !> \param cell_in ...
 !> \param cell_out ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE cell_copy (cell_in, cell_out, error)
+  SUBROUTINE cell_copy (cell_in, cell_out)
 
     TYPE(cell_type), POINTER                 :: cell_in, cell_out
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cell_copy', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    CPPrecondition(ASSOCIATED(cell_in),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(cell_out),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(cell_in))
+    CPASSERT(ASSOCIATED(cell_out))
 
     cell_out%deth         = cell_in%deth
     cell_out%perd         = cell_in%perd
@@ -160,32 +147,28 @@ CONTAINS
 !> \param cell_time ...
 !> \param h ...
 !> \param vol ...
-!> \param error ...
 !> \date    19.02.2008
 !> \author  Teodoro Laino [tlaino] - University of Zurich
 !> \version 1.0
 ! *****************************************************************************
-  SUBROUTINE parse_cell_line(input_line, cell_itimes, cell_time, h, vol, error)
+  SUBROUTINE parse_cell_line(input_line, cell_itimes, cell_time, h, vol)
     CHARACTER(LEN=*), INTENT(IN)             :: input_line
     INTEGER, INTENT(OUT)                     :: cell_itimes
     REAL(KIND=dp), INTENT(OUT)               :: cell_time
     REAL(KIND=dp), DIMENSION(3, 3), &
       INTENT(OUT)                            :: h
     REAL(KIND=dp), INTENT(OUT)               :: vol
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'parse_cell_line', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: i, j
-    LOGICAL                                  :: failure
 
-    failure = .FALSE.
     READ (input_line,*) cell_itimes, cell_time,&
          h(1,1),h(2,1),h(3,1), h(1,2),h(2,2),h(3,2), h(1,3),h(2,3),h(3,3),vol
     DO i = 1, 3
        DO j = 1, 3
-          h(j,i) = cp_unit_to_cp2k(h(j,i), "angstrom", error=error)
+          h(j,i) = cp_unit_to_cp2k(h(j,i), "angstrom")
        END DO
     END DO
 
@@ -260,13 +243,11 @@ CONTAINS
 !> \param cell_angle ...
 !> \param units_angle ...
 !> \param periodic ...
-!> \param error ...
 !> \date    04.04.2002
 !> \author  Matthias Krack
 !> \version 1.0
 ! *****************************************************************************
-  SUBROUTINE get_cell_param(cell,cell_length,cell_angle,units_angle,periodic,&
-                            error)
+  SUBROUTINE get_cell_param(cell,cell_length,cell_angle,units_angle,periodic)
 
     TYPE(cell_type), POINTER                 :: cell
     REAL(KIND=dp), DIMENSION(3), INTENT(OUT) :: cell_length
@@ -275,7 +256,6 @@ CONTAINS
     INTEGER, INTENT(IN), OPTIONAL            :: units_angle
     INTEGER, DIMENSION(3), INTENT(OUT), &
       OPTIONAL                               :: periodic
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'get_cell_param', &
       routineP = moduleN//':'//routineN
@@ -306,29 +286,24 @@ CONTAINS
 !> \param cell_angle ...
 !> \param periodic ...
 !> \param do_init_cell ...
-!> \param error ...
 !> \date    03.2008
 !> \author  Teodoro Laino
 ! *****************************************************************************
-  SUBROUTINE set_cell_param(cell,cell_length,cell_angle,periodic,do_init_cell,&
-                            error)
+  SUBROUTINE set_cell_param(cell,cell_length,cell_angle,periodic,do_init_cell)
 
     TYPE(cell_type), POINTER                 :: cell
     REAL(KIND=dp), DIMENSION(3), INTENT(IN)  :: cell_length, cell_angle
     INTEGER, DIMENSION(3), INTENT(IN), &
       OPTIONAL                               :: periodic
     LOGICAL, INTENT(IN)                      :: do_init_cell
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'set_cell_param', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: cos_alpha, cos_beta, &
                                                 cos_gamma, eps, sin_gamma
 
-    failure = .FALSE.
-    CPPrecondition(ALL(cell_angle/=0.0_dp),cp_failure_level,routineP,error,failure)
+    CPASSERT(ALL(cell_angle/=0.0_dp))
     eps = EPSILON(0.0_dp)
     cos_gamma = COS(cell_angle(3)); IF (ABS(cos_gamma)<eps) cos_gamma = 0.0_dp
     IF (ABS(ABS(cos_gamma)-1.0_dp)<eps) cos_gamma = SIGN(1.0_dp,cos_gamma)
@@ -391,9 +366,9 @@ CONTAINS
     cell%deth = ABS(det_3x3(cell%hmat))
 
     IF (cell%deth < 1.0E-10_dp) THEN
-       CALL stop_program(routineN,moduleN,__LINE__,&
-                         "An invalid set of cell vectors was specified. "//&
-                         "The determinant det(h) is too small")
+       CALL cp_abort(__LOCATION__,&
+            "An invalid set of cell vectors was specified. "//&
+            "The determinant det(h) is too small")
     END IF
     cell%h_inv = inv_3x3(cell%hmat)
 
@@ -485,8 +460,7 @@ CONTAINS
 
     dim = COUNT(cell%perd == 1)
     IF ((dim == 1).AND.(.NOT.cell%orthorhombic)) THEN
-       CALL stop_program(routineN,moduleN,__LINE__,&
-                         "Non-orthorhombic and not periodic")
+       CPABORT("Non-orthorhombic and not periodic")
     END IF
 
   END SUBROUTINE init_cell
@@ -783,32 +757,23 @@ CONTAINS
 !> \param cell the cell to initialize
 !> \param hmat the h matrix that defines the cell
 !> \param periodic periodicity of the cell
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      09.2003 created [fawzi]
 !> \author Fawzi Mohamed
 ! *****************************************************************************
-  SUBROUTINE cell_create(cell,hmat,periodic,error)
+  SUBROUTINE cell_create(cell,hmat,periodic)
 
     TYPE(cell_type), POINTER                 :: cell
     REAL(KIND=dp), DIMENSION(3, 3), &
       INTENT(IN), OPTIONAL                   :: hmat
     INTEGER, DIMENSION(3), INTENT(IN), &
       OPTIONAL                               :: periodic
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cell_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-
-    CPPrecondition(.NOT.ASSOCIATED(cell),cp_failure_level,routineP,error,failure)
-    ALLOCATE (cell,stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    CPASSERT(.NOT.ASSOCIATED(cell))
+    ALLOCATE (cell)
     last_cell_id = last_cell_id + 1
     cell%id_nr = last_cell_id
     cell%ref_count = 1
@@ -820,106 +785,54 @@ CONTAINS
     cell%orthorhombic = .FALSE.
     cell%symmetry_id = cell_sym_none
     IF (.NOT.PRESENT(hmat)) RETURN
-    IF (.NOT.failure) THEN
-       CALL init_cell(cell,hmat,periodic)
-    END IF
+    CALL init_cell(cell,hmat,periodic)
 
   END SUBROUTINE cell_create
 
 ! *****************************************************************************
 !> \brief retains the given cell (see doc/ReferenceCounting.html)
 !> \param cell the cell to retain
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      09.2003 created [fawzi]
 !> \author Fawzi Mohamed
 ! *****************************************************************************
-  SUBROUTINE cell_retain(cell,error)
+  SUBROUTINE cell_retain(cell)
 
     TYPE(cell_type), POINTER                 :: cell
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cell_retain', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-
-    CPPrecondition(ASSOCIATED(cell),cp_failure_level,routineP,error,failure)
-    IF (.NOT. failure) THEN
-       CPPreconditionNoFail(cell%ref_count>0,cp_failure_level,routineP,error)
-       cell%ref_count=cell%ref_count+1
-    END IF
+    CPASSERT(ASSOCIATED(cell))
+    CPASSERT(cell%ref_count>0)
+    cell%ref_count=cell%ref_count+1
 
   END SUBROUTINE cell_retain
 
 ! *****************************************************************************
 !> \brief releases the given cell (see doc/ReferenceCounting.html)
 !> \param cell the cell to release
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      09.2003 created [fawzi]
 !> \author Fawzi Mohamed
 ! *****************************************************************************
-  SUBROUTINE cell_release(cell,error)
+  SUBROUTINE cell_release(cell)
 
     TYPE(cell_type), POINTER                 :: cell
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cell_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-
     IF (ASSOCIATED(cell)) THEN
-       CPPreconditionNoFail(cell%ref_count>0,cp_failure_level,routineP,error)
+       CPASSERT(cell%ref_count>0)
        cell%ref_count=cell%ref_count-1
        IF (cell%ref_count==0) THEN
-          DEALLOCATE(cell,stat=stat)
-          CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+          DEALLOCATE(cell)
        END IF
        NULLIFY(cell)
     END IF
 
   END SUBROUTINE cell_release
-
-#if defined (__PLUMED_CP2K)
-! *****************************************************************************
-!> \brief   Interface with plumed, get a coordinate 3-tuple, return the minimum 
-!>          image.
-!> \param x ...
-!> \param y ...
-!> \param z ...
-!> \date    12.12.2012
-!> \author  RK
-!> \version 1.0
-! *****************************************************************************
-  SUBROUTINE pbc_cp2k_plumed(x,y,z) 
-    REAL(KIND=dp), INTENT(INOUT)             :: x, y, z
-
-    REAL(KIND=dp), DIMENSION(3)              :: r, r2
-    TYPE(cell_type), POINTER                 :: cell
-
-    CALL pbc_cp2k_plumed_getset_cell(cell, set=.FALSE.) !retrieve the cell pointer
-
-    r(1)=x
-    r(2)=y
-    r(3)=z
-
-    r2 = pbc(r,cell)
-
-    x=r2(1)
-    y=r2(2)
-    z=r2(3)
-
-  END SUBROUTINE pbc_cp2k_plumed
-#endif
 
 #if defined (__PLUMED_CP2K) || defined (__PLUMED2)
 ! *****************************************************************************

@@ -23,6 +23,7 @@ MODULE pair_potential_types
                                              spline_factor_release,&
                                              spline_factor_type
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -291,33 +292,30 @@ CONTAINS
 !> \param pot1 ...
 !> \param pot2 ...
 !> \param compare ...
-!> \param error ...
 !> \author Teodoro Laino [teo] 05.2006
 ! *****************************************************************************
-  SUBROUTINE compare_pot(pot1, pot2, compare, error)
+  SUBROUTINE compare_pot(pot1, pot2, compare)
     TYPE(pair_potential_single_type), &
       POINTER                                :: pot1, pot2
     LOGICAL, INTENT(OUT)                     :: compare
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'compare_pot', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: i
-    LOGICAL                                  :: failure, mycompare
+    LOGICAL                                  :: mycompare
 
-    failure=.FALSE.
     compare=.FALSE.
     ! Preliminary checks
 
-    CPPostcondition(ASSOCIATED(pot1%type),cp_failure_level,routineP,error,failure)
-    CPPostcondition(ASSOCIATED(pot2%type),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(pot1%type))
+    CPASSERT(ASSOCIATED(pot2%type))
     IF (SIZE(pot1%type)/=SIZE(pot2%type)) RETURN
     IF (ANY(pot1%type/=pot2%type))        RETURN
 
     ! Checking the real values of parameters
-    CPPostcondition(ASSOCIATED(pot1%set),cp_failure_level,routineP,error,failure)
-    CPPostcondition(ASSOCIATED(pot2%set),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(pot1%set))
+    CPASSERT(ASSOCIATED(pot2%set))
     DO i = 1, SIZE(pot1%type)
        mycompare = .FALSE.
        SELECT CASE(pot1%type(i))
@@ -407,74 +405,61 @@ CONTAINS
 !> \brief Creates the potential parameter type
 !> \param potparm ...
 !> \param nset ...
-!> \param error ...
 !> \author Teodoro Laino [teo] 11.2005
 ! *****************************************************************************
-  SUBROUTINE pair_potential_single_create(potparm, nset, error)
+  SUBROUTINE pair_potential_single_create(potparm, nset)
     TYPE(pair_potential_single_type), &
       POINTER                                :: potparm
     INTEGER, INTENT(IN), OPTIONAL            :: nset
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'pair_potential_single_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, lnset, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: i, lnset
 
-    failure = .FALSE.
-    CPPostcondition(.NOT.ASSOCIATED(potparm),cp_failure_level,routineP,error,failure)
-    IF (.NOT.failure) THEN
-       ALLOCATE(potparm, stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       lnset = 1
-       IF (PRESENT(nset)) lnset = nset
-       ! Standard allocation to size 1
-       ALLOCATE(potparm%type(lnset), stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       ALLOCATE(potparm%set(lnset), stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       NULLIFY( potparm%spl_f,&
-                potparm%pair_spline_data)
-       DO i = 1, lnset
-          potparm%set(i)%rmin = not_initialized
-          potparm%set(i)%rmax = not_initialized
-          NULLIFY( potparm%set(i)%ipbv,&
-                   potparm%set(i)%lj,&
-                   potparm%set(i)%gp,&
-                   potparm%set(i)%ft,&
-                   potparm%set(i)%willis,&
-                   potparm%set(i)%goodwin,&
-                   potparm%set(i)%eam,&
-                   potparm%set(i)%quip,&
-                   potparm%set(i)%buck4r,&
-                   potparm%set(i)%buckmo,&
-                   potparm%set(i)%tersoff,&
-                   potparm%set(i)%siepmann,&
-                   potparm%set(i)%ftd)
-       END DO
-       CALL pair_potential_single_clean(potparm, error)
-    END IF
+    CPASSERT(.NOT.ASSOCIATED(potparm))
+    ALLOCATE(potparm)
+    lnset = 1
+    IF (PRESENT(nset)) lnset = nset
+    ! Standard allocation to size 1
+    ALLOCATE(potparm%type(lnset))
+    ALLOCATE(potparm%set(lnset))
+    NULLIFY( potparm%spl_f,&
+             potparm%pair_spline_data)
+    DO i = 1, lnset
+       potparm%set(i)%rmin = not_initialized
+       potparm%set(i)%rmax = not_initialized
+       NULLIFY( potparm%set(i)%ipbv,&
+                potparm%set(i)%lj,&
+                potparm%set(i)%gp,&
+                potparm%set(i)%ft,&
+                potparm%set(i)%willis,&
+                potparm%set(i)%goodwin,&
+                potparm%set(i)%eam,&
+                potparm%set(i)%quip,&
+                potparm%set(i)%buck4r,&
+                potparm%set(i)%buckmo,&
+                potparm%set(i)%tersoff,&
+                potparm%set(i)%siepmann,&
+                potparm%set(i)%ftd)
+    END DO
+    CALL pair_potential_single_clean(potparm)
   END SUBROUTINE pair_potential_single_create
 
 ! *****************************************************************************
 !> \brief Cleans the potential parameter type
 !> \param potparm ...
-!> \param error ...
 !> \author unknown
 ! *****************************************************************************
-  SUBROUTINE pair_potential_single_clean(potparm, error)
+  SUBROUTINE pair_potential_single_clean(potparm)
     TYPE(pair_potential_single_type), &
       POINTER                                :: potparm
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'pair_potential_single_clean', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: i
-    LOGICAL                                  :: failure
 
-    failure = .FALSE.
     potparm % type          = nn_type
     potparm % shell_type    = nosh_nosh
     potparm % undef         = .TRUE.
@@ -484,26 +469,26 @@ CONTAINS
     potparm % at2           = 'NULL'
     potparm % rcutsq        = 0.0_dp
     IF (ASSOCIATED( potparm % pair_spline_data ))&
-         CALL spline_data_p_release ( potparm % pair_spline_data ,error=error)
+         CALL spline_data_p_release ( potparm % pair_spline_data)
     IF (ASSOCIATED( potparm % spl_f ))&
-         CALL spline_factor_release ( potparm % spl_f ,error=error)
+         CALL spline_factor_release ( potparm % spl_f)
 
     DO i = 1, SIZE(potparm%type)
        potparm%set(i)%rmin = not_initialized
        potparm%set(i)%rmax = not_initialized
-       CALL pair_potential_lj_clean (potparm%set(i)%lj, error=error)
-       CALL pair_potential_williams_clean (potparm%set(i)%willis, error=error)
-       CALL pair_potential_goodwin_clean (potparm%set(i)%goodwin, error=error)
-       CALL pair_potential_eam_clean (potparm%set(i)%eam, error=error)
-       CALL pair_potential_quip_clean (potparm%set(i)%quip, error=error)
-       CALL pair_potential_buck4r_clean (potparm%set(i)%buck4r, error=error)
-       CALL pair_potential_buckmo_clean (potparm%set(i)%buckmo, error=error)
-       CALL pair_potential_bmhft_clean (potparm%set(i)%ft, error=error)
-       CALL pair_potential_bmhftd_clean (potparm%set(i)%ftd, error=error)
-       CALL pair_potential_ipbv_clean (potparm%set(i)%ipbv, error=error)
-       CALL pair_potential_gp_clean (potparm%set(i)%gp, error=error)
-       CALL pair_potential_tersoff_clean (potparm%set(i)%tersoff, error=error)
-       CALL pair_potential_siepmann_clean (potparm%set(i)%siepmann, error=error)
+       CALL pair_potential_lj_clean (potparm%set(i)%lj)
+       CALL pair_potential_williams_clean (potparm%set(i)%willis)
+       CALL pair_potential_goodwin_clean (potparm%set(i)%goodwin)
+       CALL pair_potential_eam_clean (potparm%set(i)%eam)
+       CALL pair_potential_quip_clean (potparm%set(i)%quip)
+       CALL pair_potential_buck4r_clean (potparm%set(i)%buck4r)
+       CALL pair_potential_buckmo_clean (potparm%set(i)%buckmo)
+       CALL pair_potential_bmhft_clean (potparm%set(i)%ft)
+       CALL pair_potential_bmhftd_clean (potparm%set(i)%ftd)
+       CALL pair_potential_ipbv_clean (potparm%set(i)%ipbv)
+       CALL pair_potential_gp_clean (potparm%set(i)%gp)
+       CALL pair_potential_tersoff_clean (potparm%set(i)%tersoff)
+       CALL pair_potential_siepmann_clean (potparm%set(i)%siepmann)
     END DO
   END SUBROUTINE pair_potential_single_clean
 
@@ -511,62 +496,56 @@ CONTAINS
 !> \brief Copy two potential parameter type
 !> \param potparm_source ...
 !> \param potparm_dest ...
-!> \param error ...
 !> \author Teodoro Laino [teo] 11.2005
 ! *****************************************************************************
-  SUBROUTINE pair_potential_single_copy(potparm_source, potparm_dest, error)
+  SUBROUTINE pair_potential_single_copy(potparm_source, potparm_dest)
     TYPE(pair_potential_single_type), &
       POINTER                                :: potparm_source, potparm_dest
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'pair_potential_single_copy', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: i
-    LOGICAL                                  :: failure
 
-    failure = .FALSE.
-    CPPostcondition(ASSOCIATED(potparm_source),cp_failure_level,routineP,error,failure)
-    IF (.NOT.failure) THEN
-       IF (.NOT.ASSOCIATED(potparm_dest)) THEN
-          CALL pair_potential_single_create(potparm_dest,SIZE(potparm_source%type),error)
-       ELSE
-          CALL pair_potential_single_clean(potparm_dest, error)
-       END IF
-       potparm_dest % type          = potparm_source % type
-       potparm_dest % shell_type    = potparm_source % shell_type
-       potparm_dest % undef         = potparm_source % undef
-       potparm_dest % no_mb         = potparm_source % no_mb
-       potparm_dest % no_pp         = potparm_source % no_pp
-       potparm_dest % at1           = potparm_source % at1
-       potparm_dest % at2           = potparm_source % at2
-       potparm_dest % rcutsq        = potparm_source % rcutsq
-       IF (ASSOCIATED( potparm_source % pair_spline_data )) THEN
-          CALL spline_data_p_copy ( potparm_source % pair_spline_data, potparm_dest % pair_spline_data, error=error  )
-       END IF
-
-       IF (ASSOCIATED( potparm_source % spl_f )) THEN
-          CALL spline_factor_copy ( potparm_source % spl_f,  potparm_dest % spl_f, error=error  )
-       END IF
-
-       DO i = 1, SIZE(potparm_source%type)
-          potparm_dest%set(i)%rmin = potparm_source%set(i)%rmin
-          potparm_dest%set(i)%rmax = potparm_source%set(i)%rmax
-          CALL pair_potential_lj_copy (potparm_source%set(i)%lj, potparm_dest%set(i)%lj, error=error)
-          CALL pair_potential_williams_copy (potparm_source%set(i)%willis, potparm_dest%set(i)%willis, error=error)
-          CALL pair_potential_goodwin_copy (potparm_source%set(i)%goodwin, potparm_dest%set(i)%goodwin, error=error)
-          CALL pair_potential_eam_copy (potparm_source%set(i)%eam, potparm_dest%set(i)%eam, error=error)
-          CALL pair_potential_quip_copy (potparm_source%set(i)%quip, potparm_dest%set(i)%quip, error=error)
-          CALL pair_potential_bmhft_copy (potparm_source%set(i)%ft, potparm_dest%set(i)%ft, error=error)
-          CALL pair_potential_bmhftd_copy (potparm_source%set(i)%ftd, potparm_dest%set(i)%ftd, error=error)
-          CALL pair_potential_ipbv_copy (potparm_source%set(i)%ipbv, potparm_dest%set(i)%ipbv, error=error)
-          CALL pair_potential_buck4r_copy (potparm_source%set(i)%buck4r, potparm_dest%set(i)%buck4r, error=error)
-          CALL pair_potential_buckmo_copy (potparm_source%set(i)%buckmo, potparm_dest%set(i)%buckmo, error=error)
-          CALL pair_potential_gp_copy (potparm_source%set(i)%gp, potparm_dest%set(i)%gp, error=error)
-          CALL pair_potential_tersoff_copy (potparm_source%set(i)%tersoff, potparm_dest%set(i)%tersoff, error=error)
-          CALL pair_potential_siepmann_copy (potparm_source%set(i)%siepmann, potparm_dest%set(i)%siepmann, error=error)
-       END DO
+    CPASSERT(ASSOCIATED(potparm_source))
+    IF (.NOT.ASSOCIATED(potparm_dest)) THEN
+       CALL pair_potential_single_create(potparm_dest,SIZE(potparm_source%type))
+    ELSE
+       CALL pair_potential_single_clean(potparm_dest)
     END IF
+    potparm_dest % type          = potparm_source % type
+    potparm_dest % shell_type    = potparm_source % shell_type
+    potparm_dest % undef         = potparm_source % undef
+    potparm_dest % no_mb         = potparm_source % no_mb
+    potparm_dest % no_pp         = potparm_source % no_pp
+    potparm_dest % at1           = potparm_source % at1
+    potparm_dest % at2           = potparm_source % at2
+    potparm_dest % rcutsq        = potparm_source % rcutsq
+    IF (ASSOCIATED( potparm_source % pair_spline_data )) THEN
+       CALL spline_data_p_copy ( potparm_source % pair_spline_data, potparm_dest % pair_spline_data)
+    END IF
+
+    IF (ASSOCIATED( potparm_source % spl_f )) THEN
+       CALL spline_factor_copy ( potparm_source % spl_f,  potparm_dest % spl_f)
+    END IF
+
+    DO i = 1, SIZE(potparm_source%type)
+       potparm_dest%set(i)%rmin = potparm_source%set(i)%rmin
+       potparm_dest%set(i)%rmax = potparm_source%set(i)%rmax
+       CALL pair_potential_lj_copy (potparm_source%set(i)%lj, potparm_dest%set(i)%lj)
+       CALL pair_potential_williams_copy (potparm_source%set(i)%willis, potparm_dest%set(i)%willis)
+       CALL pair_potential_goodwin_copy (potparm_source%set(i)%goodwin, potparm_dest%set(i)%goodwin)
+       CALL pair_potential_eam_copy (potparm_source%set(i)%eam, potparm_dest%set(i)%eam)
+       CALL pair_potential_quip_copy (potparm_source%set(i)%quip, potparm_dest%set(i)%quip)
+       CALL pair_potential_bmhft_copy (potparm_source%set(i)%ft, potparm_dest%set(i)%ft)
+       CALL pair_potential_bmhftd_copy (potparm_source%set(i)%ftd, potparm_dest%set(i)%ftd)
+       CALL pair_potential_ipbv_copy (potparm_source%set(i)%ipbv, potparm_dest%set(i)%ipbv)
+       CALL pair_potential_buck4r_copy (potparm_source%set(i)%buck4r, potparm_dest%set(i)%buck4r)
+       CALL pair_potential_buckmo_copy (potparm_source%set(i)%buckmo, potparm_dest%set(i)%buckmo)
+       CALL pair_potential_gp_copy (potparm_source%set(i)%gp, potparm_dest%set(i)%gp)
+       CALL pair_potential_tersoff_copy (potparm_source%set(i)%tersoff, potparm_dest%set(i)%tersoff)
+       CALL pair_potential_siepmann_copy (potparm_source%set(i)%siepmann, potparm_dest%set(i)%siepmann)
+    END DO
   END SUBROUTINE pair_potential_single_copy
 
 ! *****************************************************************************
@@ -574,255 +553,226 @@ CONTAINS
 !>      Used in case of multiple_potential definition
 !> \param potparm_source ...
 !> \param potparm_dest ...
-!> \param error ...
 !> \author Teodoro Laino [teo] 11.2005
 ! *****************************************************************************
-  SUBROUTINE pair_potential_single_add(potparm_source, potparm_dest, error)
+  SUBROUTINE pair_potential_single_add(potparm_source, potparm_dest)
     TYPE(pair_potential_single_type), &
       POINTER                                :: potparm_source, potparm_dest
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'pair_potential_single_add', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: i, j, size_dest, size_source
-    LOGICAL                                  :: allocate_new, check, failure
+    LOGICAL                                  :: allocate_new, check
     TYPE(pair_potential_single_type), &
       POINTER                                :: potparm_tmp
 
-    failure = .FALSE.
-    CPPostcondition(ASSOCIATED(potparm_source),cp_failure_level,routineP,error,failure)
-    IF (.NOT.failure) THEN
-       ! At this level we expect all splines types
-       ! be not allocated.. No sense add splines at this level.. in case fail!
-       check = (.NOT.ASSOCIATED( potparm_source % pair_spline_data )).AND.&
-               (.NOT.ASSOCIATED( potparm_source % spl_f ))
-       CPPostcondition(check,cp_failure_level,routineP,error,failure)
-       check = (.NOT.ASSOCIATED( potparm_dest % pair_spline_data )).AND.&
-               (.NOT.ASSOCIATED( potparm_dest % spl_f ))
-       CPPostcondition(check,cp_failure_level,routineP,error,failure)
-       ! Increase the size of the destination potparm (in case) and copy the new data
-       size_source = SIZE(potparm_source%type)
-       allocate_new = .NOT.ASSOCIATED(potparm_dest)
-       IF (.NOT.allocate_new) THEN
-          size_dest = SIZE(potparm_dest%type)
-          IF (size_dest==1) THEN
-             check = (ASSOCIATED(potparm_dest%set(1)%lj)).OR.&
-                     (ASSOCIATED(potparm_dest%set(1)%willis)).OR.&
-                     (ASSOCIATED(potparm_dest%set(1)%goodwin)).OR.&
-                     (ASSOCIATED(potparm_dest%set(1)%eam)).OR.&
-                     (ASSOCIATED(potparm_dest%set(1)%quip)).OR.&
-                     (ASSOCIATED(potparm_dest%set(1)%ft)).OR.&
-                     (ASSOCIATED(potparm_dest%set(1)%ftd)).OR.&
-                     (ASSOCIATED(potparm_dest%set(1)%ipbv)).OR.&
-                     (ASSOCIATED(potparm_dest%set(1)%buck4r)).OR.&
-                     (ASSOCIATED(potparm_dest%set(1)%buckmo)).OR.&
-                     (ASSOCIATED(potparm_dest%set(1)%gp)).OR.&
-                     (ASSOCIATED(potparm_dest%set(1)%tersoff)).OR.&
-                     (ASSOCIATED(potparm_dest%set(1)%siepmann))
-             IF (.NOT.check) THEN
-                allocate_new = .TRUE.
-                CALL pair_potential_single_release(potparm_dest, error)
-             END IF
+    CPASSERT(ASSOCIATED(potparm_source))
+    ! At this level we expect all splines types
+    ! be not allocated.. No sense add splines at this level.. in case fail!
+    check = (.NOT.ASSOCIATED( potparm_source % pair_spline_data )).AND.&
+            (.NOT.ASSOCIATED( potparm_source % spl_f ))
+    CPASSERT(check)
+    check = (.NOT.ASSOCIATED( potparm_dest % pair_spline_data )).AND.&
+            (.NOT.ASSOCIATED( potparm_dest % spl_f ))
+    CPASSERT(check)
+    ! Increase the size of the destination potparm (in case) and copy the new data
+    size_source = SIZE(potparm_source%type)
+    allocate_new = .NOT.ASSOCIATED(potparm_dest)
+    IF (.NOT.allocate_new) THEN
+       size_dest = SIZE(potparm_dest%type)
+       IF (size_dest==1) THEN
+          check = (ASSOCIATED(potparm_dest%set(1)%lj)).OR.&
+                  (ASSOCIATED(potparm_dest%set(1)%willis)).OR.&
+                  (ASSOCIATED(potparm_dest%set(1)%goodwin)).OR.&
+                  (ASSOCIATED(potparm_dest%set(1)%eam)).OR.&
+                  (ASSOCIATED(potparm_dest%set(1)%quip)).OR.&
+                  (ASSOCIATED(potparm_dest%set(1)%ft)).OR.&
+                  (ASSOCIATED(potparm_dest%set(1)%ftd)).OR.&
+                  (ASSOCIATED(potparm_dest%set(1)%ipbv)).OR.&
+                  (ASSOCIATED(potparm_dest%set(1)%buck4r)).OR.&
+                  (ASSOCIATED(potparm_dest%set(1)%buckmo)).OR.&
+                  (ASSOCIATED(potparm_dest%set(1)%gp)).OR.&
+                  (ASSOCIATED(potparm_dest%set(1)%tersoff)).OR.&
+                  (ASSOCIATED(potparm_dest%set(1)%siepmann))
+          IF (.NOT.check) THEN
+             allocate_new = .TRUE.
+             CALL pair_potential_single_release(potparm_dest)
           END IF
        END IF
-       IF (allocate_new) THEN
-          size_dest = 0
-          CALL pair_potential_single_create(potparm_dest,size_source,error)
-          potparm_dest % shell_type    = potparm_source % shell_type
-          potparm_dest % undef         = potparm_source % undef
-          potparm_dest % no_mb         = potparm_source % no_mb
-          potparm_dest % no_pp         = potparm_source % no_pp
-          potparm_dest % at1           = potparm_source % at1
-          potparm_dest % at2           = potparm_source % at2
-          potparm_dest % rcutsq        = potparm_source % rcutsq
-       ELSE
-          size_dest = SIZE(potparm_dest%type)
-          NULLIFY(potparm_tmp)
-          CALL pair_potential_single_copy(potparm_dest,potparm_tmp,error)
-          CALL pair_potential_single_release(potparm_dest, error)
-          CALL pair_potential_single_create(potparm_dest,size_dest+size_source,error)
-          ! Copy back original informations..
-          potparm_dest % shell_type = potparm_tmp % shell_type
-          potparm_dest % undef      = potparm_tmp % undef
-          potparm_dest % no_mb      = potparm_tmp % no_mb
-          potparm_dest % no_pp      = potparm_tmp % no_pp
-          potparm_dest % at1        = potparm_tmp % at1
-          potparm_dest % at2        = potparm_tmp % at2
-          potparm_dest % rcutsq     = potparm_tmp % rcutsq
-          DO i = 1, size_dest
-             potparm_dest%type(i) = potparm_tmp%type(i)
-             potparm_dest%set(i)%rmin = potparm_tmp%set(i)%rmin
-             potparm_dest%set(i)%rmax = potparm_tmp%set(i)%rmax
-             CALL pair_potential_lj_copy (potparm_tmp%set(i)%lj, potparm_dest%set(i)%lj, error=error)
-             CALL pair_potential_williams_copy (potparm_tmp%set(i)%willis, potparm_dest%set(i)%willis, error=error)
-             CALL pair_potential_goodwin_copy (potparm_tmp%set(i)%goodwin, potparm_dest%set(i)%goodwin, error=error)
-             CALL pair_potential_eam_copy (potparm_tmp%set(i)%eam, potparm_dest%set(i)%eam, error=error)
-             CALL pair_potential_quip_copy (potparm_tmp%set(i)%quip, potparm_dest%set(i)%quip, error=error)
-             CALL pair_potential_bmhft_copy (potparm_tmp%set(i)%ft, potparm_dest%set(i)%ft, error=error)
-             CALL pair_potential_bmhftd_copy (potparm_tmp%set(i)%ftd, potparm_dest%set(i)%ftd, error=error)
-             CALL pair_potential_ipbv_copy (potparm_tmp%set(i)%ipbv, potparm_dest%set(i)%ipbv, error=error)
-             CALL pair_potential_buck4r_copy (potparm_tmp%set(i)%buck4r, potparm_dest%set(i)%buck4r, error=error)
-             CALL pair_potential_buckmo_copy (potparm_tmp%set(i)%buckmo, potparm_dest%set(i)%buckmo, error=error)
-             CALL pair_potential_gp_copy (potparm_tmp%set(i)%gp, potparm_dest%set(i)%gp, error=error)
-             CALL pair_potential_tersoff_copy (potparm_tmp%set(i)%tersoff, potparm_dest%set(i)%tersoff, error=error)
-             CALL pair_potential_siepmann_copy (potparm_tmp%set(i)%siepmann, potparm_dest%set(i)%siepmann, error=error)
-          END DO
-          CALL pair_potential_single_release ( potparm_tmp, error )
-       END IF
-       ! Further check with main option with source and dest (already filled with few informations)
-       check= (potparm_dest % shell_type == potparm_source % shell_type).AND.&
-              (potparm_dest % undef    .EQV.potparm_source % undef     ).AND.&
-              (potparm_dest % no_mb    .EQV.potparm_source % no_mb     ).AND.&
-              (potparm_dest % no_pp    .EQV.potparm_source % no_pp     ).AND.&
-              (potparm_dest % at1        == potparm_source % at1       ).AND.&
-              (potparm_dest % at2        == potparm_source % at2       ).AND.&
-              (potparm_dest % rcutsq     == potparm_source % rcutsq    )
-       CPPostcondition(check,cp_failure_level,routineP,error,failure)
-       ! Now copy the new pair_potential type
-       DO i = size_dest+1, size_dest+size_source
-          j = i-size_dest
-          potparm_dest%type(i) = potparm_source%type(j)
-          potparm_dest%set(i)%rmin = potparm_source%set(j)%rmin
-          potparm_dest%set(i)%rmax = potparm_source%set(j)%rmax
-          CALL pair_potential_lj_copy (potparm_source%set(j)%lj, potparm_dest%set(i)%lj, error=error)
-          CALL pair_potential_williams_copy (potparm_source%set(j)%willis, potparm_dest%set(i)%willis, error=error)
-          CALL pair_potential_goodwin_copy (potparm_source%set(j)%goodwin, potparm_dest%set(i)%goodwin, error=error)
-          CALL pair_potential_eam_copy (potparm_source%set(j)%eam, potparm_dest%set(i)%eam, error=error)
-          CALL pair_potential_quip_copy (potparm_source%set(j)%quip, potparm_dest%set(i)%quip, error=error)
-          CALL pair_potential_bmhft_copy (potparm_source%set(j)%ft, potparm_dest%set(i)%ft, error=error)
-          CALL pair_potential_bmhftd_copy (potparm_source%set(j)%ftd, potparm_dest%set(i)%ftd, error=error)
-          CALL pair_potential_ipbv_copy (potparm_source%set(j)%ipbv, potparm_dest%set(i)%ipbv, error=error)
-          CALL pair_potential_buck4r_copy (potparm_source%set(j)%buck4r, potparm_dest%set(i)%buck4r, error=error)
-          CALL pair_potential_buckmo_copy (potparm_source%set(j)%buckmo, potparm_dest%set(i)%buckmo, error=error)
-          CALL pair_potential_gp_copy (potparm_source%set(j)%gp, potparm_dest%set(i)%gp, error=error)
-          CALL pair_potential_tersoff_copy (potparm_source%set(j)%tersoff, potparm_dest%set(i)%tersoff, error=error)
-          CALL pair_potential_siepmann_copy (potparm_source%set(j)%siepmann, potparm_dest%set(i)%siepmann, error=error)
-       END DO
     END IF
+    IF (allocate_new) THEN
+       size_dest = 0
+       CALL pair_potential_single_create(potparm_dest,size_source)
+       potparm_dest % shell_type    = potparm_source % shell_type
+       potparm_dest % undef         = potparm_source % undef
+       potparm_dest % no_mb         = potparm_source % no_mb
+       potparm_dest % no_pp         = potparm_source % no_pp
+       potparm_dest % at1           = potparm_source % at1
+       potparm_dest % at2           = potparm_source % at2
+       potparm_dest % rcutsq        = potparm_source % rcutsq
+    ELSE
+       size_dest = SIZE(potparm_dest%type)
+       NULLIFY(potparm_tmp)
+       CALL pair_potential_single_copy(potparm_dest,potparm_tmp)
+       CALL pair_potential_single_release(potparm_dest)
+       CALL pair_potential_single_create(potparm_dest,size_dest+size_source)
+       ! Copy back original informations..
+       potparm_dest % shell_type = potparm_tmp % shell_type
+       potparm_dest % undef      = potparm_tmp % undef
+       potparm_dest % no_mb      = potparm_tmp % no_mb
+       potparm_dest % no_pp      = potparm_tmp % no_pp
+       potparm_dest % at1        = potparm_tmp % at1
+       potparm_dest % at2        = potparm_tmp % at2
+       potparm_dest % rcutsq     = potparm_tmp % rcutsq
+       DO i = 1, size_dest
+          potparm_dest%type(i) = potparm_tmp%type(i)
+          potparm_dest%set(i)%rmin = potparm_tmp%set(i)%rmin
+          potparm_dest%set(i)%rmax = potparm_tmp%set(i)%rmax
+          CALL pair_potential_lj_copy (potparm_tmp%set(i)%lj, potparm_dest%set(i)%lj)
+          CALL pair_potential_williams_copy (potparm_tmp%set(i)%willis, potparm_dest%set(i)%willis)
+          CALL pair_potential_goodwin_copy (potparm_tmp%set(i)%goodwin, potparm_dest%set(i)%goodwin)
+          CALL pair_potential_eam_copy (potparm_tmp%set(i)%eam, potparm_dest%set(i)%eam)
+          CALL pair_potential_quip_copy (potparm_tmp%set(i)%quip, potparm_dest%set(i)%quip)
+          CALL pair_potential_bmhft_copy (potparm_tmp%set(i)%ft, potparm_dest%set(i)%ft)
+          CALL pair_potential_bmhftd_copy (potparm_tmp%set(i)%ftd, potparm_dest%set(i)%ftd)
+          CALL pair_potential_ipbv_copy (potparm_tmp%set(i)%ipbv, potparm_dest%set(i)%ipbv)
+          CALL pair_potential_buck4r_copy (potparm_tmp%set(i)%buck4r, potparm_dest%set(i)%buck4r)
+          CALL pair_potential_buckmo_copy (potparm_tmp%set(i)%buckmo, potparm_dest%set(i)%buckmo)
+          CALL pair_potential_gp_copy (potparm_tmp%set(i)%gp, potparm_dest%set(i)%gp)
+          CALL pair_potential_tersoff_copy (potparm_tmp%set(i)%tersoff, potparm_dest%set(i)%tersoff)
+          CALL pair_potential_siepmann_copy (potparm_tmp%set(i)%siepmann, potparm_dest%set(i)%siepmann)
+       END DO
+       CALL pair_potential_single_release ( potparm_tmp)
+    END IF
+    ! Further check with main option with source and dest (already filled with few informations)
+    check= (potparm_dest % shell_type == potparm_source % shell_type).AND.&
+           (potparm_dest % undef    .EQV.potparm_source % undef     ).AND.&
+           (potparm_dest % no_mb    .EQV.potparm_source % no_mb     ).AND.&
+           (potparm_dest % no_pp    .EQV.potparm_source % no_pp     ).AND.&
+           (potparm_dest % at1        == potparm_source % at1       ).AND.&
+           (potparm_dest % at2        == potparm_source % at2       ).AND.&
+           (potparm_dest % rcutsq     == potparm_source % rcutsq    )
+    CPASSERT(check)
+    ! Now copy the new pair_potential type
+    DO i = size_dest+1, size_dest+size_source
+       j = i-size_dest
+       potparm_dest%type(i) = potparm_source%type(j)
+       potparm_dest%set(i)%rmin = potparm_source%set(j)%rmin
+       potparm_dest%set(i)%rmax = potparm_source%set(j)%rmax
+       CALL pair_potential_lj_copy (potparm_source%set(j)%lj, potparm_dest%set(i)%lj)
+       CALL pair_potential_williams_copy (potparm_source%set(j)%willis, potparm_dest%set(i)%willis)
+       CALL pair_potential_goodwin_copy (potparm_source%set(j)%goodwin, potparm_dest%set(i)%goodwin)
+       CALL pair_potential_eam_copy (potparm_source%set(j)%eam, potparm_dest%set(i)%eam)
+       CALL pair_potential_quip_copy (potparm_source%set(j)%quip, potparm_dest%set(i)%quip)
+       CALL pair_potential_bmhft_copy (potparm_source%set(j)%ft, potparm_dest%set(i)%ft)
+       CALL pair_potential_bmhftd_copy (potparm_source%set(j)%ftd, potparm_dest%set(i)%ftd)
+       CALL pair_potential_ipbv_copy (potparm_source%set(j)%ipbv, potparm_dest%set(i)%ipbv)
+       CALL pair_potential_buck4r_copy (potparm_source%set(j)%buck4r, potparm_dest%set(i)%buck4r)
+       CALL pair_potential_buckmo_copy (potparm_source%set(j)%buckmo, potparm_dest%set(i)%buckmo)
+       CALL pair_potential_gp_copy (potparm_source%set(j)%gp, potparm_dest%set(i)%gp)
+       CALL pair_potential_tersoff_copy (potparm_source%set(j)%tersoff, potparm_dest%set(i)%tersoff)
+       CALL pair_potential_siepmann_copy (potparm_source%set(j)%siepmann, potparm_dest%set(i)%siepmann)
+    END DO
   END SUBROUTINE pair_potential_single_add
 
 ! *****************************************************************************
 !> \brief Release Data-structure that constains potential parameters of a single pair
 !> \param potparm ...
-!> \param error ...
 !> \author Teodoro Laino [Teo] 11.2005
 ! *****************************************************************************
-  SUBROUTINE pair_potential_single_release ( potparm, error )
+  SUBROUTINE pair_potential_single_release ( potparm)
     TYPE(pair_potential_single_type), &
       POINTER                                :: potparm
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: &
       routineN = 'pair_potential_single_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: i
 
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       CPPostcondition(ASSOCIATED(potparm),cp_failure_level,routineP,error,failure)
-       CALL spline_data_p_release( potparm% pair_spline_data ,error=error)
-       CALL spline_factor_release( potparm% spl_f, error=error )
-       DO i = 1, SIZE(potparm%type)
-          CALL pair_potential_ipbv_release     ( potparm%set(i)%ipbv, error=error )
-          CALL pair_potential_lj_release       ( potparm%set(i)%lj, error=error )
-          CALL pair_potential_bmhft_release    ( potparm%set(i)%ft, error=error )
-          CALL pair_potential_bmhftd_release   ( potparm%set(i)%ftd, error=error )
-          CALL pair_potential_williams_release ( potparm%set(i)%willis, error=error )
-          CALL pair_potential_goodwin_release  ( potparm%set(i)%goodwin, error=error )
-          CALL pair_potential_eam_release      ( potparm%set(i)%eam, error=error )
-          CALL pair_potential_quip_release      ( potparm%set(i)%quip, error=error )
-          CALL pair_potential_buck4r_release   ( potparm%set(i)%buck4r, error=error )
-          CALL pair_potential_buckmo_release   ( potparm%set(i)%buckmo, error=error )
-          CALL pair_potential_gp_release       ( potparm%set(i)%gp, error=error )
-          CALL pair_potential_tersoff_release  ( potparm%set(i)%tersoff, error=error )
-          CALL pair_potential_siepmann_release ( potparm%set(i)%siepmann, error=error )
-       END DO
-       DEALLOCATE(potparm%type, stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       DEALLOCATE(potparm%set, stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       DEALLOCATE(potparm, stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    END IF
-    NULLIFY ( potparm )
+    CPASSERT(ASSOCIATED(potparm))
+    CALL spline_data_p_release( potparm% pair_spline_data)
+    CALL spline_factor_release( potparm% spl_f)
+    DO i = 1, SIZE(potparm%type)
+       CALL pair_potential_ipbv_release     ( potparm%set(i)%ipbv)
+       CALL pair_potential_lj_release       ( potparm%set(i)%lj)
+       CALL pair_potential_bmhft_release    ( potparm%set(i)%ft)
+       CALL pair_potential_bmhftd_release   ( potparm%set(i)%ftd)
+       CALL pair_potential_williams_release ( potparm%set(i)%willis)
+       CALL pair_potential_goodwin_release  ( potparm%set(i)%goodwin)
+       CALL pair_potential_eam_release      ( potparm%set(i)%eam)
+       CALL pair_potential_quip_release      ( potparm%set(i)%quip)
+       CALL pair_potential_buck4r_release   ( potparm%set(i)%buck4r)
+       CALL pair_potential_buckmo_release   ( potparm%set(i)%buckmo)
+       CALL pair_potential_gp_release       ( potparm%set(i)%gp)
+       CALL pair_potential_tersoff_release  ( potparm%set(i)%tersoff)
+       CALL pair_potential_siepmann_release ( potparm%set(i)%siepmann)
+    END DO
+    DEALLOCATE(potparm%type)
+    DEALLOCATE(potparm%set)
+    DEALLOCATE(potparm)
   END SUBROUTINE pair_potential_single_release
 
 ! *****************************************************************************
 !> \brief Data-structure that constains potential parameters
 !> \param potparm ...
 !> \param nkinds ...
-!> \param error ...
 !> \author unknown
 ! *****************************************************************************
-  SUBROUTINE pair_potential_pp_create ( potparm, nkinds, error )
+  SUBROUTINE pair_potential_pp_create ( potparm, nkinds)
     TYPE(pair_potential_pp_type), POINTER    :: potparm
     INTEGER, INTENT(IN)                      :: nkinds
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'pair_potential_pp_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, j, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: i, j
 
-    failure=.FALSE.
-    IF (.NOT.failure) THEN
-       CPPostcondition(.NOT.ASSOCIATED(potparm),cp_failure_level,routineP,error,failure)
-       ALLOCATE ( potparm, stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       ALLOCATE ( potparm%pot( nkinds, nkinds ), stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       DO i = 1, nkinds
-          DO j = 1, nkinds
-             NULLIFY ( potparm%pot(i,j)%pot )
-          END DO
+    CPASSERT(.NOT.ASSOCIATED(potparm))
+    ALLOCATE ( potparm)
+    ALLOCATE ( potparm%pot( nkinds, nkinds ))
+    DO i = 1, nkinds
+       DO j = 1, nkinds
+          NULLIFY ( potparm%pot(i,j)%pot )
        END DO
-       ! Use no-redundancy in the potential definition
-       DO i = 1, nkinds
-          DO j = i, nkinds
-             CALL pair_potential_single_create(potparm%pot( i, j)%pot, error=error)
-             potparm%pot( j, i )%pot => potparm%pot( i, j )%pot
-          END DO
+    END DO
+    ! Use no-redundancy in the potential definition
+    DO i = 1, nkinds
+       DO j = i, nkinds
+          CALL pair_potential_single_create(potparm%pot( i, j)%pot)
+          potparm%pot( j, i )%pot => potparm%pot( i, j )%pot
        END DO
-    END IF
+    END DO
   END SUBROUTINE pair_potential_pp_create
 
 ! *****************************************************************************
 !> \brief Release Data-structure that constains potential parameters
 !> \param potparm ...
-!> \param error ...
 !> \par History
 !>      Teodoro Laino [Teo] 11.2005 : Reorganizing the structures to optimize
 !>                                    memory management
 !> \author unknown
 ! *****************************************************************************
-  SUBROUTINE pair_potential_pp_release ( potparm, error )
+  SUBROUTINE pair_potential_pp_release ( potparm)
     TYPE(pair_potential_pp_type), POINTER    :: potparm
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'pair_potential_pp_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, j, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: i, j
 
-    failure = .FALSE.
     IF ( ASSOCIATED ( potparm ) ) THEN
        IF (ASSOCIATED (potparm%pot)) THEN
           DO i = 1, SIZE ( potparm%pot, 1 )
              DO j = i, SIZE ( potparm%pot, 2 )
-                CALL pair_potential_single_release(potparm%pot( i, j )%pot, error)
+                CALL pair_potential_single_release(potparm%pot( i, j )%pot)
                 NULLIFY(potparm%pot( j, i )%pot)
              END DO
           END DO
-          DEALLOCATE(potparm%pot, stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          DEALLOCATE(potparm%pot)
        END IF
-       DEALLOCATE ( potparm, stat = stat )
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE ( potparm)
     END IF
     NULLIFY ( potparm )
   END SUBROUTINE pair_potential_pp_release
@@ -833,82 +783,66 @@ CONTAINS
 !> \param ndim ...
 !> \param ub ...
 !> \param lb ...
-!> \param error ...
 !> \author unknown
 ! *****************************************************************************
-  SUBROUTINE pair_potential_p_create ( potparm, ndim, ub, lb, error )
+  SUBROUTINE pair_potential_p_create ( potparm, ndim, ub, lb)
     TYPE(pair_potential_p_type), POINTER     :: potparm
     INTEGER, INTENT(IN), OPTIONAL            :: ndim, ub, lb
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'pair_potential_p_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, loc_lb, loc_ub, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: i, loc_lb, loc_ub
 
-    failure=.FALSE.
-    IF (.NOT.failure) THEN
-       CPPostcondition(.NOT.ASSOCIATED(potparm),cp_failure_level,routineP,error,failure)
-       ALLOCATE ( potparm, stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       IF (PRESENT(ndim)) THEN
-          loc_lb = 1
-          loc_ub = ndim
-          ALLOCATE ( potparm%pot( loc_lb : loc_ub ), stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-          IF (PRESENT(lb).OR.PRESENT(ub)) THEN
-             CPPostcondition(.FALSE.,cp_failure_level,routineP,error,failure)
-          END IF
-       ELSE IF (PRESENT(lb).AND.PRESENT(ub)) THEN
-          loc_lb = lb
-          loc_ub = ub
-          ALLOCATE ( potparm%pot( loc_lb : loc_ub ), stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-          IF (PRESENT(ndim)) THEN
-             CPPostcondition(.FALSE.,cp_failure_level,routineP,error,failure)
-          END IF
-       ELSE
-          CPPostcondition(.FALSE.,cp_failure_level,routineP,error,failure)
+    CPASSERT(.NOT.ASSOCIATED(potparm))
+    ALLOCATE ( potparm)
+    IF (PRESENT(ndim)) THEN
+       loc_lb = 1
+       loc_ub = ndim
+       ALLOCATE ( potparm%pot( loc_lb : loc_ub ))
+       IF (PRESENT(lb).OR.PRESENT(ub)) THEN
+          CPABORT("")
        END IF
-       DO i = loc_lb, loc_ub
-          NULLIFY ( potparm%pot(i)%pot)
-          CALL pair_potential_single_create(potparm%pot(i)%pot, error=error)
-       END DO
+    ELSE IF (PRESENT(lb).AND.PRESENT(ub)) THEN
+       loc_lb = lb
+       loc_ub = ub
+       ALLOCATE ( potparm%pot( loc_lb : loc_ub ))
+       IF (PRESENT(ndim)) THEN
+          CPABORT("")
+       END IF
+    ELSE
+       CPABORT("")
     END IF
+    DO i = loc_lb, loc_ub
+       NULLIFY ( potparm%pot(i)%pot)
+       CALL pair_potential_single_create(potparm%pot(i)%pot)
+    END DO
   END SUBROUTINE pair_potential_p_create
 
 ! *****************************************************************************
 !> \brief Release Data-structure that constains potential parameters
 !> \param potparm ...
-!> \param error ...
 !> \par History
 !>      Teodoro Laino [Teo] 11.2005 : Reorganizing the structures to optimize
 !>                                    memory management
 !> \author unknown
 ! *****************************************************************************
-  SUBROUTINE pair_potential_p_release ( potparm, error )
+  SUBROUTINE pair_potential_p_release ( potparm)
     TYPE(pair_potential_p_type), POINTER     :: potparm
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'pair_potential_p_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
+    INTEGER                                  :: i
 
     IF ( ASSOCIATED ( potparm ) ) THEN
        IF (ASSOCIATED (potparm%pot)) THEN
           DO i = 1, SIZE ( potparm%pot )
-             CALL pair_potential_single_release(potparm%pot( i )%pot, error)
+             CALL pair_potential_single_release(potparm%pot( i )%pot)
           END DO
-          DEALLOCATE(potparm%pot, stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          DEALLOCATE(potparm%pot)
        END IF
-       DEALLOCATE ( potparm, stat = stat )
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE ( potparm)
     END IF
     NULLIFY ( potparm )
   END SUBROUTINE pair_potential_p_release
@@ -919,34 +853,28 @@ CONTAINS
 !> \param dest ...
 !> \param istart ...
 !> \param iend ...
-!> \param error ...
 !> \author Teodoro Laino [Teo] 11.2005
 ! *****************************************************************************
-  SUBROUTINE pair_potential_p_copy(source, dest, istart, iend, error)
+  SUBROUTINE pair_potential_p_copy(source, dest, istart, iend)
     TYPE(pair_potential_p_type), POINTER     :: source, dest
     INTEGER, INTENT(IN), OPTIONAL            :: istart, iend
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_p_copy', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: i, l_end, l_start
-    LOGICAL                                  :: failure
 
-    failure = .FALSE.
-    CPPostcondition(ASSOCIATED(source),cp_failure_level,routineP,error,failure)
-    CPPostcondition(ASSOCIATED(dest),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(source))
+    CPASSERT(ASSOCIATED(dest))
     l_start = LBOUND(source%pot,1)
     l_end   = UBOUND(source%pot,1)
     IF (PRESENT(istart)) l_start = istart
     IF (PRESENT(iend))   l_end   = iend
-    IF (.NOT.failure) THEN
-       DO i = l_start, l_end
-          IF (.NOT.ASSOCIATED(source%pot(i)%pot)) &
-               CALL pair_potential_single_create(source%pot(i)%pot, error=error)
-          CALL pair_potential_single_copy(source%pot(i)%pot,dest%pot(i)%pot,error=error)
-       END DO
-    END IF
+    DO i = l_start, l_end
+       IF (.NOT.ASSOCIATED(source%pot(i)%pot)) &
+            CALL pair_potential_single_create(source%pot(i)%pot)
+       CALL pair_potential_single_copy(source%pot(i)%pot,dest%pot(i)%pot)
+    END DO
   END SUBROUTINE pair_potential_p_copy
 
 ! *****************************************************************************
@@ -968,30 +896,26 @@ CONTAINS
 !> \param gp ...
 !> \param tersoff ...
 !> \param siepmann ...
-!> \param error ...
 !> \author Teodoro Laino [Teo] 11.2005
 ! *****************************************************************************
   SUBROUTINE pair_potential_reallocate(p,lb1_new,ub1_new,lj,lj_charmm,williams,&
                            goodwin,eam,quip,bmhft,bmhftd,ipbv,buck4r,buckmo,gp,tersoff,&
-                           siepmann,error)
+                           siepmann)
     TYPE(pair_potential_p_type), POINTER     :: p
     INTEGER, INTENT(IN)                      :: lb1_new, ub1_new
     LOGICAL, INTENT(IN), OPTIONAL :: lj, lj_charmm, williams, goodwin, eam, &
       quip, bmhft, bmhftd, ipbv, buck4r, buckmo, gp, tersoff, siepmann
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_reallocate', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: i, ipot, lb1_old, std_dim, &
                                                 ub1_old
-    LOGICAL :: check, failure, lbmhft, lbmhftd, lbuck4r, lbuckmo, leam, &
-      lgoodwin, lgp, lipbv, llj, llj_charmm, lquip, lsiepmann, ltersoff, &
-      lwilliams
+    LOGICAL :: check, lbmhft, lbmhftd, lbuck4r, lbuckmo, leam, lgoodwin, lgp, &
+      lipbv, llj, llj_charmm, lquip, lsiepmann, ltersoff, lwilliams
     TYPE(pair_potential_p_type), POINTER     :: work
 
     NULLIFY(work)
-    failure = .FALSE.
     ipot = 0
     llj       = .FALSE. ; IF (PRESENT(lj))        llj       = lj
     llj_charmm= .FALSE. ; IF (PRESENT(lj_charmm)) llj_charmm= lj_charmm
@@ -1013,1439 +937,1062 @@ CONTAINS
        check = .NOT.(llj_charmm.OR.lwilliams.OR.lgoodwin.OR.leam.OR.lquip.OR.lbmhft&
                      .OR.lbmhftd.OR.lipbv.OR.lbuck4r.OR.lbuckmo.OR.lgp.OR.ltersoff&
                      .OR.lsiepmann)
-       CPPostcondition(check,cp_failure_level,routineP,error,failure)
+       CPASSERT(check)
     END IF
     IF (llj_charmm) THEN
        ipot  = lj_charmm_type
        check = .NOT.(llj.OR.lwilliams.OR.lgoodwin.OR.leam.OR.lquip.OR.lbmhft.OR.lbmhftd.OR.lipbv&
                      .OR.lbuck4r.OR.lbuckmo.OR.lgp.OR.ltersoff.OR.lsiepmann)
-       CPPostcondition(check,cp_failure_level,routineP,error,failure)
+       CPASSERT(check)
     END IF
     IF (lwilliams) THEN
        ipot  = wl_type
        check = .NOT.(llj.OR.llj_charmm.OR.lgoodwin.OR.leam.OR.lquip.OR.lbmhft.OR.lbmhftd.OR.lipbv&
                      .OR.lbuck4r.OR.lbuckmo.OR.lgp.OR.ltersoff.OR.lsiepmann)
-       CPPostcondition(check,cp_failure_level,routineP,error,failure)
+       CPASSERT(check)
     END IF
     IF (lgoodwin) THEN
        ipot  = gw_type
        check = .NOT.(llj.OR.llj_charmm.OR.lwilliams.OR.leam.OR.lquip.OR.lbmhft.OR.lbmhftd.OR.lipbv&
                      .OR.lbuck4r.OR.lbuckmo.OR.lgp.OR.ltersoff.OR.lsiepmann)
-       CPPostcondition(check,cp_failure_level,routineP,error,failure)
+       CPASSERT(check)
     END IF
     IF (leam) THEN
        ipot  = ea_type
        check = .NOT.(llj.OR.llj_charmm.OR.lgoodwin.OR.lwilliams.OR.lquip.OR.lbmhft.OR.lbmhftd.OR.lipbv&
                      .OR.lbuck4r.OR.lbuckmo.OR.lgp.OR.ltersoff.OR.lsiepmann)
-       CPPostcondition(check,cp_failure_level,routineP,error,failure)
+       CPASSERT(check)
     END IF
     IF (lquip) THEN
        ipot  = quip_type
        check = .NOT.(llj.OR.llj_charmm.OR.lgoodwin.OR.lwilliams.OR.leam.OR.lbmhft.OR.lbmhftd.OR.lipbv&
                      .OR.lbuck4r.OR.lbuckmo.OR.lgp.OR.ltersoff.OR.lsiepmann)
-       CPPostcondition(check,cp_failure_level,routineP,error,failure)
+       CPASSERT(check)
     END IF
     IF (lbmhft) THEN
        ipot  = ft_type
        check = .NOT.(llj.OR.llj_charmm.OR.lgoodwin.OR.leam.OR.lquip.OR.lwilliams.OR.lbmhftd.OR.lipbv&
                      .OR.lbuck4r.OR.lbuckmo.OR.lgp.OR.ltersoff.OR.lsiepmann)
-       CPPostcondition(check,cp_failure_level,routineP,error,failure)
+       CPASSERT(check)
     END IF
     IF (lbmhftd) THEN
        ipot  = ftd_type
        check = .NOT.(llj.OR.llj_charmm.OR.lgoodwin.OR.leam.OR.lquip.OR.lwilliams.OR.lbmhft.OR.lipbv&
                      .OR.lbuck4r.OR.lbuckmo.OR.lgp.OR.ltersoff.OR.lsiepmann)
-       CPPostcondition(check,cp_failure_level,routineP,error,failure)
+       CPASSERT(check)
     END IF
     IF (lipbv) THEN
        ipot  = ip_type
        check = .NOT.(llj.OR.llj_charmm.OR.lgoodwin.OR.leam.OR.lquip.OR.lwilliams.OR.lbmhft.OR.lbmhftd&
                      .OR.lbuck4r.OR.lbuckmo.OR.lgp.OR.ltersoff.OR.lsiepmann)
-       CPPostcondition(check,cp_failure_level,routineP,error,failure)
+       CPASSERT(check)
     END IF
     IF (lbuck4r) THEN
        ipot  = b4_type
        check = .NOT.(llj.OR.llj_charmm.OR.lgoodwin.OR.leam.OR.lquip.OR.lwilliams.OR.lbmhft.OR.lbmhftd&
                      .OR.lipbv.OR.lbuckmo.OR.lgp.OR.ltersoff.OR.lsiepmann)
-       CPPostcondition(check,cp_failure_level,routineP,error,failure)
+       CPASSERT(check)
     END IF
     IF (lbuckmo) THEN
        ipot  = bm_type
        check = .NOT.(llj.OR.llj_charmm.OR.lgoodwin.OR.leam.OR.lquip.OR.lwilliams.OR.lbmhft.OR.lbmhftd&
                     .OR.lipbv.OR.lbuck4r.OR.lgp.OR.ltersoff.OR.lsiepmann)
-       CPPostcondition(check,cp_failure_level,routineP,error,failure)
+       CPASSERT(check)
     END IF
     IF (ltersoff) THEN
        ipot  = tersoff_type
        check = .NOT.(llj.OR.llj_charmm.OR.lgoodwin.OR.leam.OR.lquip.OR.lwilliams.OR.lbmhft.OR.lbmhftd&
                     .OR.lipbv.OR.lbuck4r.OR.lbuckmo.OR.lgp.OR.lsiepmann)
-       CPPostcondition(check,cp_failure_level,routineP,error,failure)
+       CPASSERT(check)
     END IF
     IF (lsiepmann) THEN
        ipot  = siepmann_type
        check = .NOT.(llj.OR.llj_charmm.OR.lgoodwin.OR.leam.OR.lquip.OR.lwilliams.OR.lbmhft.OR.lbmhftd&
                     .OR.lipbv.OR.lbuck4r.OR.lbuckmo.OR.lgp.OR.ltersoff)
-       CPPostcondition(check,cp_failure_level,routineP,error,failure)
+       CPASSERT(check)
     END IF
     IF (lgp) THEN
        ipot  = gp_type
        check = .NOT.(llj.OR.llj_charmm.OR.lgoodwin.OR.leam.OR.lwilliams.OR.lbmhft.OR.lbmhftd&
                     .OR.lipbv.OR.lbuck4r.OR.lbuckmo.OR.ltersoff.OR.lsiepmann)
-       CPPostcondition(check,cp_failure_level,routineP,error,failure)
+       CPASSERT(check)
     END IF
 
-    IF (.NOT.failure) THEN
-       lb1_old = 0
-       ub1_old = 0
-       IF (ASSOCIATED(p)) THEN
-          lb1_old = LBOUND(p%pot,1)
-          ub1_old = UBOUND(p%pot,1)
-          CALL pair_potential_p_create(work, lb=lb1_old, ub=ub1_old, error=error)
-          CALL pair_potential_p_copy(p, work, error=error)
-          CALL pair_potential_p_release(p, error=error)
-       END IF
-
-       CALL pair_potential_p_create(p, lb=lb1_new, ub=ub1_new, error=error)
-       IF (ASSOCIATED(work)) THEN
-          CALL pair_potential_p_copy(work, p, istart=lb1_old, iend=ub1_old, error=error)
-       END IF
-       std_dim = 1
-       DO i = ub1_old+1, ub1_new
-          check = (SIZE(p%pot(i)%pot%type)==std_dim).AND.(SIZE(p%pot(i)%pot%type)==std_dim)
-          CPPostcondition(check,cp_failure_level,routineP,error,failure)
-          p % pot ( i ) % pot % type  = nn_type
-          p % pot ( i ) % pot % shell_type  = nosh_nosh
-          p % pot ( i ) % pot % undef = .TRUE.
-          p % pot ( i ) % pot % no_mb = .FALSE.
-          p % pot ( i ) % pot % no_pp = .FALSE.
-          p % pot ( i ) % pot % at1   = 'NULL'
-          p % pot ( i ) % pot % at2   = 'NULL'
-          p % pot ( i ) % pot % set(std_dim) % rmin = not_initialized
-          p % pot ( i ) % pot % set(std_dim) % rmax = not_initialized
-          SELECT CASE (ipot)
-          CASE (lj_type,lj_charmm_type)
-             CALL pair_potential_lj_create(p%pot(i)%pot%set(std_dim)%lj, error=error)
-          CASE (wl_type)
-             CALL pair_potential_williams_create(p%pot(i)%pot%set(std_dim)%willis, error=error)
-          CASE (gw_type)
-             CALL pair_potential_goodwin_create(p%pot(i)%pot%set(std_dim)%goodwin, error=error)
-          CASE (ea_type)
-             CALL pair_potential_eam_create(p%pot(i)%pot%set(std_dim)%eam, error=error)
-          CASE (quip_type)
-             CALL pair_potential_quip_create(p%pot(i)%pot%set(std_dim)%quip, error=error)
-          CASE (ft_type)
-             CALL pair_potential_bmhft_create(p%pot(i)%pot%set(std_dim)%ft, error=error)
-          CASE (ftd_type)
-             CALL pair_potential_bmhftd_create(p%pot(i)%pot%set(std_dim)%ftd, error=error)
-          CASE (ip_type)
-             CALL pair_potential_ipbv_create(p%pot(i)%pot%set(std_dim)%ipbv, error=error)
-          CASE (b4_type)
-             CALL pair_potential_buck4r_create(p%pot(i)%pot%set(std_dim)%buck4r, error=error)
-          CASE (bm_type)
-             CALL pair_potential_buckmo_create(p%pot(i)%pot%set(std_dim)%buckmo, error=error)
-          CASE (gp_type)
-             CALL pair_potential_gp_create(p%pot(i)%pot%set(std_dim)%gp, error=error)
-          CASE (tersoff_type)
-             CALL pair_potential_tersoff_create(p%pot(i)%pot%set(std_dim)%tersoff, error=error)
-          CASE (siepmann_type)
-             CALL pair_potential_siepmann_create(p%pot(i)%pot%set(std_dim)%siepmann, error=error)
-          END SELECT
-          NULLIFY ( p%pot(i)%pot%spl_f  )
-          NULLIFY ( p%pot(i)%pot%pair_spline_data )
-       END DO
-
-       IF (ASSOCIATED(work)) CALL pair_potential_p_release(work, error=error)
+    lb1_old = 0
+    ub1_old = 0
+    IF (ASSOCIATED(p)) THEN
+       lb1_old = LBOUND(p%pot,1)
+       ub1_old = UBOUND(p%pot,1)
+       CALL pair_potential_p_create(work, lb=lb1_old, ub=ub1_old)
+       CALL pair_potential_p_copy(p, work)
+       CALL pair_potential_p_release(p)
     END IF
+
+    CALL pair_potential_p_create(p, lb=lb1_new, ub=ub1_new)
+    IF (ASSOCIATED(work)) THEN
+       CALL pair_potential_p_copy(work, p, istart=lb1_old, iend=ub1_old)
+    END IF
+    std_dim = 1
+    DO i = ub1_old+1, ub1_new
+       check = (SIZE(p%pot(i)%pot%type)==std_dim).AND.(SIZE(p%pot(i)%pot%type)==std_dim)
+       CPASSERT(check)
+       p % pot ( i ) % pot % type  = nn_type
+       p % pot ( i ) % pot % shell_type  = nosh_nosh
+       p % pot ( i ) % pot % undef = .TRUE.
+       p % pot ( i ) % pot % no_mb = .FALSE.
+       p % pot ( i ) % pot % no_pp = .FALSE.
+       p % pot ( i ) % pot % at1   = 'NULL'
+       p % pot ( i ) % pot % at2   = 'NULL'
+       p % pot ( i ) % pot % set(std_dim) % rmin = not_initialized
+       p % pot ( i ) % pot % set(std_dim) % rmax = not_initialized
+       SELECT CASE (ipot)
+       CASE (lj_type,lj_charmm_type)
+          CALL pair_potential_lj_create(p%pot(i)%pot%set(std_dim)%lj)
+       CASE (wl_type)
+          CALL pair_potential_williams_create(p%pot(i)%pot%set(std_dim)%willis)
+       CASE (gw_type)
+          CALL pair_potential_goodwin_create(p%pot(i)%pot%set(std_dim)%goodwin)
+       CASE (ea_type)
+          CALL pair_potential_eam_create(p%pot(i)%pot%set(std_dim)%eam)
+       CASE (quip_type)
+          CALL pair_potential_quip_create(p%pot(i)%pot%set(std_dim)%quip)
+       CASE (ft_type)
+          CALL pair_potential_bmhft_create(p%pot(i)%pot%set(std_dim)%ft)
+       CASE (ftd_type)
+          CALL pair_potential_bmhftd_create(p%pot(i)%pot%set(std_dim)%ftd)
+       CASE (ip_type)
+          CALL pair_potential_ipbv_create(p%pot(i)%pot%set(std_dim)%ipbv)
+       CASE (b4_type)
+          CALL pair_potential_buck4r_create(p%pot(i)%pot%set(std_dim)%buck4r)
+       CASE (bm_type)
+          CALL pair_potential_buckmo_create(p%pot(i)%pot%set(std_dim)%buckmo)
+       CASE (gp_type)
+          CALL pair_potential_gp_create(p%pot(i)%pot%set(std_dim)%gp)
+       CASE (tersoff_type)
+          CALL pair_potential_tersoff_create(p%pot(i)%pot%set(std_dim)%tersoff)
+       CASE (siepmann_type)
+          CALL pair_potential_siepmann_create(p%pot(i)%pot%set(std_dim)%siepmann)
+       END SELECT
+       NULLIFY ( p%pot(i)%pot%spl_f  )
+       NULLIFY ( p%pot(i)%pot%pair_spline_data )
+    END DO
+
+    IF (ASSOCIATED(work)) CALL pair_potential_p_release(work)
   END SUBROUTINE pair_potential_reallocate
 
 ! *****************************************************************************
 !> \brief Creates the generic potential type
 !> \param gp ...
-!> \param error ...
 !> \author Teodoro Laino [teo] 11.2005
 ! *****************************************************************************
-  SUBROUTINE pair_potential_gp_create(gp, error)
+  SUBROUTINE pair_potential_gp_create(gp)
     TYPE(gp_pot_type), POINTER               :: gp
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_gp_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       CPPostcondition(.NOT.ASSOCIATED(gp),cp_failure_level,routineP,error,failure)
-       ALLOCATE(gp, stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       NULLIFY (gp%parameters)
-       NULLIFY (gp%values)
-       CALL pair_potential_gp_clean(gp, error=error)
-    END IF
+    CPASSERT(.NOT.ASSOCIATED(gp))
+    ALLOCATE(gp)
+    NULLIFY (gp%parameters)
+    NULLIFY (gp%values)
+    CALL pair_potential_gp_clean(gp)
   END SUBROUTINE pair_potential_gp_create
 
 ! *****************************************************************************
 !> \brief Copy two generic potential type
 !> \param gp_source ...
 !> \param gp_dest ...
-!> \param error ...
 !> \author Teodoro Laino [teo] 11.2005
 ! *****************************************************************************
-  SUBROUTINE pair_potential_gp_copy(gp_source, gp_dest, error)
+  SUBROUTINE pair_potential_gp_copy(gp_source, gp_dest)
     TYPE(gp_pot_type), POINTER               :: gp_source, gp_dest
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_gp_copy', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: idim, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: idim
 
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF (.NOT.ASSOCIATED(gp_source)) RETURN
-       IF (ASSOCIATED(gp_dest)) CALL pair_potential_gp_release(gp_dest, error=error)
-       CALL pair_potential_gp_create(gp_dest, error=error)
-       gp_dest%myid      = gp_source%myid
-       gp_dest%potential = gp_source%potential
-       gp_dest%variables = gp_source%variables
-       IF (ASSOCIATED(gp_source%parameters)) THEN
-          idim = SIZE(gp_source%parameters)
-          ALLOCATE(gp_dest%parameters(idim),stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-          gp_dest%parameters = gp_source%parameters
-       END IF
-       IF (ASSOCIATED(gp_source%values)) THEN
-          idim = SIZE(gp_source%values)
-          ALLOCATE(gp_dest%values(idim),stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-          gp_dest%values = gp_source%values
-       END IF
+    IF (.NOT.ASSOCIATED(gp_source)) RETURN
+    IF (ASSOCIATED(gp_dest)) CALL pair_potential_gp_release(gp_dest)
+    CALL pair_potential_gp_create(gp_dest)
+    gp_dest%myid      = gp_source%myid
+    gp_dest%potential = gp_source%potential
+    gp_dest%variables = gp_source%variables
+    IF (ASSOCIATED(gp_source%parameters)) THEN
+       idim = SIZE(gp_source%parameters)
+       ALLOCATE(gp_dest%parameters(idim))
+       gp_dest%parameters = gp_source%parameters
+    END IF
+    IF (ASSOCIATED(gp_source%values)) THEN
+       idim = SIZE(gp_source%values)
+       ALLOCATE(gp_dest%values(idim))
+       gp_dest%values = gp_source%values
     END IF
   END SUBROUTINE pair_potential_gp_copy
 
 ! *****************************************************************************
 !> \brief Cleans the generic potential type
 !> \param gp ...
-!> \param error ...
 !> \author Teodoro Laino [teo] 11.2005
 ! *****************************************************************************
-  SUBROUTINE pair_potential_gp_clean(gp, error)
+  SUBROUTINE pair_potential_gp_clean(gp)
     TYPE(gp_pot_type), POINTER               :: gp
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_gp_clean', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF (.NOT.ASSOCIATED(gp)) RETURN
-       gp%myid      = 0
-       gp%potential = ""
-       gp%variables = ""
-       IF (ASSOCIATED(gp%values)) THEN
-          DEALLOCATE(gp%values,stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       END IF
-       IF (ASSOCIATED(gp%parameters)) THEN
-          DEALLOCATE(gp%parameters,stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       END IF
+    IF (.NOT.ASSOCIATED(gp)) RETURN
+    gp%myid      = 0
+    gp%potential = ""
+    gp%variables = ""
+    IF (ASSOCIATED(gp%values)) THEN
+       DEALLOCATE(gp%values)
+    END IF
+    IF (ASSOCIATED(gp%parameters)) THEN
+       DEALLOCATE(gp%parameters)
     END IF
   END SUBROUTINE pair_potential_gp_clean
 
 ! *****************************************************************************
 !> \brief Destroys the generic potential type
 !> \param gp ...
-!> \param error ...
 !> \author Teodoro Laino [teo] 11.2005
 ! *****************************************************************************
-  SUBROUTINE pair_potential_gp_release(gp, error)
+  SUBROUTINE pair_potential_gp_release(gp)
     TYPE(gp_pot_type), POINTER               :: gp
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_gp_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF (ASSOCIATED(gp)) THEN
-          IF (ASSOCIATED(gp%parameters)) THEN
-             DEALLOCATE(gp%parameters, stat=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-          END IF
-          IF (ASSOCIATED(gp%values)) THEN
-             DEALLOCATE(gp%values, stat=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-          END IF
-          DEALLOCATE(gp, stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    IF (ASSOCIATED(gp)) THEN
+       IF (ASSOCIATED(gp%parameters)) THEN
+          DEALLOCATE(gp%parameters)
        END IF
-       NULLIFY(gp)
+       IF (ASSOCIATED(gp%values)) THEN
+          DEALLOCATE(gp%values)
+       END IF
+       DEALLOCATE(gp)
     END IF
+    NULLIFY(gp)
   END SUBROUTINE pair_potential_gp_release
 
 ! *****************************************************************************
 !> \brief Cleans the LJ potential type
 !> \param lj ...
-!> \param error ...
 !> \author Teodoro Laino [teo] 11.2005
 ! *****************************************************************************
-  SUBROUTINE pair_potential_lj_create(lj, error)
+  SUBROUTINE pair_potential_lj_create(lj)
     TYPE(lj_pot_type), POINTER               :: lj
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_lj_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       CPPostcondition(.NOT.ASSOCIATED(lj),cp_failure_level,routineP,error,failure)
-       ALLOCATE(lj, stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       CALL pair_potential_lj_clean(lj, error=error)
-    END IF
+    CPASSERT(.NOT.ASSOCIATED(lj))
+    ALLOCATE(lj)
+    CALL pair_potential_lj_clean(lj)
   END SUBROUTINE pair_potential_lj_create
 
 ! *****************************************************************************
 !> \brief Copy two LJ potential type
 !> \param lj_source ...
 !> \param lj_dest ...
-!> \param error ...
 !> \author Teodoro Laino [teo] 11.2005
 ! *****************************************************************************
-  SUBROUTINE pair_potential_lj_copy(lj_source, lj_dest, error)
+  SUBROUTINE pair_potential_lj_copy(lj_source, lj_dest)
     TYPE(lj_pot_type), POINTER               :: lj_source, lj_dest
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_lj_copy', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF (.NOT.ASSOCIATED(lj_source)) RETURN
-       IF (ASSOCIATED(lj_dest)) CALL pair_potential_lj_release(lj_dest, error=error)
-       CALL pair_potential_lj_create(lj_dest, error=error)
-       lj_dest%epsilon = lj_source%epsilon
-       lj_dest%sigma6  = lj_source%sigma6
-       lj_dest%sigma12 = lj_source%sigma12
-    END IF
+    IF (.NOT.ASSOCIATED(lj_source)) RETURN
+    IF (ASSOCIATED(lj_dest)) CALL pair_potential_lj_release(lj_dest)
+    CALL pair_potential_lj_create(lj_dest)
+    lj_dest%epsilon = lj_source%epsilon
+    lj_dest%sigma6  = lj_source%sigma6
+    lj_dest%sigma12 = lj_source%sigma12
   END SUBROUTINE pair_potential_lj_copy
 
 ! *****************************************************************************
 !> \brief Creates the LJ potential type
 !> \param lj ...
-!> \param error ...
 !> \author Teodoro Laino [teo] 11.2005
 ! *****************************************************************************
-  SUBROUTINE pair_potential_lj_clean(lj, error)
+  SUBROUTINE pair_potential_lj_clean(lj)
     TYPE(lj_pot_type), POINTER               :: lj
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_lj_clean', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF (.NOT.ASSOCIATED(lj)) RETURN
-       lj%epsilon = 0.0_dp
-       lj%sigma6  = 0.0_dp
-       lj%sigma12 = 0.0_dp
-    END IF
+    IF (.NOT.ASSOCIATED(lj)) RETURN
+    lj%epsilon = 0.0_dp
+    lj%sigma6  = 0.0_dp
+    lj%sigma12 = 0.0_dp
   END SUBROUTINE pair_potential_lj_clean
 
 ! *****************************************************************************
 !> \brief Destroys the LJ potential type
 !> \param lj ...
-!> \param error ...
 !> \author Teodoro Laino [teo] 11.2005
 ! *****************************************************************************
-  SUBROUTINE pair_potential_lj_release(lj, error)
+  SUBROUTINE pair_potential_lj_release(lj)
     TYPE(lj_pot_type), POINTER               :: lj
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_lj_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF (ASSOCIATED(lj)) THEN
-          DEALLOCATE(lj, stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       END IF
-       NULLIFY(lj)
+    IF (ASSOCIATED(lj)) THEN
+       DEALLOCATE(lj)
     END IF
+    NULLIFY(lj)
   END SUBROUTINE pair_potential_lj_release
 
 ! *****************************************************************************
 !> \brief Creates the WILLIAMS potential type
 !> \param willis ...
-!> \param error ...
 !> \author Teodoro Laino [teo] 11.2005
 ! *****************************************************************************
-  SUBROUTINE pair_potential_williams_create(willis, error)
+  SUBROUTINE pair_potential_williams_create(willis)
     TYPE(williams_pot_type), POINTER         :: willis
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: &
       routineN = 'pair_potential_williams_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       CPPostcondition(.NOT.ASSOCIATED(willis),cp_failure_level,routineP,error,failure)
-       ALLOCATE(willis, stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       CALL pair_potential_williams_clean(willis, error=error)
-    END IF
+    CPASSERT(.NOT.ASSOCIATED(willis))
+    ALLOCATE(willis)
+    CALL pair_potential_williams_clean(willis)
   END SUBROUTINE pair_potential_williams_create
 
 ! *****************************************************************************
 !> \brief Copy two WILLIAMS potential type
 !> \param willis_source ...
 !> \param willis_dest ...
-!> \param error ...
 !> \author Teodoro Laino [teo] 11.2005
 ! *****************************************************************************
-  SUBROUTINE pair_potential_williams_copy(willis_source, willis_dest, error)
+  SUBROUTINE pair_potential_williams_copy(willis_source, willis_dest)
     TYPE(williams_pot_type), POINTER         :: willis_source, willis_dest
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_williams_copy', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF (.NOT.ASSOCIATED(willis_source)) RETURN
-       IF (ASSOCIATED(willis_dest)) CALL pair_potential_williams_release(willis_dest, error=error)
-       CALL pair_potential_williams_create(willis_dest, error=error)
-       willis_dest%a = willis_source%a
-       willis_dest%b = willis_source%b
-       willis_dest%c = willis_source%c
-    END IF
+    IF (.NOT.ASSOCIATED(willis_source)) RETURN
+    IF (ASSOCIATED(willis_dest)) CALL pair_potential_williams_release(willis_dest)
+    CALL pair_potential_williams_create(willis_dest)
+    willis_dest%a = willis_source%a
+    willis_dest%b = willis_source%b
+    willis_dest%c = willis_source%c
   END SUBROUTINE pair_potential_williams_copy
 
 ! *****************************************************************************
 !> \brief Creates the WILLIAMS potential type
 !> \param willis ...
-!> \param error ...
 !> \author Teodoro Laino [teo] 11.2005
 ! *****************************************************************************
-  SUBROUTINE pair_potential_williams_clean(willis, error)
+  SUBROUTINE pair_potential_williams_clean(willis)
     TYPE(williams_pot_type), POINTER         :: willis
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: &
       routineN = 'pair_potential_williams_clean', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF(.NOT.ASSOCIATED(willis)) RETURN
-       willis%a = 0.0_dp
-       willis%b = 0.0_dp
-       willis%c = 0.0_dp
-    END IF
+    IF(.NOT.ASSOCIATED(willis)) RETURN
+    willis%a = 0.0_dp
+    willis%b = 0.0_dp
+    willis%c = 0.0_dp
   END SUBROUTINE pair_potential_williams_clean
 
 ! *****************************************************************************
 !> \brief Destroys the WILLIAMS potential type
 !> \param willis ...
-!> \param error ...
 !> \author Teodoro Laino [teo] 11.2005
 ! *****************************************************************************
-  SUBROUTINE pair_potential_williams_release(willis, error)
+  SUBROUTINE pair_potential_williams_release(willis)
     TYPE(williams_pot_type), POINTER         :: willis
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: &
       routineN = 'pair_potential_williams_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF (ASSOCIATED(willis)) THEN
-          DEALLOCATE(willis, stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       END IF
-       NULLIFY(willis)
+    IF (ASSOCIATED(willis)) THEN
+       DEALLOCATE(willis)
     END IF
+    NULLIFY(willis)
   END SUBROUTINE pair_potential_williams_release
 
 ! *****************************************************************************
 !> \brief Creates the GOODWIN potential type
 !> \param goodwin ...
-!> \param error ...
 !> \author Teodoro Laino [teo] 11.2005
 ! *****************************************************************************
-  SUBROUTINE pair_potential_goodwin_create(goodwin, error)
+  SUBROUTINE pair_potential_goodwin_create(goodwin)
     TYPE(goodwin_pot_type), POINTER          :: goodwin
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: &
       routineN = 'pair_potential_goodwin_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       CPPostcondition(.NOT.ASSOCIATED(goodwin),cp_failure_level,routineP,error,failure)
-       ALLOCATE(goodwin, stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       CALL pair_potential_goodwin_clean(goodwin, error=error)
-    END IF
+    CPASSERT(.NOT.ASSOCIATED(goodwin))
+    ALLOCATE(goodwin)
+    CALL pair_potential_goodwin_clean(goodwin)
   END SUBROUTINE pair_potential_goodwin_create
 
 ! *****************************************************************************
 !> \brief Copy two GOODWIN potential type
 !> \param goodwin_source ...
 !> \param goodwin_dest ...
-!> \param error ...
 !> \author Teodoro Laino [teo] 11.2005
 ! *****************************************************************************
-  SUBROUTINE pair_potential_goodwin_copy(goodwin_source, goodwin_dest, error)
+  SUBROUTINE pair_potential_goodwin_copy(goodwin_source, goodwin_dest)
     TYPE(goodwin_pot_type), POINTER          :: goodwin_source, goodwin_dest
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_goodwin_copy', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF (.NOT.ASSOCIATED(goodwin_source)) RETURN
-       IF (ASSOCIATED(goodwin_dest)) CALL pair_potential_goodwin_release(goodwin_dest, error=error)
-       CALL pair_potential_goodwin_create(goodwin_dest, error=error)
-       goodwin_dest%vr0 = goodwin_source%vr0
-       goodwin_dest%d   = goodwin_source%d
-       goodwin_dest%dc  = goodwin_source%dc
-       goodwin_dest%m   = goodwin_source%m
-       goodwin_dest%mc  = goodwin_source%mc
-    END IF
+    IF (.NOT.ASSOCIATED(goodwin_source)) RETURN
+    IF (ASSOCIATED(goodwin_dest)) CALL pair_potential_goodwin_release(goodwin_dest)
+    CALL pair_potential_goodwin_create(goodwin_dest)
+    goodwin_dest%vr0 = goodwin_source%vr0
+    goodwin_dest%d   = goodwin_source%d
+    goodwin_dest%dc  = goodwin_source%dc
+    goodwin_dest%m   = goodwin_source%m
+    goodwin_dest%mc  = goodwin_source%mc
   END SUBROUTINE pair_potential_goodwin_copy
 
 ! *****************************************************************************
 !> \brief Creates the GOODWIN potential type
 !> \param goodwin ...
-!> \param error ...
 !> \author Teodoro Laino [teo] 11.2005
 ! *****************************************************************************
-  SUBROUTINE pair_potential_goodwin_clean(goodwin, error)
+  SUBROUTINE pair_potential_goodwin_clean(goodwin)
     TYPE(goodwin_pot_type), POINTER          :: goodwin
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_goodwin_clean', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF(.NOT.ASSOCIATED(goodwin)) RETURN
-       goodwin%vr0 = 0.0_dp
-       goodwin%d   = 0.0_dp
-       goodwin%dc  = 0.0_dp
-       goodwin%m   = 0.0_dp
-       goodwin%mc  = 0.0_dp
-    END IF
+    IF(.NOT.ASSOCIATED(goodwin)) RETURN
+    goodwin%vr0 = 0.0_dp
+    goodwin%d   = 0.0_dp
+    goodwin%dc  = 0.0_dp
+    goodwin%m   = 0.0_dp
+    goodwin%mc  = 0.0_dp
   END SUBROUTINE pair_potential_goodwin_clean
 
 ! *****************************************************************************
 !> \brief Destroys the GOODWIN potential type
 !> \param goodwin ...
-!> \param error ...
 !> \author Teodoro Laino [teo] 11.2005
 ! *****************************************************************************
-  SUBROUTINE pair_potential_goodwin_release(goodwin, error)
+  SUBROUTINE pair_potential_goodwin_release(goodwin)
     TYPE(goodwin_pot_type), POINTER          :: goodwin
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: &
       routineN = 'pair_potential_goodwin_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF (ASSOCIATED(goodwin)) THEN
-          DEALLOCATE(goodwin, stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       END IF
-       NULLIFY(goodwin)
+    IF (ASSOCIATED(goodwin)) THEN
+       DEALLOCATE(goodwin)
     END IF
+    NULLIFY(goodwin)
   END SUBROUTINE pair_potential_goodwin_release
 
 ! *****************************************************************************
 !> \brief Creates the EAM potential type
 !> \param eam ...
-!> \param error ...
 !> \author Teodoro Laino [teo] 11.2005
 ! *****************************************************************************
-  SUBROUTINE pair_potential_eam_create(eam, error)
+  SUBROUTINE pair_potential_eam_create(eam)
     TYPE(eam_pot_type), POINTER              :: eam
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_eam_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       CPPostcondition(.NOT.ASSOCIATED(eam),cp_failure_level,routineP,error,failure)
-       ALLOCATE(eam, stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       NULLIFY(eam%rho, eam%phi, eam%frho, eam%rhoval, eam%rval,&
-               eam%rhop, eam%phip, eam%frhop)
-       CALL pair_potential_eam_clean(eam, error=error)
-    END IF
+    CPASSERT(.NOT.ASSOCIATED(eam))
+    ALLOCATE(eam)
+    NULLIFY(eam%rho, eam%phi, eam%frho, eam%rhoval, eam%rval,&
+            eam%rhop, eam%phip, eam%frhop)
+    CALL pair_potential_eam_clean(eam)
   END SUBROUTINE pair_potential_eam_create
 
 ! *****************************************************************************
 !> \brief Copy two EAM potential type
 !> \param eam_source ...
 !> \param eam_dest ...
-!> \param error ...
 !> \author Teodoro Laino [teo] 11.2005
 ! *****************************************************************************
-  SUBROUTINE pair_potential_eam_copy(eam_source, eam_dest, error)
+  SUBROUTINE pair_potential_eam_copy(eam_source, eam_dest)
     TYPE(eam_pot_type), POINTER              :: eam_source, eam_dest
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_eam_copy', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF (.NOT.ASSOCIATED(eam_source)) RETURN
-       IF (ASSOCIATED(eam_dest)) CALL pair_potential_eam_release(eam_dest, error=error)
-       CALL pair_potential_eam_create(eam_dest, error=error)
-       eam_dest%eam_file_name = eam_source%eam_file_name
-       eam_dest%drar          = eam_source%drar
-       eam_dest%drhoar        = eam_source%drhoar
-       eam_dest%acutal        = eam_source%acutal
-       eam_dest%npoints       = eam_source%npoints
-       ! Allocate arrays with the proper size
-       CALL reallocate(eam_dest%rho,   1, eam_dest%npoints)
-       CALL reallocate(eam_dest%rhop,  1, eam_dest%npoints)
-       CALL reallocate(eam_dest%phi,   1, eam_dest%npoints)
-       CALL reallocate(eam_dest%phip,  1, eam_dest%npoints)
-       CALL reallocate(eam_dest%frho,  1, eam_dest%npoints)
-       CALL reallocate(eam_dest%frhop, 1, eam_dest%npoints)
-       CALL reallocate(eam_dest%rval,  1, eam_dest%npoints)
-       CALL reallocate(eam_dest%rhoval,1, eam_dest%npoints)
-       eam_dest%rho           = eam_source%rho
-       eam_dest%phi           = eam_source%phi
-       eam_dest%frho          = eam_source%frho
-       eam_dest%rhoval        = eam_source%rhoval
-       eam_dest%rval          = eam_source%rval
-       eam_dest%rhop          = eam_source%rhop
-       eam_dest%phip          = eam_source%phip
-       eam_dest%frhop         = eam_source%frhop
-    END IF
+    IF (.NOT.ASSOCIATED(eam_source)) RETURN
+    IF (ASSOCIATED(eam_dest)) CALL pair_potential_eam_release(eam_dest)
+    CALL pair_potential_eam_create(eam_dest)
+    eam_dest%eam_file_name = eam_source%eam_file_name
+    eam_dest%drar          = eam_source%drar
+    eam_dest%drhoar        = eam_source%drhoar
+    eam_dest%acutal        = eam_source%acutal
+    eam_dest%npoints       = eam_source%npoints
+    ! Allocate arrays with the proper size
+    CALL reallocate(eam_dest%rho,   1, eam_dest%npoints)
+    CALL reallocate(eam_dest%rhop,  1, eam_dest%npoints)
+    CALL reallocate(eam_dest%phi,   1, eam_dest%npoints)
+    CALL reallocate(eam_dest%phip,  1, eam_dest%npoints)
+    CALL reallocate(eam_dest%frho,  1, eam_dest%npoints)
+    CALL reallocate(eam_dest%frhop, 1, eam_dest%npoints)
+    CALL reallocate(eam_dest%rval,  1, eam_dest%npoints)
+    CALL reallocate(eam_dest%rhoval,1, eam_dest%npoints)
+    eam_dest%rho           = eam_source%rho
+    eam_dest%phi           = eam_source%phi
+    eam_dest%frho          = eam_source%frho
+    eam_dest%rhoval        = eam_source%rhoval
+    eam_dest%rval          = eam_source%rval
+    eam_dest%rhop          = eam_source%rhop
+    eam_dest%phip          = eam_source%phip
+    eam_dest%frhop         = eam_source%frhop
   END SUBROUTINE pair_potential_eam_copy
 
 ! *****************************************************************************
 !> \brief Creates the EAM potential type
 !> \param eam ...
-!> \param error ...
 !> \author Teodoro Laino [teo] 11.2005
 ! *****************************************************************************
-  SUBROUTINE pair_potential_eam_clean(eam, error)
+  SUBROUTINE pair_potential_eam_clean(eam)
     TYPE(eam_pot_type), POINTER              :: eam
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_eam_clean', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF(.NOT.ASSOCIATED(eam)) RETURN
-       eam%eam_file_name = 'NULL'
-       eam%drar          = 0.0_dp
-       eam%drhoar        = 0.0_dp
-       eam%acutal        = 0.0_dp
-       eam%npoints       = 0
-       CALL reallocate(eam%rho,   1, eam%npoints)
-       CALL reallocate(eam%rhop,  1, eam%npoints)
-       CALL reallocate(eam%phi,   1, eam%npoints)
-       CALL reallocate(eam%phip,  1, eam%npoints)
-       CALL reallocate(eam%frho,  1, eam%npoints)
-       CALL reallocate(eam%frhop, 1, eam%npoints)
-       CALL reallocate(eam%rval,  1, eam%npoints)
-       CALL reallocate(eam%rhoval,1, eam%npoints)
-    END IF
+    IF(.NOT.ASSOCIATED(eam)) RETURN
+    eam%eam_file_name = 'NULL'
+    eam%drar          = 0.0_dp
+    eam%drhoar        = 0.0_dp
+    eam%acutal        = 0.0_dp
+    eam%npoints       = 0
+    CALL reallocate(eam%rho,   1, eam%npoints)
+    CALL reallocate(eam%rhop,  1, eam%npoints)
+    CALL reallocate(eam%phi,   1, eam%npoints)
+    CALL reallocate(eam%phip,  1, eam%npoints)
+    CALL reallocate(eam%frho,  1, eam%npoints)
+    CALL reallocate(eam%frhop, 1, eam%npoints)
+    CALL reallocate(eam%rval,  1, eam%npoints)
+    CALL reallocate(eam%rhoval,1, eam%npoints)
   END SUBROUTINE pair_potential_eam_clean
 
 ! *****************************************************************************
 !> \brief Destroys the EAM potential type
 !> \param eam ...
-!> \param error ...
 !> \author Teodoro Laino [teo] 11.2005
 ! *****************************************************************************
-  SUBROUTINE pair_potential_eam_release(eam, error)
+  SUBROUTINE pair_potential_eam_release(eam)
     TYPE(eam_pot_type), POINTER              :: eam
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_eam_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF (ASSOCIATED(eam)) THEN
-          IF (ASSOCIATED(eam%rho)) THEN
-             DEALLOCATE(eam%rho, stat=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-          END IF
-          IF (ASSOCIATED(eam%rhop)) THEN
-             DEALLOCATE(eam%rhop, stat=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-          END IF
-          IF (ASSOCIATED(eam%phi)) THEN
-             DEALLOCATE(eam%phi, stat=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-          END IF
-          IF (ASSOCIATED(eam%phip)) THEN
-             DEALLOCATE(eam%phip, stat=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-          END IF
-          IF (ASSOCIATED(eam%frho)) THEN
-             DEALLOCATE(eam%frho, stat=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-          END IF
-          IF (ASSOCIATED(eam%frhop)) THEN
-             DEALLOCATE(eam%frhop, stat=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-          END IF
-          IF (ASSOCIATED(eam%rval)) THEN
-             DEALLOCATE(eam%rval, stat=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-          END IF
-          IF (ASSOCIATED(eam%rhoval)) THEN
-             DEALLOCATE(eam%rhoval, stat=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-          END IF
-          DEALLOCATE(eam, stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    IF (ASSOCIATED(eam)) THEN
+       IF (ASSOCIATED(eam%rho)) THEN
+          DEALLOCATE(eam%rho)
        END IF
+       IF (ASSOCIATED(eam%rhop)) THEN
+          DEALLOCATE(eam%rhop)
+       END IF
+       IF (ASSOCIATED(eam%phi)) THEN
+          DEALLOCATE(eam%phi)
+       END IF
+       IF (ASSOCIATED(eam%phip)) THEN
+          DEALLOCATE(eam%phip)
+       END IF
+       IF (ASSOCIATED(eam%frho)) THEN
+          DEALLOCATE(eam%frho)
+       END IF
+       IF (ASSOCIATED(eam%frhop)) THEN
+          DEALLOCATE(eam%frhop)
+       END IF
+       IF (ASSOCIATED(eam%rval)) THEN
+          DEALLOCATE(eam%rval)
+       END IF
+       IF (ASSOCIATED(eam%rhoval)) THEN
+          DEALLOCATE(eam%rhoval)
+       END IF
+       DEALLOCATE(eam)
     END IF
   END SUBROUTINE pair_potential_eam_release
 
 ! *****************************************************************************
 !> \brief Creates the QUIP potential type
 !> \param quip ...
-!> \param error ...
 !> \author Teodoro Laino [teo] 11.2005
 ! *****************************************************************************
-  SUBROUTINE pair_potential_quip_create(quip, error)
+  SUBROUTINE pair_potential_quip_create(quip)
     TYPE(quip_pot_type), POINTER             :: quip
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_quip_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       CPPostcondition(.NOT.ASSOCIATED(quip),cp_failure_level,routineP,error,failure)
-       ALLOCATE(quip, stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       quip%quip_file_name=""
-       quip%init_args=""
-       quip%calc_args=""
-       CALL pair_potential_quip_clean(quip, error=error)
-    END IF
+    CPASSERT(.NOT.ASSOCIATED(quip))
+    ALLOCATE(quip)
+    quip%quip_file_name=""
+    quip%init_args=""
+    quip%calc_args=""
+    CALL pair_potential_quip_clean(quip)
   END SUBROUTINE pair_potential_quip_create
 
 ! *****************************************************************************
 !> \brief Copy two QUIP potential type
 !> \param quip_source ...
 !> \param quip_dest ...
-!> \param error ...
 !> \author Teodoro Laino [teo] 11.2005
 ! *****************************************************************************
-  SUBROUTINE pair_potential_quip_copy(quip_source, quip_dest, error)
+  SUBROUTINE pair_potential_quip_copy(quip_source, quip_dest)
     TYPE(quip_pot_type), POINTER             :: quip_source, quip_dest
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_quip_copy', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF (.NOT.ASSOCIATED(quip_source)) RETURN
-       IF (ASSOCIATED(quip_dest)) CALL pair_potential_quip_release(quip_dest, error=error)
-       CALL pair_potential_quip_create(quip_dest, error=error)
-       quip_dest%quip_file_name = quip_source%quip_file_name
-       quip_dest%init_args = quip_source%init_args
-       quip_dest%calc_args = quip_source%calc_args
-    END IF
+    IF (.NOT.ASSOCIATED(quip_source)) RETURN
+    IF (ASSOCIATED(quip_dest)) CALL pair_potential_quip_release(quip_dest)
+    CALL pair_potential_quip_create(quip_dest)
+    quip_dest%quip_file_name = quip_source%quip_file_name
+    quip_dest%init_args = quip_source%init_args
+    quip_dest%calc_args = quip_source%calc_args
   END SUBROUTINE pair_potential_quip_copy
 
 ! *****************************************************************************
 !> \brief Creates the QUIP potential type
 !> \param quip ...
-!> \param error ...
 !> \author Teodoro Laino [teo] 11.2005
 ! *****************************************************************************
-  SUBROUTINE pair_potential_quip_clean(quip, error)
+  SUBROUTINE pair_potential_quip_clean(quip)
     TYPE(quip_pot_type), POINTER             :: quip
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_quip_clean', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF(.NOT.ASSOCIATED(quip)) RETURN
-       quip%quip_file_name = 'NULL'
-       quip%init_args = ''
-       quip%calc_args = ''
-    END IF
+    IF(.NOT.ASSOCIATED(quip)) RETURN
+    quip%quip_file_name = 'NULL'
+    quip%init_args = ''
+    quip%calc_args = ''
   END SUBROUTINE pair_potential_quip_clean
 
 ! *****************************************************************************
 !> \brief Destroys the QUIP potential type
 !> \param quip ...
-!> \param error ...
 !> \author Teodoro Laino [teo] 11.2005
 ! *****************************************************************************
-  SUBROUTINE pair_potential_quip_release(quip, error)
+  SUBROUTINE pair_potential_quip_release(quip)
     TYPE(quip_pot_type), POINTER             :: quip
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_quip_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF (ASSOCIATED(quip)) THEN
-          DEALLOCATE(quip, stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       END IF
+    IF (ASSOCIATED(quip)) THEN
+       DEALLOCATE(quip)
     END IF
   END SUBROUTINE pair_potential_quip_release
 
 ! *****************************************************************************
 !> \brief Creates the BMHFT (TOSI-FUMI) potential type
 !> \param ft ...
-!> \param error ...
 !> \author Teodoro Laino [teo] 11.2005
 ! *****************************************************************************
-  SUBROUTINE pair_potential_bmhft_create(ft, error)
+  SUBROUTINE pair_potential_bmhft_create(ft)
     TYPE(ft_pot_type), POINTER               :: ft
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_bmhft_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       CPPostcondition(.NOT.ASSOCIATED(ft),cp_failure_level,routineP,error,failure)
-       ALLOCATE(ft, stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       CALL pair_potential_bmhft_clean(ft, error=error)
-    END IF
+    CPASSERT(.NOT.ASSOCIATED(ft))
+    ALLOCATE(ft)
+    CALL pair_potential_bmhft_clean(ft)
   END SUBROUTINE pair_potential_bmhft_create
 
 ! *****************************************************************************
 !> \brief Copy two BMHFT (TOSI-FUMI) potential type
 !> \param ft_source ...
 !> \param ft_dest ...
-!> \param error ...
 !> \author Teodoro Laino [teo] 11.2005
 ! *****************************************************************************
-  SUBROUTINE pair_potential_bmhft_copy(ft_source, ft_dest, error)
+  SUBROUTINE pair_potential_bmhft_copy(ft_source, ft_dest)
     TYPE(ft_pot_type), POINTER               :: ft_source, ft_dest
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_bmhft_copy', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF (.NOT.ASSOCIATED(ft_source)) RETURN
-       IF (ASSOCIATED(ft_dest)) CALL pair_potential_bmhft_release(ft_dest, error=error)
-       CALL pair_potential_bmhft_create(ft_dest, error=error)
-       ft_dest%A = ft_source%A
-       ft_dest%B = ft_source%B
-       ft_dest%C = ft_source%C
-       ft_dest%D = ft_source%D
-    END IF
+    IF (.NOT.ASSOCIATED(ft_source)) RETURN
+    IF (ASSOCIATED(ft_dest)) CALL pair_potential_bmhft_release(ft_dest)
+    CALL pair_potential_bmhft_create(ft_dest)
+    ft_dest%A = ft_source%A
+    ft_dest%B = ft_source%B
+    ft_dest%C = ft_source%C
+    ft_dest%D = ft_source%D
   END SUBROUTINE pair_potential_bmhft_copy
 
 ! *****************************************************************************
 !> \brief Creates the BMHFT (TOSI-FUMI) potential type
 !> \param ft ...
-!> \param error ...
 !> \author Teodoro Laino [teo] 11.2005
 ! *****************************************************************************
-  SUBROUTINE pair_potential_bmhft_clean(ft, error)
+  SUBROUTINE pair_potential_bmhft_clean(ft)
     TYPE(ft_pot_type), POINTER               :: ft
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_bmhft_clean', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF(.NOT.ASSOCIATED(ft)) RETURN
-       ft%A = 0.0_dp
-       ft%B = 0.0_dp
-       ft%C = 0.0_dp
-       ft%D = 0.0_dp
-    END IF
+    IF(.NOT.ASSOCIATED(ft)) RETURN
+    ft%A = 0.0_dp
+    ft%B = 0.0_dp
+    ft%C = 0.0_dp
+    ft%D = 0.0_dp
   END SUBROUTINE pair_potential_bmhft_clean
 
 ! *****************************************************************************
 !> \brief Destroys the BMHFT potential type
 !> \param ft ...
-!> \param error ...
 !> \author Teodoro Laino [teo] 11.2005
 ! *****************************************************************************
-  SUBROUTINE pair_potential_bmhft_release(ft, error)
+  SUBROUTINE pair_potential_bmhft_release(ft)
     TYPE(ft_pot_type), POINTER               :: ft
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_bmhft_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF (ASSOCIATED(ft)) THEN
-          DEALLOCATE(ft, stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       END IF
-       NULLIFY(ft)
+    IF (ASSOCIATED(ft)) THEN
+       DEALLOCATE(ft)
     END IF
+    NULLIFY(ft)
   END SUBROUTINE pair_potential_bmhft_release
 
 ! *****************************************************************************
 !> \brief Creates the BMHFTD (damped TOSI-FUMI) potential type
 !> \param ftd ...
-!> \param error ...
 !> \author Mathieu Salanne 05.2010
 ! *****************************************************************************
-  SUBROUTINE pair_potential_bmhftd_create(ftd, error)
+  SUBROUTINE pair_potential_bmhftd_create(ftd)
     TYPE(ftd_pot_type), POINTER              :: ftd
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_bmhftd_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       CPPostcondition(.NOT.ASSOCIATED(ftd),cp_failure_level,routineP,error,failure)
-       ALLOCATE(ftd, stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       CALL pair_potential_bmhftd_clean(ftd, error=error)
-    END IF
+    CPASSERT(.NOT.ASSOCIATED(ftd))
+    ALLOCATE(ftd)
+    CALL pair_potential_bmhftd_clean(ftd)
   END SUBROUTINE pair_potential_bmhftd_create
 
 ! *****************************************************************************
 !> \brief Copy two BMHFTD (Damped TOSI-FUMI) potential type
 !> \param ftd_source ...
 !> \param ftd_dest ...
-!> \param error ...
 !> \author Mathieu Salanne 05.2010
 ! *****************************************************************************
-  SUBROUTINE pair_potential_bmhftd_copy(ftd_source, ftd_dest, error)
+  SUBROUTINE pair_potential_bmhftd_copy(ftd_source, ftd_dest)
     TYPE(ftd_pot_type), POINTER              :: ftd_source, ftd_dest
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_bmhftd_copy', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF (.NOT.ASSOCIATED(ftd_source)) RETURN
-       IF (ASSOCIATED(ftd_dest)) CALL pair_potential_bmhftd_release(ftd_dest, error=error)
-       CALL pair_potential_bmhftd_create(ftd_dest, error=error)
-       ftd_dest%A = ftd_source%A
-       ftd_dest%B = ftd_source%B
-       ftd_dest%C = ftd_source%C
-       ftd_dest%D = ftd_source%D
-       ftd_dest%BD = ftd_source%BD
-    END IF
+    IF (.NOT.ASSOCIATED(ftd_source)) RETURN
+    IF (ASSOCIATED(ftd_dest)) CALL pair_potential_bmhftd_release(ftd_dest)
+    CALL pair_potential_bmhftd_create(ftd_dest)
+    ftd_dest%A = ftd_source%A
+    ftd_dest%B = ftd_source%B
+    ftd_dest%C = ftd_source%C
+    ftd_dest%D = ftd_source%D
+    ftd_dest%BD = ftd_source%BD
   END SUBROUTINE pair_potential_bmhftd_copy
 
 ! *****************************************************************************
 !> \brief Cleans the BMHFTD (damped TOSI-FUMI) potential type
 !> \param ftd ...
-!> \param error ...
 !> \author Mathieu Salanne
 ! *****************************************************************************
-  SUBROUTINE pair_potential_bmhftd_clean(ftd, error)
+  SUBROUTINE pair_potential_bmhftd_clean(ftd)
     TYPE(ftd_pot_type), POINTER              :: ftd
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_bmhftd_clean', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF(.NOT.ASSOCIATED(ftd)) RETURN
-       ftd%A = 0.0_dp
-       ftd%B = 0.0_dp
-       ftd%C = 0.0_dp
-       ftd%D = 0.0_dp
-       ftd%BD = 0.0_dp
-    END IF
+    IF(.NOT.ASSOCIATED(ftd)) RETURN
+    ftd%A = 0.0_dp
+    ftd%B = 0.0_dp
+    ftd%C = 0.0_dp
+    ftd%D = 0.0_dp
+    ftd%BD = 0.0_dp
   END SUBROUTINE pair_potential_bmhftd_clean
 
 ! *****************************************************************************
 !> \brief Destroys the BMHFTD potential type
 !> \param ftd ...
-!> \param error ...
 !> \author Mathieu Salanne 05.2010
 ! *****************************************************************************
-  SUBROUTINE pair_potential_bmhftd_release(ftd, error)
+  SUBROUTINE pair_potential_bmhftd_release(ftd)
     TYPE(ftd_pot_type), POINTER              :: ftd
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: &
       routineN = 'pair_potential_bmhftd_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF (ASSOCIATED(ftd)) THEN
-          DEALLOCATE(ftd, stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       END IF
-       NULLIFY(ftd)
+    IF (ASSOCIATED(ftd)) THEN
+       DEALLOCATE(ftd)
     END IF
+    NULLIFY(ftd)
   END SUBROUTINE pair_potential_bmhftd_release
 
 ! *****************************************************************************
 !> \brief Creates the IPBV potential type
 !> \param ipbv ...
-!> \param error ...
 !> \author Teodoro Laino [teo] 11.2005
 ! *****************************************************************************
-  SUBROUTINE pair_potential_ipbv_create(ipbv, error)
+  SUBROUTINE pair_potential_ipbv_create(ipbv)
     TYPE(ipbv_pot_type), POINTER             :: ipbv
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_ipbv_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       CPPostcondition(.NOT.ASSOCIATED(ipbv),cp_failure_level,routineP,error,failure)
-       ALLOCATE(ipbv, stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       CALL pair_potential_ipbv_clean(ipbv, error=error)
-    END IF
+    CPASSERT(.NOT.ASSOCIATED(ipbv))
+    ALLOCATE(ipbv)
+    CALL pair_potential_ipbv_clean(ipbv)
   END SUBROUTINE pair_potential_ipbv_create
 
 ! *****************************************************************************
 !> \brief Copy two IPBV potential type
 !> \param ipbv_source ...
 !> \param ipbv_dest ...
-!> \param error ...
 !> \author Teodoro Laino [teo] 11.2005
 ! *****************************************************************************
-  SUBROUTINE pair_potential_ipbv_copy(ipbv_source, ipbv_dest, error)
+  SUBROUTINE pair_potential_ipbv_copy(ipbv_source, ipbv_dest)
     TYPE(ipbv_pot_type), POINTER             :: ipbv_source, ipbv_dest
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_ipbv_copy', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF (.NOT.ASSOCIATED(ipbv_source)) RETURN
-       IF (ASSOCIATED(ipbv_dest)) CALL pair_potential_ipbv_release(ipbv_dest, error=error)
-       CALL pair_potential_ipbv_create(ipbv_dest, error=error)
-       ipbv_dest%a     = ipbv_source%a
-       ipbv_dest%rcore = ipbv_source%rcore
-       ipbv_dest%b     = ipbv_source%b
-       ipbv_dest%m     = ipbv_source%m
-    END IF
+    IF (.NOT.ASSOCIATED(ipbv_source)) RETURN
+    IF (ASSOCIATED(ipbv_dest)) CALL pair_potential_ipbv_release(ipbv_dest)
+    CALL pair_potential_ipbv_create(ipbv_dest)
+    ipbv_dest%a     = ipbv_source%a
+    ipbv_dest%rcore = ipbv_source%rcore
+    ipbv_dest%b     = ipbv_source%b
+    ipbv_dest%m     = ipbv_source%m
   END SUBROUTINE pair_potential_ipbv_copy
 
 ! *****************************************************************************
 !> \brief Creates the IPBV potential type
 !> \param ipbv ...
-!> \param error ...
 !> \author Teodoro Laino [teo] 11.2005
 ! *****************************************************************************
-  SUBROUTINE pair_potential_ipbv_clean(ipbv, error)
+  SUBROUTINE pair_potential_ipbv_clean(ipbv)
     TYPE(ipbv_pot_type), POINTER             :: ipbv
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_ipbv_clean', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF(.NOT.ASSOCIATED(ipbv)) RETURN
-       ipbv%a     = 0.0_dp
-       ipbv%rcore = 0.0_dp
-       ipbv%b     = 0.0_dp
-       ipbv%m     = 0.0_dp
-    END IF
+    IF(.NOT.ASSOCIATED(ipbv)) RETURN
+    ipbv%a     = 0.0_dp
+    ipbv%rcore = 0.0_dp
+    ipbv%b     = 0.0_dp
+    ipbv%m     = 0.0_dp
   END SUBROUTINE pair_potential_ipbv_clean
 
 ! *****************************************************************************
 !> \brief Destroys the IPBV potential type
 !> \param ipbv ...
-!> \param error ...
 !> \author Teodoro Laino [teo] 11.2005
 ! *****************************************************************************
-  SUBROUTINE pair_potential_ipbv_release(ipbv, error)
+  SUBROUTINE pair_potential_ipbv_release(ipbv)
     TYPE(ipbv_pot_type), POINTER             :: ipbv
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_ipbv_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF (ASSOCIATED(ipbv)) THEN
-          DEALLOCATE(ipbv, stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       END IF
-       NULLIFY(ipbv)
+    IF (ASSOCIATED(ipbv)) THEN
+       DEALLOCATE(ipbv)
     END IF
+    NULLIFY(ipbv)
   END SUBROUTINE pair_potential_ipbv_release
 
 ! *****************************************************************************
 !> \brief Creates the Buckingham 4 ranges  potential type
 !> \param buck4r ...
-!> \param error ...
 !> \author MI 10.2006
 ! *****************************************************************************
-  SUBROUTINE pair_potential_buck4r_create(buck4r, error)
+  SUBROUTINE pair_potential_buck4r_create(buck4r)
     TYPE(buck4ran_pot_type), POINTER         :: buck4r
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_buck4r_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       CPPostcondition(.NOT.ASSOCIATED(buck4r),cp_failure_level,routineP,error,failure)
-       ALLOCATE(buck4r, stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       CALL pair_potential_buck4r_clean(buck4r, error=error)
-    END IF
+    CPASSERT(.NOT.ASSOCIATED(buck4r))
+    ALLOCATE(buck4r)
+    CALL pair_potential_buck4r_clean(buck4r)
   END SUBROUTINE pair_potential_buck4r_create
 
 ! *****************************************************************************
 !> \brief Copy two Buckingham 4 ranges  potential type
 !> \param buck4r_source ...
 !> \param buck4r_dest ...
-!> \param error ...
 !> \author MI 10.2006
 ! *****************************************************************************
-  SUBROUTINE pair_potential_buck4r_copy(buck4r_source, buck4r_dest, error)
+  SUBROUTINE pair_potential_buck4r_copy(buck4r_source, buck4r_dest)
     TYPE(buck4ran_pot_type), POINTER         :: buck4r_source, buck4r_dest
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_buck4r_copy', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF (.NOT.ASSOCIATED(buck4r_source)) RETURN
-       IF (ASSOCIATED(buck4r_dest)) CALL pair_potential_buck4r_release(buck4r_dest, error=error)
-       CALL pair_potential_buck4r_create(buck4r_dest, error=error)
-       buck4r_dest%a      = buck4r_source%a
-       buck4r_dest%b      = buck4r_source%b
-       buck4r_dest%c      = buck4r_source%c
-       buck4r_dest%r1     = buck4r_source%r1
-       buck4r_dest%r2     = buck4r_source%r2
-       buck4r_dest%r3     = buck4r_source%r3
-       buck4r_dest%poly1  = buck4r_source%poly1
-       buck4r_dest%poly2  = buck4r_source%poly2
-       buck4r_dest%npoly1 = buck4r_source%npoly1
-       buck4r_dest%npoly2 = buck4r_source%npoly2
-    END IF
+    IF (.NOT.ASSOCIATED(buck4r_source)) RETURN
+    IF (ASSOCIATED(buck4r_dest)) CALL pair_potential_buck4r_release(buck4r_dest)
+    CALL pair_potential_buck4r_create(buck4r_dest)
+    buck4r_dest%a      = buck4r_source%a
+    buck4r_dest%b      = buck4r_source%b
+    buck4r_dest%c      = buck4r_source%c
+    buck4r_dest%r1     = buck4r_source%r1
+    buck4r_dest%r2     = buck4r_source%r2
+    buck4r_dest%r3     = buck4r_source%r3
+    buck4r_dest%poly1  = buck4r_source%poly1
+    buck4r_dest%poly2  = buck4r_source%poly2
+    buck4r_dest%npoly1 = buck4r_source%npoly1
+    buck4r_dest%npoly2 = buck4r_source%npoly2
   END SUBROUTINE pair_potential_buck4r_copy
 
 ! *****************************************************************************
 !> \brief Creates the Buckingham 4 ranges  potential type
 !> \param buck4r ...
-!> \param error ...
 !> \author MI 10.2006
 ! *****************************************************************************
-  SUBROUTINE pair_potential_buck4r_clean(buck4r, error)
+  SUBROUTINE pair_potential_buck4r_clean(buck4r)
     TYPE(buck4ran_pot_type), POINTER         :: buck4r
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_buck4r_clean', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF(.NOT.ASSOCIATED(buck4r)) RETURN
-       buck4r%a  = 0.0_dp
-       buck4r%b  = 0.0_dp
-       buck4r%c  = 0.0_dp
-       buck4r%r1 = 0.0_dp
-       buck4r%r2 = 0.0_dp
-       buck4r%r3 = 0.0_dp
-       buck4r%poly1  = 0.0_dp
-       buck4r%npoly1 = 0
-       buck4r%poly2  = 0.0_dp
-       buck4r%npoly2 = 0
-    END IF
+    IF(.NOT.ASSOCIATED(buck4r)) RETURN
+    buck4r%a  = 0.0_dp
+    buck4r%b  = 0.0_dp
+    buck4r%c  = 0.0_dp
+    buck4r%r1 = 0.0_dp
+    buck4r%r2 = 0.0_dp
+    buck4r%r3 = 0.0_dp
+    buck4r%poly1  = 0.0_dp
+    buck4r%npoly1 = 0
+    buck4r%poly2  = 0.0_dp
+    buck4r%npoly2 = 0
   END SUBROUTINE pair_potential_buck4r_clean
 
 ! *****************************************************************************
 !> \brief Destroys the Buckingham 4 ranges potential type
 !> \param buck4r ...
-!> \param error ...
 !> \author MI  10.2006
 ! *****************************************************************************
-  SUBROUTINE pair_potential_buck4r_release(buck4r, error)
+  SUBROUTINE pair_potential_buck4r_release(buck4r)
     TYPE(buck4ran_pot_type), POINTER         :: buck4r
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: &
       routineN = 'pair_potential_buck4r_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF (ASSOCIATED(buck4r)) THEN
-          DEALLOCATE(buck4r, stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       END IF
-       NULLIFY(buck4r)
+    IF (ASSOCIATED(buck4r)) THEN
+       DEALLOCATE(buck4r)
     END IF
+    NULLIFY(buck4r)
   END SUBROUTINE pair_potential_buck4r_release
 
 ! *****************************************************************************
 !> \brief Creates the Buckingham plus Morse potential type
 !> \param buckmo ...
-!> \param error ...
 !> \author MI 10.2006
 ! *****************************************************************************
-  SUBROUTINE pair_potential_buckmo_create(buckmo, error)
+  SUBROUTINE pair_potential_buckmo_create(buckmo)
     TYPE(buckmorse_pot_type), POINTER        :: buckmo
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_buckmo_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       CPPostcondition(.NOT.ASSOCIATED(buckmo),cp_failure_level,routineP,error,failure)
-       ALLOCATE(buckmo, stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       CALL pair_potential_buckmo_clean(buckmo, error=error)
-    END IF
+    CPASSERT(.NOT.ASSOCIATED(buckmo))
+    ALLOCATE(buckmo)
+    CALL pair_potential_buckmo_clean(buckmo)
   END SUBROUTINE pair_potential_buckmo_create
 
 ! *****************************************************************************
 !> \brief Copy two Buckingham plus Morse  potential type
 !> \param buckmo_source ...
 !> \param buckmo_dest ...
-!> \param error ...
 !> \author MI 10.2006
 ! *****************************************************************************
-  SUBROUTINE pair_potential_buckmo_copy(buckmo_source, buckmo_dest, error)
+  SUBROUTINE pair_potential_buckmo_copy(buckmo_source, buckmo_dest)
     TYPE(buckmorse_pot_type), POINTER        :: buckmo_source, buckmo_dest
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_buckmo_copy', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF (.NOT.ASSOCIATED(buckmo_source)) RETURN
-       IF (ASSOCIATED(buckmo_dest)) CALL pair_potential_buckmo_release(buckmo_dest, error=error)
-       CALL pair_potential_buckmo_create(buckmo_dest, error=error)
-       buckmo_dest%f0   = buckmo_source%f0
-       buckmo_dest%a1   = buckmo_source%a1
-       buckmo_dest%a2   = buckmo_source%a2
-       buckmo_dest%b1   = buckmo_source%b1
-       buckmo_dest%b2   = buckmo_source%b2
-       buckmo_dest%c    = buckmo_source%c
-       buckmo_dest%d    = buckmo_source%d
-       buckmo_dest%r0   = buckmo_source%r0
-       buckmo_dest%beta = buckmo_source%beta
-    END IF
+    IF (.NOT.ASSOCIATED(buckmo_source)) RETURN
+    IF (ASSOCIATED(buckmo_dest)) CALL pair_potential_buckmo_release(buckmo_dest)
+    CALL pair_potential_buckmo_create(buckmo_dest)
+    buckmo_dest%f0   = buckmo_source%f0
+    buckmo_dest%a1   = buckmo_source%a1
+    buckmo_dest%a2   = buckmo_source%a2
+    buckmo_dest%b1   = buckmo_source%b1
+    buckmo_dest%b2   = buckmo_source%b2
+    buckmo_dest%c    = buckmo_source%c
+    buckmo_dest%d    = buckmo_source%d
+    buckmo_dest%r0   = buckmo_source%r0
+    buckmo_dest%beta = buckmo_source%beta
   END SUBROUTINE pair_potential_buckmo_copy
 
 ! *****************************************************************************
 !> \brief Creates the Buckingham plus Morse  potential type
 !> \param buckmo ...
-!> \param error ...
 !> \author MI 10.2006
 ! *****************************************************************************
-  SUBROUTINE pair_potential_buckmo_clean(buckmo, error)
+  SUBROUTINE pair_potential_buckmo_clean(buckmo)
     TYPE(buckmorse_pot_type), POINTER        :: buckmo
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_buckmo_clean', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF(.NOT.ASSOCIATED(buckmo)) RETURN
-       buckmo%f0 = 0.0_dp
-       buckmo%a1 = 0.0_dp
-       buckmo%a2 = 0.0_dp
-       buckmo%b1 = 0.0_dp
-       buckmo%b2 = 0.0_dp
-       buckmo%c = 0.0_dp
-       buckmo%d  = 0.0_dp
-       buckmo%r0 = 0.0_dp
-       buckmo%beta = 0.0_dp
-    END IF
+    IF(.NOT.ASSOCIATED(buckmo)) RETURN
+    buckmo%f0 = 0.0_dp
+    buckmo%a1 = 0.0_dp
+    buckmo%a2 = 0.0_dp
+    buckmo%b1 = 0.0_dp
+    buckmo%b2 = 0.0_dp
+    buckmo%c = 0.0_dp
+    buckmo%d  = 0.0_dp
+    buckmo%r0 = 0.0_dp
+    buckmo%beta = 0.0_dp
   END SUBROUTINE pair_potential_buckmo_clean
 
 ! *****************************************************************************
 !> \brief Destroys the Buckingham plus Morse potential type
 !> \param buckmo ...
-!> \param error ...
 !> \author MI  10.2006
 ! *****************************************************************************
-  SUBROUTINE pair_potential_buckmo_release(buckmo, error)
+  SUBROUTINE pair_potential_buckmo_release(buckmo)
     TYPE(buckmorse_pot_type), POINTER        :: buckmo
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: &
       routineN = 'pair_potential_buckmo_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF (ASSOCIATED(buckmo)) THEN
-          DEALLOCATE(buckmo, stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       END IF
-       NULLIFY(buckmo)
+    IF (ASSOCIATED(buckmo)) THEN
+       DEALLOCATE(buckmo)
     END IF
+    NULLIFY(buckmo)
   END SUBROUTINE pair_potential_buckmo_release
 
 ! *****************************************************************************
 !> \brief Creates the Tersoff potential type
 !>      (Tersoff, J. PRB 39(8), 5566, 1989)
 !> \param tersoff ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE pair_potential_tersoff_create(tersoff, error)
+  SUBROUTINE pair_potential_tersoff_create(tersoff)
     TYPE(tersoff_pot_type), POINTER          :: tersoff
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: &
       routineN = 'pair_potential_tersoff_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       CPPostcondition(.NOT.ASSOCIATED(tersoff),cp_failure_level,routineP,error,failure)
-       ALLOCATE(tersoff, stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       CALL pair_potential_tersoff_clean(tersoff, error=error)
-    END IF
+    CPASSERT(.NOT.ASSOCIATED(tersoff))
+    ALLOCATE(tersoff)
+    CALL pair_potential_tersoff_clean(tersoff)
   END SUBROUTINE pair_potential_tersoff_create
 
 ! *****************************************************************************
@@ -2453,211 +2000,156 @@ CONTAINS
 !>      (Tersoff, J. PRB 39(8), 5566, 1989)
 !> \param tersoff_source ...
 !> \param tersoff_dest ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE pair_potential_tersoff_copy(tersoff_source, tersoff_dest, error)
+  SUBROUTINE pair_potential_tersoff_copy(tersoff_source, tersoff_dest)
     TYPE(tersoff_pot_type), POINTER          :: tersoff_source, tersoff_dest
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_tersoff_copy', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF (.NOT.ASSOCIATED(tersoff_source)) RETURN
-       IF (ASSOCIATED(tersoff_dest)) CALL pair_potential_tersoff_release(tersoff_dest, error=error)
-       CALL pair_potential_tersoff_create(tersoff_dest, error=error)
-       tersoff_dest%A       = tersoff_source%A
-       tersoff_dest%B       = tersoff_source%B
-       tersoff_dest%lambda1 = tersoff_source%lambda1
-       tersoff_dest%lambda2 = tersoff_source%lambda2
-       tersoff_dest%alpha   = tersoff_source%alpha
-       tersoff_dest%beta    = tersoff_source%beta
-       tersoff_dest%n       = tersoff_source%n
-       tersoff_dest%c       = tersoff_source%c
-       tersoff_dest%d       = tersoff_source%d
-       tersoff_dest%h       = tersoff_source%h
-       tersoff_dest%lambda3 = tersoff_source%lambda3
-       tersoff_dest%bigR    = tersoff_source%bigR
-       tersoff_dest%bigD    = tersoff_source%bigD
-       tersoff_dest%rcutsq  = tersoff_source%rcutsq
-    END IF
+    IF (.NOT.ASSOCIATED(tersoff_source)) RETURN
+    IF (ASSOCIATED(tersoff_dest)) CALL pair_potential_tersoff_release(tersoff_dest)
+    CALL pair_potential_tersoff_create(tersoff_dest)
+    tersoff_dest%A       = tersoff_source%A
+    tersoff_dest%B       = tersoff_source%B
+    tersoff_dest%lambda1 = tersoff_source%lambda1
+    tersoff_dest%lambda2 = tersoff_source%lambda2
+    tersoff_dest%alpha   = tersoff_source%alpha
+    tersoff_dest%beta    = tersoff_source%beta
+    tersoff_dest%n       = tersoff_source%n
+    tersoff_dest%c       = tersoff_source%c
+    tersoff_dest%d       = tersoff_source%d
+    tersoff_dest%h       = tersoff_source%h
+    tersoff_dest%lambda3 = tersoff_source%lambda3
+    tersoff_dest%bigR    = tersoff_source%bigR
+    tersoff_dest%bigD    = tersoff_source%bigD
+    tersoff_dest%rcutsq  = tersoff_source%rcutsq
   END SUBROUTINE pair_potential_tersoff_copy
 
 ! *****************************************************************************
 !> \brief Creates the Tersoff potential type
 !>      (Tersoff, J. PRB 39(8), 5566, 1989)
 !> \param tersoff ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE pair_potential_tersoff_clean(tersoff, error)
+  SUBROUTINE pair_potential_tersoff_clean(tersoff)
     TYPE(tersoff_pot_type), POINTER          :: tersoff
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_tersoff_clean', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF(.NOT.ASSOCIATED(tersoff)) RETURN
-       tersoff%A       = 0.0_dp
-       tersoff%B       = 0.0_dp
-       tersoff%lambda1 = 0.0_dp
-       tersoff%lambda2 = 0.0_dp
-       tersoff%alpha   = 0.0_dp
-       tersoff%beta    = 0.0_dp
-       tersoff%n       = 0.0_dp
-       tersoff%c       = 0.0_dp
-       tersoff%d       = 0.0_dp
-       tersoff%h       = 0.0_dp
-       tersoff%lambda3 = 0.0_dp
-       tersoff%bigR    = 0.0_dp
-       tersoff%bigD    = 0.0_dp
-       tersoff%rcutsq  = 0.0_dp
-    END IF
+    IF(.NOT.ASSOCIATED(tersoff)) RETURN
+    tersoff%A       = 0.0_dp
+    tersoff%B       = 0.0_dp
+    tersoff%lambda1 = 0.0_dp
+    tersoff%lambda2 = 0.0_dp
+    tersoff%alpha   = 0.0_dp
+    tersoff%beta    = 0.0_dp
+    tersoff%n       = 0.0_dp
+    tersoff%c       = 0.0_dp
+    tersoff%d       = 0.0_dp
+    tersoff%h       = 0.0_dp
+    tersoff%lambda3 = 0.0_dp
+    tersoff%bigR    = 0.0_dp
+    tersoff%bigD    = 0.0_dp
+    tersoff%rcutsq  = 0.0_dp
   END SUBROUTINE pair_potential_tersoff_clean
 
 ! *****************************************************************************
 !> \brief Destroys the Tersoff
 !>      (Tersoff, J. PRB 39(8), 5566, 1989)
 !> \param tersoff ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE pair_potential_tersoff_release(tersoff, error)
+  SUBROUTINE pair_potential_tersoff_release(tersoff)
     TYPE(tersoff_pot_type), POINTER          :: tersoff
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: &
       routineN = 'pair_potential_tersoff_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF (ASSOCIATED(tersoff)) THEN
-          DEALLOCATE(tersoff, stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       END IF
-       NULLIFY(tersoff)
+    IF (ASSOCIATED(tersoff)) THEN
+       DEALLOCATE(tersoff)
     END IF
+    NULLIFY(tersoff)
   END SUBROUTINE pair_potential_tersoff_release
 
 ! ***************************************************************************** 
 !> \brief Creates the Siepmann-Sprik potential type
 !>      (Siepmann and Sprik, J. Chem. Phys. 102(1) 511, 1995)  
 !> \param siepmann ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE pair_potential_siepmann_create(siepmann, error)
+  SUBROUTINE pair_potential_siepmann_create(siepmann)
     TYPE(siepmann_pot_type), POINTER         :: siepmann
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: &
       routineN = 'pair_potential_siepmann_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       CPPostcondition(.NOT.ASSOCIATED(siepmann),cp_failure_level,routineP,error,failure)
-       ALLOCATE(siepmann, stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       CALL pair_potential_siepmann_clean(siepmann, error=error)
-    END IF
+    CPASSERT(.NOT.ASSOCIATED(siepmann))
+    ALLOCATE(siepmann)
+    CALL pair_potential_siepmann_clean(siepmann)
   END SUBROUTINE pair_potential_siepmann_create
 ! *****************************************************************************
 !> \brief Copy two Siepmann potential type
 !>      (Siepmann and Sprik, J. Chem. Phys. 102(1) 511, 1995)  
 !> \param siepmann_source ...
 !> \param siepmann_dest ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE pair_potential_siepmann_copy(siepmann_source, siepmann_dest, error)
+  SUBROUTINE pair_potential_siepmann_copy(siepmann_source, siepmann_dest)
     TYPE(siepmann_pot_type), POINTER         :: siepmann_source, siepmann_dest
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pair_potential_siepmann_copy', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF (.NOT.ASSOCIATED(siepmann_source)) RETURN
-       IF (ASSOCIATED(siepmann_dest)) CALL pair_potential_siepmann_release(siepmann_dest, error=error)
-       CALL pair_potential_siepmann_create(siepmann_dest, error=error)
-       siepmann_dest%B                  = siepmann_source%B
-       siepmann_dest%D                  = siepmann_source%D
-       siepmann_dest%E                  = siepmann_source%E
-       siepmann_dest%F                  = siepmann_source%F
-       siepmann_dest%beta               = siepmann_source%beta
-       siepmann_dest%rcutsq             = siepmann_source%rcutsq
-       siepmann_dest%allow_oh_formation = siepmann_source%allow_oh_formation
-    END IF
+    IF (.NOT.ASSOCIATED(siepmann_source)) RETURN
+    IF (ASSOCIATED(siepmann_dest)) CALL pair_potential_siepmann_release(siepmann_dest)
+    CALL pair_potential_siepmann_create(siepmann_dest)
+    siepmann_dest%B                  = siepmann_source%B
+    siepmann_dest%D                  = siepmann_source%D
+    siepmann_dest%E                  = siepmann_source%E
+    siepmann_dest%F                  = siepmann_source%F
+    siepmann_dest%beta               = siepmann_source%beta
+    siepmann_dest%rcutsq             = siepmann_source%rcutsq
+    siepmann_dest%allow_oh_formation = siepmann_source%allow_oh_formation
   END SUBROUTINE pair_potential_siepmann_copy
 
 ! *****************************************************************************
 !> \brief Creates the Siepmann-Sprik potential type
 !>      (Siepmann and Sprik, J. Chem. Phys. 102(1) 511, 1995)  
 !> \param siepmann ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE pair_potential_siepmann_clean(siepmann, error)
+  SUBROUTINE pair_potential_siepmann_clean(siepmann)
     TYPE(siepmann_pot_type), POINTER         :: siepmann
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: &
       routineN = 'pair_potential_siepmann_clean', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF(.NOT.ASSOCIATED(siepmann)) RETURN
-       siepmann%B       = 0.0_dp
-       siepmann%D       = 0.0_dp
-       siepmann%E       = 0.0_dp
-       siepmann%F       = 0.0_dp
-       siepmann%beta    = 0.0_dp
-       siepmann%rcutsq  = 0.0_dp
-       siepmann%allow_oh_formation = .FALSE.
-    END IF
+    IF(.NOT.ASSOCIATED(siepmann)) RETURN
+    siepmann%B       = 0.0_dp
+    siepmann%D       = 0.0_dp
+    siepmann%E       = 0.0_dp
+    siepmann%F       = 0.0_dp
+    siepmann%beta    = 0.0_dp
+    siepmann%rcutsq  = 0.0_dp
+    siepmann%allow_oh_formation = .FALSE.
   END SUBROUTINE pair_potential_siepmann_clean
 
 ! *****************************************************************************
 !> \brief Destroys the Siepmann-Sprik potential
 !>      (Siepmann and Sprik, J. Chem. Phys. 102(1) 511, 1995)  
 !> \param siepmann ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE pair_potential_siepmann_release(siepmann, error)
+  SUBROUTINE pair_potential_siepmann_release(siepmann)
     TYPE(siepmann_pot_type), POINTER         :: siepmann
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: &
       routineN = 'pair_potential_siepmann_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       IF (ASSOCIATED(siepmann)) THEN
-          DEALLOCATE(siepmann, stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       END IF
-       NULLIFY(siepmann)
+    IF (ASSOCIATED(siepmann)) THEN
+       DEALLOCATE(siepmann)
     END IF
+    NULLIFY(siepmann)
   END SUBROUTINE pair_potential_siepmann_release
 
 END MODULE pair_potential_types

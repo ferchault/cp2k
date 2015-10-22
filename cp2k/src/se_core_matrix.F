@@ -25,10 +25,14 @@ MODULE se_core_matrix
                                              cp_print_key_should_output,&
                                              cp_print_key_unit_nr
   USE cp_para_types,                   ONLY: cp_para_env_type
-  USE input_constants,                 ONLY: &
-       do_method_am1, do_method_mndo, do_method_mndod, do_method_pdg, &
-       do_method_pm3, do_method_pm6, do_method_pnnl, do_method_rm1, &
-       use_orb_basis_set
+  USE input_constants,                 ONLY: do_method_am1,&
+                                             do_method_mndo,&
+                                             do_method_mndod,&
+                                             do_method_pdg,&
+                                             do_method_pm3,&
+                                             do_method_pm6,&
+                                             do_method_pnnl,&
+                                             do_method_rm1
   USE input_section_types,             ONLY: section_vals_val_get
   USE kinds,                           ONLY: dp
   USE particle_types,                  ONLY: particle_type
@@ -54,11 +58,10 @@ MODULE se_core_matrix
   USE semi_empirical_types,            ONLY: get_se_param,&
                                              semi_empirical_type
   USE semi_empirical_utils,            ONLY: get_se_type
-  USE timings,                         ONLY: timeset,&
-                                             timestop
   USE virial_methods,                  ONLY: virial_pair_force
   USE virial_types,                    ONLY: virial_type
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -75,24 +78,22 @@ CONTAINS
 !> \param qs_env ...
 !> \param para_env ...
 !> \param calculate_forces ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE build_se_core_matrix(qs_env,para_env,calculate_forces,error)
+  SUBROUTINE build_se_core_matrix(qs_env,para_env,calculate_forces)
 
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(cp_para_env_type), POINTER          :: para_env
     LOGICAL, INTENT(IN)                      :: calculate_forces
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'build_se_core_matrix', &
       routineP = moduleN//':'//routineN
 
     INTEGER :: after, atom_a, atom_b, handle, i, iatom, icol, icor, ikind, &
-      inode, irow, istat, itype, iw, j, jatom, jkind, natom, natorb_a, nkind, &
-      nr_a, nra, nrb
+      inode, irow, itype, iw, j, jatom, jkind, natom, natorb_a, nkind, nr_a, &
+      nra, nrb
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: nrt
     INTEGER, DIMENSION(:), POINTER           :: atom_of_kind
-    LOGICAL                                  :: defined, failure, found, &
+    LOGICAL                                  :: defined, found, omit_headers, &
                                                 use_virial
     LOGICAL, ALLOCATABLE, DIMENSION(:)       :: se_defined
     REAL(KIND=dp)                            :: delta, dr, econst, eheat, &
@@ -134,7 +135,7 @@ CONTAINS
     CALL timeset(routineN,handle)
 
     NULLIFY(logger,energy)
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
 
      NULLIFY ( rho,force,atomic_kind_set,qs_kind_set,sab_orb,&
                diagmat_h,diagmat_p,particle_set, matrix_p, ks_env)
@@ -151,64 +152,57 @@ CONTAINS
                      force=force,&
                      virial=virial,&
                      rho=rho,&
-                     sab_orb=sab_orb,&
-                     error=error)
+                     sab_orb=sab_orb)
 
      ! calculate overlap matrix
      IF(calculate_forces) THEN
         CALL build_overlap_matrix(ks_env,nderivative=1, matrix_s=matrix_s,&
                                   matrix_name="OVERLAP",&
-                                  basis_set_id_a=use_orb_basis_set,&
-                                  basis_set_id_b=use_orb_basis_set, &
-                                  sab_nl=sab_orb,&
-                                  error=error)
-        CALL set_ks_env(ks_env,matrix_s=matrix_s,error=error)
+                                  basis_type_a="ORB",&
+                                  basis_type_b="ORB", &
+                                  sab_nl=sab_orb)
+        CALL set_ks_env(ks_env,matrix_s=matrix_s)
         use_virial = virial%pv_availability.AND.(.NOT.virial%pv_numer)
      ELSE
         CALL build_overlap_matrix(ks_env,matrix_s=matrix_s,&
                                   matrix_name="OVERLAP",&
-                                  basis_set_id_a=use_orb_basis_set,&
-                                  basis_set_id_b=use_orb_basis_set, &
-                                  sab_nl=sab_orb,&
-                                  error=error)
-        CALL set_ks_env(ks_env,matrix_s=matrix_s,error=error)
+                                  basis_type_a="ORB",&
+                                  basis_type_b="ORB", &
+                                  sab_nl=sab_orb)
+        CALL set_ks_env(ks_env,matrix_s=matrix_s)
         use_virial = .FALSE.
      END IF
 
      IF(calculate_forces) THEN
-       CALL qs_rho_get(rho, rho_ao=matrix_p, error=error)
+       CALL qs_rho_get(rho, rho_ao=matrix_p)
 
        IF (SIZE(matrix_p) == 2) THEN
-          CALL cp_dbcsr_add(matrix_p(1)%matrix, matrix_p(2)%matrix, alpha_scalar=1.0_dp, beta_scalar=1.0_dp, error=error)
+          CALL cp_dbcsr_add(matrix_p(1)%matrix, matrix_p(2)%matrix, alpha_scalar=1.0_dp, beta_scalar=1.0_dp)
        END IF
        natom = SIZE (particle_set)
-       ALLOCATE (atom_of_kind(natom),STAT=istat)
-       CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+       ALLOCATE (atom_of_kind(natom))
        delta = dft_control%qs_control%se_control%delta
        CALL get_atomic_kind_set(atomic_kind_set=atomic_kind_set,&
                                 atom_of_kind=atom_of_kind)
-       ALLOCATE(diagmat_p,STAT=istat)
-       CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
-       CALL cp_dbcsr_init (diagmat_p, error=error)
-       CALL cp_dbcsr_get_block_diag(matrix_p(1)%matrix, diagmat_p, error=error)
-       CALL cp_dbcsr_replicate_all(diagmat_p,error=error)
+       ALLOCATE(diagmat_p)
+       CALL cp_dbcsr_init (diagmat_p)
+       CALL cp_dbcsr_get_block_diag(matrix_p(1)%matrix, diagmat_p)
+       CALL cp_dbcsr_replicate_all(diagmat_p)
      END IF
 
      ! Allocate the core Hamiltonian matrix
-     CALL cp_dbcsr_allocate_matrix_set(matrix_h,1,error=error)
-     ALLOCATE(matrix_h(1)%matrix,STAT=istat)
-     CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
-     CALL cp_dbcsr_init(matrix_h(1)%matrix, error=error)
-     CALL cp_dbcsr_copy(matrix_h(1)%matrix,matrix_s(1)%matrix,"CORE HAMILTONIAN MATRIX",error=error)
-     CALL cp_dbcsr_set(matrix_h(1)%matrix,0.0_dp,error=error)
+     CALL cp_dbcsr_allocate_matrix_set(matrix_h,1)
+     ALLOCATE(matrix_h(1)%matrix)
+     CALL cp_dbcsr_init(matrix_h(1)%matrix)
+     CALL cp_dbcsr_copy(matrix_h(1)%matrix,matrix_s(1)%matrix,"CORE HAMILTONIAN MATRIX")
+     CALL cp_dbcsr_set(matrix_h(1)%matrix,0.0_dp)
 
      ! Allocate a diagonal block matrix
-     ALLOCATE(diagmat_h,STAT=istat)
-     CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
-     CALL cp_dbcsr_init(diagmat_h, error=error)
-     CALL cp_dbcsr_get_block_diag(matrix_s(1)%matrix, diagmat_h, error=error)
-     CALL cp_dbcsr_set(diagmat_h, 0.0_dp, error=error)
-     CALL cp_dbcsr_replicate_all(diagmat_h,error=error)
+     ALLOCATE(diagmat_h)
+     CALL cp_dbcsr_init(diagmat_h)
+     CALL cp_dbcsr_get_block_diag(matrix_s(1)%matrix, diagmat_h)
+     CALL cp_dbcsr_set(diagmat_h, 0.0_dp)
+     CALL cp_dbcsr_replicate_all(diagmat_h)
 
      ! kh might be set in qs_control
      itype = get_se_type(dft_control%qs_control%method_id)
@@ -216,19 +210,13 @@ CONTAINS
 
      nkind = SIZE(atomic_kind_set)
 
-     ALLOCATE (se_defined(nkind),STAT=istat)
-     CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
-     ALLOCATE (hmt(16,nkind),STAT=istat)
-     CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
-     ALLOCATE (umt(16,nkind),STAT=istat)
-     CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+     ALLOCATE (se_defined(nkind))
+     ALLOCATE (hmt(16,nkind))
+     ALLOCATE (umt(16,nkind))
 
-     ALLOCATE (ZSt(nkind),STAT=istat)
-     CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
-     ALLOCATE (ZPt(nkind),STAT=istat)
-     CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
-     ALLOCATE (nrt(nkind),STAT=istat)
-     CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+     ALLOCATE (ZSt(nkind))
+     ALLOCATE (ZPt(nkind))
+     ALLOCATE (nrt(nkind))
 
      econst   = 0.0_dp
      DO ikind=1,nkind
@@ -277,10 +265,10 @@ CONTAINS
                   do_method_pm3,do_method_pm6,do_method_mndod, do_method_pnnl)
               NULLIFY(h_blocka)
               CALL cp_dbcsr_get_block_p(diagmat_h,iatom,iatom,h_blocka,found)
-              CPPostcondition(ASSOCIATED(h_blocka),cp_failure_level,routineP,error,failure)
+              CPASSERT(ASSOCIATED(h_blocka))
               IF(calculate_forces) THEN
                 CALL cp_dbcsr_get_block_p(diagmat_p,iatom,iatom,pamat,found)
-                CPPostcondition(ASSOCIATED(pamat),cp_failure_level,routineP,error,failure)
+                CPASSERT(ASSOCIATED(pamat))
               END IF
           END SELECT
         END IF
@@ -289,7 +277,7 @@ CONTAINS
 
           SELECT CASE (dft_control%qs_control%method_id)
              CASE DEFAULT
-               CPPostcondition(.FALSE.,cp_failure_level,routineP,error,failure)
+               CPABORT("")
              CASE (do_method_am1,do_method_rm1,do_method_mndo,do_method_pdg,&
                    do_method_pm3,do_method_pm6,do_method_mndod, do_method_pnnl)
                DO i=1,SIZE(h_blocka,1)
@@ -308,13 +296,13 @@ CONTAINS
           NULLIFY (h_block)
           CALL cp_dbcsr_get_block_p(matrix_h(1)%matrix,&
                irow,icol,h_block,found)
-          CPPostcondition(ASSOCIATED(h_block),cp_failure_level,routineP,error,failure)
+          CPASSERT(ASSOCIATED(h_block))
           ! two-centre one-electron term
           NULLIFY(s_block)
 
 !          CALL cp_dbcsr_get_block_p(matrix_s(1)%matrix,&
 !               irow,icol,s_block,found)
-!          CPPostcondition(ASSOCIATED(s_block),cp_failure_level,routineP,error,failure)
+!          CPPostcondition(ASSOCIATED(s_block),cp_failure_level,routineP,failure)
 !
 !          if( irow == iatom )then
 !            R= -rij
@@ -332,7 +320,7 @@ CONTAINS
 
           CALL cp_dbcsr_get_block_p(matrix_s(1)%matrix,&
                irow,icol,s_block,found)
-          CPPostcondition(ASSOCIATED(s_block),cp_failure_level,routineP,error,failure)
+          CPASSERT(ASSOCIATED(s_block))
           IF ( irow == iatom ) THEN
             DO i=1,SIZE(h_block,1)
               DO j=1,SIZE(h_block,2)
@@ -359,12 +347,12 @@ CONTAINS
 !            endif
 
             CALL cp_dbcsr_get_block_p(matrix_p(1)%matrix,irow,icol,pabmat,found)
-            CPPostcondition(ASSOCIATED(pabmat),cp_failure_level,routineP,error,failure)
+            CPASSERT(ASSOCIATED(pabmat))
             DO icor=1,3
               force_ab(icor) = 0._dp
 
 !              CALL cp_dbcsr_get_block_p(matrix_s(icor+1)%matrix,irow,icol,dsmat,found)
-!              CPPostcondition(ASSOCIATED(dsmat),cp_failure_level,routineP,error,failure)
+!              CPPostcondition(ASSOCIATED(dsmat),cp_failure_level,routineP,failure)
 !
 !              do i=1,4
 !                do j=1,4
@@ -373,7 +361,7 @@ CONTAINS
 !              enddo
 
               CALL cp_dbcsr_get_block_p(matrix_s(icor+1)%matrix,irow,icol,dsmat,found)
-              CPPostcondition(ASSOCIATED(dsmat),cp_failure_level,routineP,error,failure)
+              CPASSERT(ASSOCIATED(dsmat))
               dsmat=2._dp*kh*dsmat*pabmat
               IF ( irow == iatom ) THEN
                  DO i=1,SIZE(h_block,1)
@@ -400,43 +388,42 @@ CONTAINS
           force(jkind)%all_potential(:,atom_b) =&
               force(jkind)%all_potential(:,atom_b) + force_ab(:)
           IF (use_virial) THEN
-            CALL virial_pair_force ( virial%pv_virial, -1.0_dp, force_ab, rij, error)
+            CALL virial_pair_force ( virial%pv_virial, -1.0_dp, force_ab, rij)
           END IF
         END IF
 
      END DO
      CALL neighbor_list_iterator_release(nl_iterator)
 
-     DEALLOCATE (se_defined,hmt,umt,ZSt,ZPt,nrt,STAT=istat)
-     CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+     DEALLOCATE (se_defined,hmt,umt,ZSt,ZPt,nrt)
 
-     CALL cp_dbcsr_sum_replicated(diagmat_h, error=error)
-     CALL cp_dbcsr_distribute(diagmat_h,error=error)
-     CALL cp_dbcsr_add(matrix_h(1)%matrix, diagmat_h,1.0_dp,1.0_dp,error=error)
-     CALL set_ks_env(ks_env,matrix_h=matrix_h,error=error)
+     CALL cp_dbcsr_sum_replicated(diagmat_h)
+     CALL cp_dbcsr_distribute(diagmat_h)
+     CALL cp_dbcsr_add(matrix_h(1)%matrix, diagmat_h,1.0_dp,1.0_dp)
+     CALL set_ks_env(ks_env,matrix_h=matrix_h)
 
      IF (BTEST(cp_print_key_should_output(logger%iter_info,&
-         qs_env%input,"DFT%PRINT%AO_MATRICES/CORE_HAMILTONIAN",error=error),cp_p_file)) THEN
+         qs_env%input,"DFT%PRINT%AO_MATRICES/CORE_HAMILTONIAN"),cp_p_file)) THEN
        iw = cp_print_key_unit_nr(logger,qs_env%input,"DFT%PRINT%AO_MATRICES/CORE_HAMILTONIAN",&
-            extension=".Log",error=error)
-       CALL section_vals_val_get(qs_env%input,"DFT%PRINT%AO_MATRICES%NDIGITS",i_val=after,error=error)
+            extension=".Log")
+       CALL section_vals_val_get(qs_env%input,"DFT%PRINT%AO_MATRICES%NDIGITS",i_val=after)
+       CALL section_vals_val_get(qs_env%input,"DFT%PRINT%AO_MATRICES%OMIT_HEADERS",l_val=omit_headers)
        after = MIN(MAX(after,1),16)
        CALL cp_dbcsr_write_sparse_matrix(matrix_h(1)%matrix,4,after,qs_env,para_env,&
-                                         scale=evolt,output_unit=iw,error=error)
+                                         scale=evolt,output_unit=iw,omit_headers=omit_headers)
        CALL cp_print_key_finished_output(iw,logger,qs_env%input,&
-            "DFT%PRINT%AO_MATRICES/CORE_HAMILTONIAN", error=error)
+            "DFT%PRINT%AO_MATRICES/CORE_HAMILTONIAN")
      END IF
 
      IF(calculate_forces) THEN
        IF (SIZE(matrix_p) == 2) THEN
-          CALL cp_dbcsr_add(matrix_p(1)%matrix,matrix_p(2)%matrix,alpha_scalar=1.0_dp,beta_scalar=-1.0_dp,error=error)
+          CALL cp_dbcsr_add(matrix_p(1)%matrix,matrix_p(2)%matrix,alpha_scalar=1.0_dp,beta_scalar=-1.0_dp)
        END IF
-       DEALLOCATE(atom_of_kind,STAT=istat)
-       CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
-       CALL cp_dbcsr_deallocate_matrix(diagmat_p,error=error)
+       DEALLOCATE(atom_of_kind)
+       CALL cp_dbcsr_deallocate_matrix(diagmat_p)
      END IF
 
-     CALL cp_dbcsr_deallocate_matrix(diagmat_h,error=error)
+     CALL cp_dbcsr_deallocate_matrix(diagmat_h)
 
      CALL timestop(handle)
 

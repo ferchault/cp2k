@@ -15,6 +15,7 @@ MODULE input_enumeration_types
   USE string_utilities,                ONLY: a2s,&
                                              uppercase
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -57,11 +58,9 @@ CONTAINS
 !> \param desc ...
 !> \param strict if integer values not in the list should be accepted,
 !>        defaults defaults to true
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author fawzi
 ! *****************************************************************************
-SUBROUTINE enum_create(enum,c_vals,i_vals,desc,strict,error)
+SUBROUTINE enum_create(enum,c_vals,i_vals,desc,strict)
     TYPE(enumeration_type), POINTER          :: enum
     CHARACTER(len=*), DIMENSION(:), &
       INTENT(in)                             :: c_vals
@@ -69,114 +68,85 @@ SUBROUTINE enum_create(enum,c_vals,i_vals,desc,strict,error)
     CHARACTER(len=*), DIMENSION(:), &
       INTENT(in), OPTIONAL                   :: desc
     LOGICAL, INTENT(in), OPTIONAL            :: strict
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'enum_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, j, n, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: i, j, n
 
-  failure=.FALSE.
-
-  CPPrecondition(.NOT.ASSOCIATED(enum),cp_failure_level,routineP,error,failure)
-  CPPrecondition(SIZE(c_vals)==SIZE(i_vals),cp_failure_level,routineP,error,failure)
-  IF (.NOT.failure) THEN
-     ALLOCATE(enum,stat=stat)
-     CPPostcondition(stat==0,cp_fatal_level,routineP,error,failure)
-  END IF
-  IF (.NOT. failure) THEN
-     last_enumeration_id=last_enumeration_id+1
-     enum%id_nr=last_enumeration_id
-     enum%ref_count=1
-     ALLOCATE(enum%c_vals(SIZE(c_vals)),stat=stat)
-     CPPostcondition(stat==0,cp_fatal_level,routineP,error,failure)
-     DO i=1,SIZE(enum%c_vals)
-        enum%c_vals(i)=c_vals(i)
-        CALL uppercase(enum%c_vals(i))
-     END DO
-     ALLOCATE(enum%i_vals(SIZE(i_vals)),stat=stat)
-     CPPostcondition(stat==0,cp_fatal_level,routineP,error,failure)
-     enum%i_vals=i_vals
-     enum%strict=.TRUE.
-     IF (PRESENT(strict)) enum%strict=strict
-     ALLOCATE(enum%desc(SIZE(c_vals)),stat=stat)
-     CPPostcondition(stat==0,cp_fatal_level,routineP,error,failure)
-     IF (PRESENT(desc)) THEN
-        CPPrecondition(SIZE(enum%desc)==SIZE(desc),cp_failure_level,routineP,error,failure)
-        DO i=1,SIZE(enum%desc)
-           n = LEN_TRIM(desc(i))
-           ALLOCATE(enum%desc(i)%chars(n))
-           DO j=1, n
-             enum%desc(i)%chars(j) = desc(i)(j:j)
-           END DO
-       END DO
-     ELSE
-        DO i=1,SIZE(enum%desc)
-           ALLOCATE(enum%desc(i)%chars(1))
-           enum%desc(i)%chars(1:1) = ' '
+  CPASSERT(.NOT.ASSOCIATED(enum))
+  CPASSERT(SIZE(c_vals)==SIZE(i_vals))
+  ALLOCATE(enum)
+  last_enumeration_id=last_enumeration_id+1
+  enum%id_nr=last_enumeration_id
+  enum%ref_count=1
+  ALLOCATE(enum%c_vals(SIZE(c_vals)))
+  DO i=1,SIZE(enum%c_vals)
+     enum%c_vals(i)=c_vals(i)
+     CALL uppercase(enum%c_vals(i))
+  END DO
+  ALLOCATE(enum%i_vals(SIZE(i_vals)))
+  enum%i_vals=i_vals
+  enum%strict=.TRUE.
+  IF (PRESENT(strict)) enum%strict=strict
+  ALLOCATE(enum%desc(SIZE(c_vals)))
+  IF (PRESENT(desc)) THEN
+     CPASSERT(SIZE(enum%desc)==SIZE(desc))
+     DO i=1,SIZE(enum%desc)
+        n = LEN_TRIM(desc(i))
+        ALLOCATE(enum%desc(i)%chars(n))
+        DO j=1, n
+          enum%desc(i)%chars(j) = desc(i)(j:j)
         END DO
-     END IF
+    END DO
+  ELSE
+     DO i=1,SIZE(enum%desc)
+        ALLOCATE(enum%desc(i)%chars(1))
+        enum%desc(i)%chars(1:1) = ' '
+     END DO
   END IF
 END SUBROUTINE enum_create
 
 ! *****************************************************************************
 !> \brief retains the given enumeration
 !> \param enum the obect to retain
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author fawzi
 ! *****************************************************************************
-SUBROUTINE enum_retain(enum,error)
+SUBROUTINE enum_retain(enum)
     TYPE(enumeration_type), POINTER          :: enum
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'enum_retain', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-  failure=.FALSE.
-  CPPrecondition(ASSOCIATED(enum),cp_failure_level,routineP,error,failure)
-  IF (.NOT. failure) THEN
-       CPPreconditionNoFail(enum%ref_count>0,cp_failure_level,routineP,error)
-       enum%ref_count=enum%ref_count+1
-    END IF
+  CPASSERT(ASSOCIATED(enum))
+  CPASSERT(enum%ref_count>0)
+  enum%ref_count=enum%ref_count+1
   END SUBROUTINE enum_retain
 
 ! *****************************************************************************
 !> \brief releases the given enumeration
 !> \param enum the obect to release
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author fawzi
 ! *****************************************************************************
-SUBROUTINE enum_release(enum,error)
+SUBROUTINE enum_release(enum)
     TYPE(enumeration_type), POINTER          :: enum
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'enum_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: i
 
-  failure=.FALSE.
   IF (ASSOCIATED(enum)) THEN
-       CPPreconditionNoFail(enum%ref_count>0,cp_failure_level,routineP,error)
+       CPASSERT(enum%ref_count>0)
        enum%ref_count=enum%ref_count-1
        IF (enum%ref_count==0) THEN
-          DEALLOCATE(enum%c_vals,stat=stat)
-          CPPostcondition(stat==0,cp_fatal_level,routineP,error,failure)
-          DEALLOCATE(enum%i_vals,stat=stat)
-          CPPostcondition(stat==0,cp_fatal_level,routineP,error,failure)
+          DEALLOCATE(enum%c_vals)
+          DEALLOCATE(enum%i_vals)
           DO i=1, SIZE(enum%desc)
              DEALLOCATE(enum%desc(i)%chars)
           END DO
-          DEALLOCATE(enum%desc,stat=stat)
-          CPPostcondition(stat==0,cp_fatal_level,routineP,error,failure)
-          DEALLOCATE(enum,stat=stat)
-          CPPostcondition(stat==0,cp_fatal_level,routineP,error,failure)
+          DEALLOCATE(enum%desc)
+          DEALLOCATE(enum)
        END IF
     END IF
     NULLIFY(enum)
@@ -186,50 +156,42 @@ SUBROUTINE enum_release(enum,error)
 !> \brief maps an integer to a string
 !> \param enum the enumeration to use for the mapping
 !> \param i the value to map
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \retval res ...
 !> \author fawzi
 ! *****************************************************************************
-FUNCTION enum_i2c(enum,i,error) RESULT(res)
+FUNCTION enum_i2c(enum,i) RESULT(res)
     TYPE(enumeration_type), POINTER          :: enum
     INTEGER, INTENT(in)                      :: i
-    TYPE(cp_error_type), INTENT(inout)       :: error
     CHARACTER(len=default_string_length)     :: res
 
     CHARACTER(len=*), PARAMETER :: routineN = 'enum_i2c', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: j
-    LOGICAL                                  :: failure, found
+    LOGICAL                                  :: found
 
-  failure=.FALSE.
-
-  CPPrecondition(ASSOCIATED(enum),cp_failure_level,routineP,error,failure)
-  CPPrecondition(enum%ref_count>0,cp_failure_level,routineP,error,failure)
+  CPASSERT(ASSOCIATED(enum))
+  CPASSERT(enum%ref_count>0)
   res=" "
-  IF (.NOT. failure) THEN
-     found=.FALSE.
-     DO j=1,SIZE(enum%i_vals)
-        IF (enum%i_vals(j)==i) THEN
-           res=enum%c_vals(j)
-           found=.TRUE.
-           EXIT
-        END IF
-     END DO
-     IF (.NOT.found) THEN
-        IF (enum%strict) THEN
-         DO j=1,SIZE(enum%desc)
-          PRINT *, TRIM(a2s(enum%desc(j)%chars))
-          PRINT *, TRIM(enum%c_vals(j))
-         ENDDO
-          PRINT *, enum%i_vals
-        END IF
-        CALL cp_assert(.NOT.enum%strict,cp_failure_level,cp_assertion_failed,&
-             routineP,"invalid value for enumeration:"//cp_to_string(i),&
-             error,failure)
-        res=ADJUSTL(cp_to_string(i))
+  found=.FALSE.
+  DO j=1,SIZE(enum%i_vals)
+     IF (enum%i_vals(j)==i) THEN
+        res=enum%c_vals(j)
+        found=.TRUE.
+        EXIT
      END IF
+  END DO
+  IF (.NOT.found) THEN
+     IF (enum%strict) THEN
+      DO j=1,SIZE(enum%desc)
+       PRINT *, TRIM(a2s(enum%desc(j)%chars))
+       PRINT *, TRIM(enum%c_vals(j))
+      ENDDO
+       PRINT *, enum%i_vals
+     END IF
+     IF(enum%strict)&
+        CPABORT("invalid value for enumeration:"//cp_to_string(i))
+     res=ADJUSTL(cp_to_string(i))
   END IF
 END FUNCTION enum_i2c
 
@@ -237,15 +199,12 @@ END FUNCTION enum_i2c
 !> \brief maps a string to an integer
 !> \param enum the enumeration to use for the mapping
 !> \param c the value to map
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \retval res ...
 !> \author fawzi
 ! *****************************************************************************
-FUNCTION enum_c2i(enum,c,error) RESULT(res)
+FUNCTION enum_c2i(enum,c) RESULT(res)
     TYPE(enumeration_type), POINTER          :: enum
     CHARACTER(len=*), INTENT(in)             :: c
-    TYPE(cp_error_type), INTENT(inout)       :: error
     INTEGER                                  :: res
 
     CHARACTER(len=*), PARAMETER :: routineN = 'enum_c2i', &
@@ -253,33 +212,27 @@ FUNCTION enum_c2i(enum,c,error) RESULT(res)
 
     CHARACTER(len=default_string_length)     :: upc
     INTEGER                                  :: iostat, j
-    LOGICAL                                  :: failure, found
+    LOGICAL                                  :: found
 
-  failure=.FALSE.
-
-  CPPrecondition(ASSOCIATED(enum),cp_failure_level,routineP,error,failure)
-  CPPrecondition(enum%ref_count>0,cp_failure_level,routineP,error,failure)
+  CPASSERT(ASSOCIATED(enum))
+  CPASSERT(enum%ref_count>0)
   upc=c
   CALL uppercase(upc)
-  IF (.NOT. failure) THEN
-     found=.FALSE.
-     DO j=1,SIZE(enum%c_vals)
-        IF (enum%c_vals(j)==upc) THEN
-           res=enum%i_vals(j)
-           found=.TRUE.
-           EXIT
-        END IF
-     END DO
-
-     IF (.NOT.found) THEN
-        CALL cp_assert(.NOT.enum%strict,cp_failure_level,cp_assertion_failed,&
-             routineP,"invalid value for enumeration:"//TRIM(c),&
-             error=error,failure=failure)
-        READ(c,"(i10)",iostat=iostat) res
-        CALL cp_assert(iostat==0,cp_failure_level,cp_assertion_failed,&
-             routineP,"invalid value for enumeration2:"//TRIM(c),&
-             error=error,failure=failure)
+  found=.FALSE.
+  DO j=1,SIZE(enum%c_vals)
+     IF (enum%c_vals(j)==upc) THEN
+        res=enum%i_vals(j)
+        found=.TRUE.
+        EXIT
      END IF
+  END DO
+
+  IF (.NOT.found) THEN
+     IF(enum%strict)&
+        CPABORT("invalid value for enumeration:"//TRIM(c))
+     READ(c,"(i10)",iostat=iostat) res
+     IF(iostat/=0)&
+        CPABORT("invalid value for enumeration2:"//TRIM(c))
   END IF
 END FUNCTION enum_c2i
 

@@ -27,13 +27,11 @@ MODULE atom_energy
        create_atom_type, init_atom_basis, init_atom_potential, &
        read_atom_opt_section, release_atom_basis, release_atom_potential, &
        release_atom_type, set_atom
-! ZMP added atom_read_external_density atom_read_external_vxc to atom_utiles
   USE atom_utils,                      ONLY: &
        atom_consistent_method, atom_core_density, atom_density, &
        atom_local_potential, atom_read_external_density, &
        atom_read_external_vxc, atom_set_occupation, atom_write_zmp_restart, &
        get_maxl_occ, get_maxn_occ
-! ZMP added atom_xc module
   USE atom_xc,                         ONLY: calculate_atom_ext_vxc,&
                                              calculate_atom_zmp
   USE cp_output_handling,              ONLY: cp_print_key_finished_output,&
@@ -45,16 +43,14 @@ MODULE atom_energy
                                              section_vals_val_get
   USE kinds,                           ONLY: default_string_length,&
                                              dp
-  USE lapack
   USE mathconstants,                   ONLY: dfac,&
                                              gamma1,&
                                              pi
   USE periodic_table,                  ONLY: nelem,&
                                              ptable
   USE physcon,                         ONLY: evolt
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -71,11 +67,9 @@ CONTAINS
 ! *****************************************************************************
 !> \brief ...
 !> \param atom_section ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE atom_energy_opt(atom_section,error)
+  SUBROUTINE atom_energy_opt(atom_section)
     TYPE(section_vals_type), POINTER         :: atom_section
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'atom_energy_opt', &
       routineP = moduleN//':'//routineN
@@ -84,14 +78,14 @@ CONTAINS
     CHARACTER(LEN=default_string_length)     :: filename
     CHARACTER(LEN=default_string_length), &
       DIMENSION(:), POINTER                  :: tmpstringlist
-    INTEGER :: do_eric, do_erie, handle, i, ierr, im, in, iw, k, l, maxl, mb, &
+    INTEGER :: do_eric, do_erie, handle, i, im, in, iw, k, l, maxl, mb, &
       method, mo, n, n_meth, n_rep, nder, num_gau, num_gto, num_pol, reltyp, &
       zcore, zval, zz
     INTEGER, DIMENSION(0:3)                  :: maxn
     INTEGER, DIMENSION(:), POINTER           :: cn
     LOGICAL                                  :: dm, do_zmp, doread, eri_c, &
-                                                eri_e, failure, had_ae, &
-                                                had_pp, pp_calc, read_vxc
+                                                eri_e, had_ae, had_pp, &
+                                                pp_calc, read_vxc
     REAL(KIND=dp)                            :: delta, lambda
     REAL(KIND=dp), ALLOCATABLE, DIMENSION(:) :: ext_density, ext_vxc
     REAL(KIND=dp), DIMENSION(0:3, 10)        :: pocc
@@ -108,13 +102,11 @@ CONTAINS
       method_section, opt_section, potential_section, powell_section, &
       xc_section, zmp_restart_section, zmp_section
 
-    failure = .FALSE.
-
     CALL timeset(routineN,handle)
 
     ! What atom do we calculate
-    CALL section_vals_val_get(atom_section,"ATOMIC_NUMBER", i_val=zval, error=error)
-    CALL section_vals_val_get(atom_section,"ELEMENT", c_val=elem, error=error)
+    CALL section_vals_val_get(atom_section,"ATOMIC_NUMBER", i_val=zval)
+    CALL section_vals_val_get(atom_section,"ELEMENT", c_val=elem)
     zz = 0
     DO i=1,nelem
       IF ( ptable(i)%symbol == elem ) THEN
@@ -125,47 +117,45 @@ CONTAINS
     IF ( zz /= 1 ) zval = zz
 
     ! read and set up inofrmation on the basis sets
-    ALLOCATE(ae_basis,pp_basis,STAT=ierr)
-    CPPostcondition(ierr==0, cp_failure_level, routineP, error, failure)
-    basis_section => section_vals_get_subs_vals(atom_section,"AE_BASIS",error=error)
+    ALLOCATE(ae_basis,pp_basis)
+    basis_section => section_vals_get_subs_vals(atom_section,"AE_BASIS")
     NULLIFY(ae_basis%grid)
-    CALL init_atom_basis(ae_basis,basis_section,zval,"AE",error)
+    CALL init_atom_basis(ae_basis,basis_section,zval,"AE")
     NULLIFY(pp_basis%grid)
-    basis_section => section_vals_get_subs_vals(atom_section,"PP_BASIS",error=error)
-    CALL init_atom_basis(pp_basis,basis_section,zval,"PP",error)
+    basis_section => section_vals_get_subs_vals(atom_section,"PP_BASIS")
+    CALL init_atom_basis(pp_basis,basis_section,zval,"PP")
 
     ! print general and basis set information
-    logger => cp_error_get_logger(error)
-    iw = cp_print_key_unit_nr(logger,atom_section,"PRINT%PROGRAM_BANNER",extension=".log",error=error)
-    IF(iw > 0) CALL atom_print_info(zval,"Atomic Energy Calculation",iw,error)
-    CALL cp_print_key_finished_output(iw,logger,atom_section,"PRINT%PROGRAM_BANNER",error=error)
-    iw = cp_print_key_unit_nr(logger,atom_section,"PRINT%BASIS_SET",extension=".log",error=error)
+    logger => cp_get_default_logger()
+    iw = cp_print_key_unit_nr(logger,atom_section,"PRINT%PROGRAM_BANNER",extension=".log")
+    IF(iw > 0) CALL atom_print_info(zval,"Atomic Energy Calculation",iw)
+    CALL cp_print_key_finished_output(iw,logger,atom_section,"PRINT%PROGRAM_BANNER")
+    iw = cp_print_key_unit_nr(logger,atom_section,"PRINT%BASIS_SET",extension=".log")
     IF(iw > 0) THEN
-      CALL atom_print_basis(ae_basis,iw," All Electron Basis",error)
-      CALL atom_print_basis(pp_basis,iw," Pseudopotential Basis",error)
+      CALL atom_print_basis(ae_basis,iw," All Electron Basis")
+      CALL atom_print_basis(pp_basis,iw," Pseudopotential Basis")
     END IF
-    CALL cp_print_key_finished_output(iw,logger,atom_section,"PRINT%BASIS_SET",error=error)
+    CALL cp_print_key_finished_output(iw,logger,atom_section,"PRINT%BASIS_SET")
 
     ! read and setup information on the pseudopotential
     NULLIFY(potential_section)
-    potential_section => section_vals_get_subs_vals(atom_section,"POTENTIAL",error=error)
-    ALLOCATE(ae_pot,p_pot,STAT=ierr)
-    CPPostcondition(ierr==0, cp_failure_level, routineP, error, failure)
-    CALL init_atom_potential(p_pot,potential_section,zval,error)
-    CALL init_atom_potential(ae_pot,potential_section,-1,error)
+    potential_section => section_vals_get_subs_vals(atom_section,"POTENTIAL")
+    ALLOCATE(ae_pot,p_pot)
+    CALL init_atom_potential(p_pot,potential_section,zval)
+    CALL init_atom_potential(ae_pot,potential_section,-1)
 
     ! if the ERI's are calculated analytically, we have to precalculate them
     eri_c = .FALSE.
-    CALL section_vals_val_get(atom_section,"COULOMB_INTEGRALS", i_val=do_eric, error=error)
+    CALL section_vals_val_get(atom_section,"COULOMB_INTEGRALS", i_val=do_eric)
     IF(do_eric==do_analytic) eri_c = .TRUE.
     eri_e = .FALSE.
-    CALL section_vals_val_get(atom_section,"EXCHANGE_INTEGRALS", i_val=do_erie, error=error)
+    CALL section_vals_val_get(atom_section,"EXCHANGE_INTEGRALS", i_val=do_erie)
     IF(do_erie==do_analytic) eri_e = .TRUE.
 
     ! information on the states to be calculated
-    CALL section_vals_val_get(atom_section,"MAX_ANGULAR_MOMENTUM", i_val=maxl, error=error)
+    CALL section_vals_val_get(atom_section,"MAX_ANGULAR_MOMENTUM", i_val=maxl)
     maxn=0
-    CALL section_vals_val_get(atom_section,"CALCULATE_STATES", i_vals=cn, error=error)
+    CALL section_vals_val_get(atom_section,"CALCULATE_STATES", i_vals=cn)
     DO in = 1, MIN(SIZE(cn),4)
       maxn(in-1) = cn(in)
     END DO
@@ -175,35 +165,33 @@ CONTAINS
     END DO
 
     ! read optimization section
-    opt_section => section_vals_get_subs_vals(atom_section,"OPTIMIZATION",error=error)
-    CALL read_atom_opt_section(optimization,opt_section,error)
+    opt_section => section_vals_get_subs_vals(atom_section,"OPTIMIZATION")
+    CALL read_atom_opt_section(optimization,opt_section)
 
     had_ae = .FALSE.
     had_pp = .FALSE.
 
     ! Check for the total number of electron configurations to be calculated
-    CALL section_vals_val_get(atom_section,"ELECTRON_CONFIGURATION", n_rep_val=n_rep, error=error)
+    CALL section_vals_val_get(atom_section,"ELECTRON_CONFIGURATION", n_rep_val=n_rep)
     ! Check for the total number of method types to be calculated
-    method_section => section_vals_get_subs_vals(atom_section,"METHOD",error=error)
-    CALL section_vals_get(method_section,n_repetition=n_meth,error=error)
+    method_section => section_vals_get_subs_vals(atom_section,"METHOD")
+    CALL section_vals_get(method_section,n_repetition=n_meth)
 
     ! integrals
-    ALLOCATE(ae_int, pp_int,STAT=ierr)
-    CPPostcondition(ierr==0, cp_failure_level, routineP, error, failure)
+    ALLOCATE(ae_int, pp_int)
 
-    ALLOCATE(atom_info(n_rep,n_meth),STAT=ierr)
-    CPPostcondition(ierr==0, cp_failure_level, routineP, error, failure)
+    ALLOCATE(atom_info(n_rep,n_meth))
 
     DO in = 1, n_rep
       DO im = 1, n_meth
 
         NULLIFY(atom_info(in,im)%atom)
-        CALL create_atom_type(atom_info(in,im)%atom,error)
+        CALL create_atom_type(atom_info(in,im)%atom)
 
         atom_info(in,im)%atom%optimization = optimization
 
         atom_info(in,im)%atom%z = zval
-        xc_section => section_vals_get_subs_vals(method_section,"XC",i_rep_section=im,error=error)
+        xc_section => section_vals_get_subs_vals(method_section,"XC",i_rep_section=im)
         atom_info(in,im)%atom%xc_section => xc_section
 
         ! ZMP Reading input sections if they are found initialize everything
@@ -211,42 +199,41 @@ CONTAINS
         doread=.FALSE.
         read_vxc=.FALSE.
 
-        zmp_section => section_vals_get_subs_vals(method_section,"ZMP",error=error)
-        CALL section_vals_get(zmp_section,explicit=do_zmp,error=error)
+        zmp_section => section_vals_get_subs_vals(method_section,"ZMP")
+        CALL section_vals_get(zmp_section,explicit=do_zmp)
         atom_info(in,im)%atom%do_zmp=do_zmp
-        CALL section_vals_val_get(zmp_section,"FILE_DENSITY",c_val=filename,error=error)
+        CALL section_vals_val_get(zmp_section,"FILE_DENSITY",c_val=filename)
         atom_info(in,im)%atom%ext_file=filename
         CALL section_vals_val_get(zmp_section,"GRID_TOL",&
-             r_val= atom_info(in,im)%atom%zmpgrid_tol,error=error)
-        CALL section_vals_val_get(zmp_section,"LAMBDA",r_val=lambda,error=error)
+             r_val= atom_info(in,im)%atom%zmpgrid_tol)
+        CALL section_vals_val_get(zmp_section,"LAMBDA",r_val=lambda)
         atom_info(in,im)%atom%lambda=lambda
-        CALL section_vals_val_get(zmp_section,"DM",l_val=dm,error=error)
+        CALL section_vals_val_get(zmp_section,"DM",l_val=dm)
         atom_info(in,im)%atom%dm=dm
 
-        zmp_restart_section => section_vals_get_subs_vals(zmp_section,"RESTART",error=error)
-        CALL section_vals_get(zmp_restart_section,explicit=doread,error=error)
+        zmp_restart_section => section_vals_get_subs_vals(zmp_section,"RESTART")
+        CALL section_vals_get(zmp_restart_section,explicit=doread)
         atom_info(in,im)%atom%doread=doread
-        CALL section_vals_val_get(zmp_restart_section,"FILE_RESTART",c_val=filename,error=error)
+        CALL section_vals_val_get(zmp_restart_section,"FILE_RESTART",c_val=filename)
         atom_info(in,im)%atom%zmp_restart_file=filename
 
         ! ZMP Reading external vxc section, if found initialize
-        external_vxc_section => section_vals_get_subs_vals(method_section,"EXTERNAL_VXC",error=error)
-        CALL section_vals_get(external_vxc_section,explicit=read_vxc,error=error)
+        external_vxc_section => section_vals_get_subs_vals(method_section,"EXTERNAL_VXC")
+        CALL section_vals_get(external_vxc_section,explicit=read_vxc)
         atom_info(in,im)%atom%read_vxc=read_vxc
-        CALL section_vals_val_get(external_vxc_section,"FILE_VXC",c_val=filename,error=error)
+        CALL section_vals_val_get(external_vxc_section,"FILE_VXC",c_val=filename)
         atom_info(in,im)%atom%ext_vxc_file=filename
         CALL section_vals_val_get(external_vxc_section,"GRID_TOL",&
-             r_val= atom_info(in,im)%atom%zmpvxcgrid_tol,error=error)
+             r_val= atom_info(in,im)%atom%zmpvxcgrid_tol)
 
-        ALLOCATE(state,STAT=ierr)
-        CPPostcondition(ierr==0, cp_failure_level, routineP, error, failure)
+        ALLOCATE(state)
 
         ! get the electronic configuration
         CALL section_vals_val_get(atom_section,"ELECTRON_CONFIGURATION", i_rep_val=in,&
-                                  c_vals=tmpstringlist, error=error)
+                                  c_vals=tmpstringlist)
 
         ! set occupations
-        CALL atom_set_occupation(tmpstringlist,state%occ,state%occupation,state%multiplicity,error)
+        CALL atom_set_occupation(tmpstringlist,state%occ,state%occupation,state%multiplicity)
         state%maxl_occ = get_maxl_occ(state%occ)
         state%maxn_occ = get_maxn_occ(state%occ)
 
@@ -262,78 +249,78 @@ CONTAINS
         pp_calc = ANY(INDEX(tmpstringlist(1:),"CORE") /= 0)
         IF ( pp_calc ) THEN
           ! get and set the core occupations
-          CALL section_vals_val_get(atom_section,"CORE", c_vals=tmpstringlist, error=error)
-          CALL atom_set_occupation(tmpstringlist,state%core,pocc,error=error)
+          CALL section_vals_val_get(atom_section,"CORE", c_vals=tmpstringlist)
+          CALL atom_set_occupation(tmpstringlist,state%core,pocc)
           zcore = zval - NINT(SUM(state%core))
-          CALL set_atom(atom_info(in,im)%atom,zcore=zcore,pp_calc=.TRUE.,error=error)
+          CALL set_atom(atom_info(in,im)%atom,zcore=zcore,pp_calc=.TRUE.)
         ELSE
           state%core=0._dp
-          CALL set_atom(atom_info(in,im)%atom,zcore=zval,pp_calc=.FALSE.,error=error)
+          CALL set_atom(atom_info(in,im)%atom,zcore=zval,pp_calc=.FALSE.)
         END IF
 
-        CALL section_vals_val_get(method_section,"METHOD_TYPE",i_val=method,i_rep_section=im,error=error)
-        CALL section_vals_val_get(method_section,"RELATIVISTIC",i_val=reltyp,i_rep_section=im,error=error)
-        CALL set_atom(atom_info(in,im)%atom,method_type=method,relativistic=reltyp,error=error)
+        CALL section_vals_val_get(method_section,"METHOD_TYPE",i_val=method,i_rep_section=im)
+        CALL section_vals_val_get(method_section,"RELATIVISTIC",i_val=reltyp,i_rep_section=im)
+        CALL set_atom(atom_info(in,im)%atom,method_type=method,relativistic=reltyp)
 
         IF(atom_consistent_method(method,state%multiplicity)) THEN
-          iw = cp_print_key_unit_nr(logger,atom_section,"PRINT%METHOD_INFO",extension=".log",error=error)
-          CALL atom_print_method(atom_info(in,im)%atom,iw,error)
-          CALL cp_print_key_finished_output(iw,logger,atom_section,"PRINT%METHOD_INFO",error=error)
+          iw = cp_print_key_unit_nr(logger,atom_section,"PRINT%METHOD_INFO",extension=".log")
+          CALL atom_print_method(atom_info(in,im)%atom,iw)
+          CALL cp_print_key_finished_output(iw,logger,atom_section,"PRINT%METHOD_INFO")
 
-          iw = cp_print_key_unit_nr(logger,atom_section,"PRINT%POTENTIAL",extension=".log",error=error)
+          iw = cp_print_key_unit_nr(logger,atom_section,"PRINT%POTENTIAL",extension=".log")
           IF ( pp_calc ) THEN
-            IF(iw > 0) CALL atom_print_potential(p_pot,iw,error)
+            IF(iw > 0) CALL atom_print_potential(p_pot,iw)
           ELSE
-            IF(iw > 0) CALL atom_print_potential(ae_pot,iw,error)
+            IF(iw > 0) CALL atom_print_potential(ae_pot,iw)
           END IF
-          CALL cp_print_key_finished_output(iw,logger,atom_section,"PRINT%POTENTIAL",error=error)
+          CALL cp_print_key_finished_output(iw,logger,atom_section,"PRINT%POTENTIAL")
         END IF
 
         ! calculate integrals
         IF ( pp_calc ) THEN
           ! general integrals
           CALL atom_int_setup(pp_int,pp_basis,&
-                              potential=p_pot,eri_coulomb=eri_c,eri_exchange=eri_e,error=error)
+                              potential=p_pot,eri_coulomb=eri_c,eri_exchange=eri_e)
           ! potential
-          CALL atom_ppint_setup(pp_int,pp_basis,potential=p_pot,error=error)
+          CALL atom_ppint_setup(pp_int,pp_basis,potential=p_pot)
           !
           NULLIFY(pp_int%tzora,pp_int%hdkh)
           !
-          CALL set_atom(atom_info(in,im)%atom,basis=pp_basis,integrals=pp_int,potential=p_pot,error=error)
+          CALL set_atom(atom_info(in,im)%atom,basis=pp_basis,integrals=pp_int,potential=p_pot)
           state%maxn_calc(:) = MIN( state%maxn_calc(:), pp_basis%nbas(:) )
-          CPPostcondition(ALL(state%maxn_calc(:) >= state%maxn_occ), cp_failure_level, routineP, error, failure)
+          CPASSERT(ALL(state%maxn_calc(:) >= state%maxn_occ))
           had_pp = .TRUE.
         ELSE
           ! general integrals
           CALL atom_int_setup(ae_int,ae_basis,potential=ae_pot,&
-                              eri_coulomb=eri_c,eri_exchange=eri_e,error=error)
+                              eri_coulomb=eri_c,eri_exchange=eri_e)
           ! potential
-          CALL atom_ppint_setup(ae_int,ae_basis,potential=ae_pot,error=error)
+          CALL atom_ppint_setup(ae_int,ae_basis,potential=ae_pot)
           ! relativistic correction terms
-          CALL atom_relint_setup(ae_int,ae_basis,reltyp,zcore=REAL(zval,dp),error=error)
+          CALL atom_relint_setup(ae_int,ae_basis,reltyp,zcore=REAL(zval,dp))
           !
-          CALL set_atom(atom_info(in,im)%atom,basis=ae_basis,integrals=ae_int,potential=ae_pot,error=error)
+          CALL set_atom(atom_info(in,im)%atom,basis=ae_basis,integrals=ae_int,potential=ae_pot)
           state%maxn_calc(:) = MIN( state%maxn_calc(:), ae_basis%nbas(:) )
-          CPPostcondition(ALL(state%maxn_calc(:) >= state%maxn_occ), cp_failure_level, routineP, error, failure)
+          CPASSERT(ALL(state%maxn_calc(:) >= state%maxn_occ))
           had_ae = .TRUE.
         END IF
 
-        CALL set_atom(atom_info(in,im)%atom,state=state,error=error)
+        CALL set_atom(atom_info(in,im)%atom,state=state)
 
         CALL set_atom(atom_info(in,im)%atom,coulomb_integral_type=do_eric,&
-                      exchange_integral_type=do_erie,error=error)
+                      exchange_integral_type=do_erie)
 
         NULLIFY(orbitals)
         mo = MAXVAL(state%maxn_calc)
         mb = MAXVAL(atom_info(in,im)%atom%basis%nbas)
-        CALL create_atom_orbs(orbitals,mb,mo,error)
-        CALL set_atom(atom_info(in,im)%atom,orbitals=orbitals,error=error)
+        CALL create_atom_orbs(orbitals,mb,mo)
+        CALL set_atom(atom_info(in,im)%atom,orbitals=orbitals)
 
         IF(atom_consistent_method(method,state%multiplicity)) THEN
           !Calculate the electronic structure
-          iw = cp_print_key_unit_nr(logger,atom_section,"PRINT%SCF_INFO",extension=".log",error=error)
-          CALL calculate_atom(atom_info(in,im)%atom,iw,error=error)
-          CALL cp_print_key_finished_output(iw,logger,atom_section,"PRINT%SCF_INFO",error=error)
+          iw = cp_print_key_unit_nr(logger,atom_section,"PRINT%SCF_INFO",extension=".log")
+          CALL calculate_atom(atom_info(in,im)%atom,iw)
+          CALL cp_print_key_finished_output(iw,logger,atom_section,"PRINT%SCF_INFO")
 
           ! ZMP If we have the external density do zmp
           IF (atom_info(in,im)%atom%do_zmp) THEN
@@ -344,7 +331,7 @@ CONTAINS
             CALL atom_read_external_density(ext_density, atom_info(in,im)%atom,iw)
             CALL calculate_atom_zmp(ext_density=ext_density, &
                                     atom=atom_info(in,im)%atom, &
-                                    lprint=.TRUE.,error=error)
+                                    lprint=.TRUE.)
             DEALLOCATE(ext_density)
           ENDIF
           ! ZMP If we have the external v_xc calculate KS quantities
@@ -354,13 +341,13 @@ CONTAINS
             CALL atom_read_external_vxc(ext_vxc, atom_info(in,im)%atom,iw)
             CALL calculate_atom_ext_vxc(vxc=ext_vxc, &
                                         atom=atom_info(in,im)%atom, &
-                                        lprint=.TRUE.,error=error)
+                                        lprint=.TRUE.)
             DEALLOCATE(ext_vxc)
           ENDIF
 
           ! rk: Print out the energies needed for the scptb parametrization
           ! (Orbital energies minus Kinetic, etc)
-          iw = cp_print_key_unit_nr(logger,atom_section,"PRINT%ENERGIES_MINUS_KINETIC",extension=".log",error=error)
+          iw = cp_print_key_unit_nr(logger,atom_section,"PRINT%ENERGIES_MINUS_KINETIC",extension=".log")
           IF (iw > 0) THEN
                 WRITE(iw,'(T36,A,T61,F20.12)') "     Etot-Ekin   ::",atom_info(in,im)%atom%energy%etot &
                          - atom_info(in,im)%atom%energy%ekin
@@ -403,47 +390,47 @@ CONTAINS
 
 
           ! Print out the orbitals if requested
-          iw = cp_print_key_unit_nr(logger,atom_section,"PRINT%ORBITALS",extension=".log",error=error)
+          iw = cp_print_key_unit_nr(logger,atom_section,"PRINT%ORBITALS",extension=".log")
           IF (iw > 0) THEN
-            CALL atom_print_orbitals(atom_info(in,im)%atom,iw,error=error)
+            CALL atom_print_orbitals(atom_info(in,im)%atom,iw)
           END IF
-          CALL cp_print_key_finished_output(iw,logger,atom_section,"PRINT%ORBITALS",error=error)
+          CALL cp_print_key_finished_output(iw,logger,atom_section,"PRINT%ORBITALS")
 
           ! perform a fit of the total electronic density
-          iw = cp_print_key_unit_nr(logger,atom_section,"PRINT%FIT_DENSITY",extension=".log",error=error)
+          iw = cp_print_key_unit_nr(logger,atom_section,"PRINT%FIT_DENSITY",extension=".log")
           IF (iw>0) THEN
-            CALL section_vals_val_get(atom_section,"PRINT%FIT_DENSITY%NUM_GTO", i_val=num_gto, error=error)
-            powell_section => section_vals_get_subs_vals(atom_section,"POWELL",error=error)
-            CALL atom_fit_density(atom_info(in,im)%atom,num_gto,0,iw,powell_section=powell_section,error=error)
+            CALL section_vals_val_get(atom_section,"PRINT%FIT_DENSITY%NUM_GTO", i_val=num_gto)
+            powell_section => section_vals_get_subs_vals(atom_section,"POWELL")
+            CALL atom_fit_density(atom_info(in,im)%atom,num_gto,0,iw,powell_section=powell_section)
           END IF
-          CALL cp_print_key_finished_output(iw,logger,atom_section,"PRINT%FIT_DENSITY",error=error)
+          CALL cp_print_key_finished_output(iw,logger,atom_section,"PRINT%FIT_DENSITY")
 
           ! Optimize a local potential for the non-additive kinetic energy term in KG
-          iw = cp_print_key_unit_nr(logger,atom_section,"PRINT%FIT_KGPOT",extension=".log",error=error)
+          iw = cp_print_key_unit_nr(logger,atom_section,"PRINT%FIT_KGPOT",extension=".log")
           IF (iw>0) THEN
-            CALL section_vals_val_get(atom_section,"PRINT%FIT_KGPOT%NUM_GAUSSIAN", i_val=num_gau, error=error)
-            CALL section_vals_val_get(atom_section,"PRINT%FIT_KGPOT%NUM_POLYNOM", i_val=num_pol, error=error)
-            powell_section => section_vals_get_subs_vals(atom_section,"POWELL",error=error)
-            CALL atom_fit_kgpot(atom_info(in,im)%atom,num_gau,num_pol,iw,powell_section=powell_section,error=error)
+            CALL section_vals_val_get(atom_section,"PRINT%FIT_KGPOT%NUM_GAUSSIAN", i_val=num_gau)
+            CALL section_vals_val_get(atom_section,"PRINT%FIT_KGPOT%NUM_POLYNOM", i_val=num_pol)
+            powell_section => section_vals_get_subs_vals(atom_section,"POWELL")
+            CALL atom_fit_kgpot(atom_info(in,im)%atom,num_gau,num_pol,iw,powell_section=powell_section)
           END IF
-          CALL cp_print_key_finished_output(iw,logger,atom_section,"PRINT%FIT_KGPOT",error=error)
+          CALL cp_print_key_finished_output(iw,logger,atom_section,"PRINT%FIT_KGPOT")
 
           ! generate a response basis
-          iw = cp_print_key_unit_nr(logger,atom_section,"PRINT%RESPONSE_BASIS",extension=".log",error=error)
+          iw = cp_print_key_unit_nr(logger,atom_section,"PRINT%RESPONSE_BASIS",extension=".log")
           IF (iw>0) THEN
-            CALL section_vals_val_get(atom_section,"PRINT%RESPONSE_BASIS%DELTA_CHARGE", r_val=delta, error=error)
-            CALL section_vals_val_get(atom_section,"PRINT%RESPONSE_BASIS%DERIVATIVES", i_val=nder, error=error)
-            CALL atom_response_basis(atom_info(in,im)%atom,delta,nder,iw,error)
+            CALL section_vals_val_get(atom_section,"PRINT%RESPONSE_BASIS%DELTA_CHARGE", r_val=delta)
+            CALL section_vals_val_get(atom_section,"PRINT%RESPONSE_BASIS%DERIVATIVES", i_val=nder)
+            CALL atom_response_basis(atom_info(in,im)%atom,delta,nder,iw)
           END IF
-          CALL cp_print_key_finished_output(iw,logger,atom_section,"PRINT%RESPONSE_BASIS",error=error)
+          CALL cp_print_key_finished_output(iw,logger,atom_section,"PRINT%RESPONSE_BASIS")
 
           ! generate a UPF file
          iw = cp_print_key_unit_nr(logger,atom_section,"PRINT%UPF_FILE",extension=".upf",&
-              file_position="REWIND",error=error)
+              file_position="REWIND")
           IF (iw>0) THEN
-            CALL atom_write_upf(atom_info(in,im)%atom,iw,error)
+            CALL atom_write_upf(atom_info(in,im)%atom,iw)
           END IF
-          CALL cp_print_key_finished_output(iw,logger,atom_section,"PRINT%UPF_FILE",error=error)
+          CALL cp_print_key_finished_output(iw,logger,atom_section,"PRINT%UPF_FILE")
         END IF
 
       END DO
@@ -451,31 +438,29 @@ CONTAINS
 
     ! clean up
     IF ( had_ae ) THEN
-      CALL atom_int_release(ae_int,error)
-      CALL atom_ppint_release(ae_int,error)
-      CALL atom_relint_release(ae_int,error)
+      CALL atom_int_release(ae_int)
+      CALL atom_ppint_release(ae_int)
+      CALL atom_relint_release(ae_int)
     END IF
     IF ( had_pp ) THEN
-      CALL atom_int_release(pp_int,error)
-      CALL atom_ppint_release(pp_int,error)
-      CALL atom_relint_release(pp_int,error)
+      CALL atom_int_release(pp_int)
+      CALL atom_ppint_release(pp_int)
+      CALL atom_relint_release(pp_int)
     END IF
-    CALL release_atom_basis(ae_basis,error)
-    CALL release_atom_basis(pp_basis,error)
+    CALL release_atom_basis(ae_basis)
+    CALL release_atom_basis(pp_basis)
 
-    CALL release_atom_potential(p_pot,error)
-    CALL release_atom_potential(ae_pot,error)
+    CALL release_atom_potential(p_pot)
+    CALL release_atom_potential(ae_pot)
 
     DO in = 1, n_rep
       DO im = 1, n_meth
-        CALL release_atom_type(atom_info(in,im)%atom,error)
+        CALL release_atom_type(atom_info(in,im)%atom)
       END DO
     END DO
-    DEALLOCATE(atom_info,STAT=ierr)
-    CPPostcondition(ierr==0, cp_failure_level, routineP, error, failure)
+    DEALLOCATE(atom_info)
 
-    DEALLOCATE(ae_pot,p_pot,ae_basis,pp_basis,ae_int,pp_int,STAT=ierr)
-    CPPostcondition(ierr==0, cp_failure_level, routineP, error, failure)
+    DEALLOCATE(ae_pot,p_pot,ae_basis,pp_basis,ae_int,pp_int)
 
     CALL timestop(handle)
 
@@ -487,21 +472,18 @@ CONTAINS
 !> \param delta ...
 !> \param nder ...
 !> \param iw ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE atom_response_basis(atom,delta,nder,iw,error)
+  SUBROUTINE atom_response_basis(atom,delta,nder,iw)
 
     TYPE(atom_type), POINTER                 :: atom
     REAL(KIND=dp), INTENT(IN)                :: delta
     INTEGER, INTENT(IN)                      :: nder, iw
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'atom_response_basis', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, ider, ierr, j, k, l, &
-                                                lhomo, m, n, nhomo, s1, s2
-    LOGICAL                                  :: failure
+    INTEGER                                  :: i, ider, j, k, l, lhomo, m, &
+                                                n, nhomo, s1, s2
     REAL(KIND=dp)                            :: dene, emax, expzet, fhomo, o, &
                                                 prefac, zeta
     REAL(KIND=dp), ALLOCATABLE, &
@@ -514,7 +496,6 @@ CONTAINS
       POINTER                                :: ovlp
     TYPE(atom_state), POINTER                :: state
 
-    failure = .FALSE.
     WRITE(iw,'(/," ",79("*"),/,T34,A,/," ",79("*"))') "RESPONSE BASIS"
 
     state => atom%state
@@ -537,18 +518,16 @@ CONTAINS
 
     s1=SIZE(atom%orbitals%wfn,1)
     s2=SIZE(atom%orbitals%wfn,2)
-    ALLOCATE(wfn(s1,s2,0:3,-nder:nder),STAT=ierr)
-    CPPostcondition(ierr==0, cp_failure_level, routineP, error, failure)
+    ALLOCATE(wfn(s1,s2,0:3,-nder:nder))
     s2=MAXVAL(state%maxn_occ)+nder
-    ALLOCATE(rbasis(s1,s2,0:3),STAT=ierr)
-    CPPostcondition(ierr==0, cp_failure_level, routineP, error, failure)
+    ALLOCATE(rbasis(s1,s2,0:3))
     rbasis = 0._dp
 
     DO ider=-nder,nder
       dene = REAL(ider,KIND=dp)*delta
-      CPPostcondition(fhomo>ABS(dene), cp_failure_level, routineP, error, failure)
+      CPASSERT(fhomo>ABS(dene))
       state%occupation(lhomo,nhomo)=fhomo+dene
-      CALL calculate_atom(atom,iw=0,noguess=.TRUE.,error=error)
+      CALL calculate_atom(atom,iw=0,noguess=.TRUE.)
       wfn(:,:,:,ider) = atom%orbitals%wfn
       state%occupation(lhomo,nhomo)=fhomo
     END DO
@@ -570,7 +549,7 @@ CONTAINS
             rbasis(:,i+3,l) = 0.125_dp*(wfn(:,i,l,3) - 3._dp*wfn(:,i,l,1) &
                                       + 3._dp*wfn(:,i,l,-1) - wfn(:,i,l,-3))/delta**3
           CASE DEFAULT
-            CPPostcondition(.FALSE., cp_failure_level, routineP, error, failure)
+            CPABORT("")
         END SELECT
       END DO
 
@@ -587,8 +566,7 @@ CONTAINS
       ENDDO
 
       ! check
-      ALLOCATE(amat(n,n),STAT=ierr)
-      CPPostcondition(ierr==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(amat(n,n))
       amat(1:n,1:n) = MATMUL(TRANSPOSE(rbasis(1:m,1:n,l)),MATMUL(ovlp(1:m,1:m,l),rbasis(1:m,1:n,l)))
       DO i=1,n
         amat(i,i)=amat(i,i) - 1._dp
@@ -596,8 +574,7 @@ CONTAINS
       IF (MAXVAL(ABS(amat)) > 1.e-12) THEN
          WRITE(iw,'(A,G20.10)') " Orthogonality error  ", MAXVAL(ABS(amat))
       END IF
-      DEALLOCATE(amat,STAT=ierr)
-      CPPostcondition(ierr==0,cp_failure_level,routineP,error,failure)
+      DEALLOCATE(amat)
 
       ! Quickstep normalization
       WRITE(iw,'(/,A,T30,I3)') " Angular momentum :",l
@@ -613,8 +590,7 @@ CONTAINS
 
     END DO
 
-    DEALLOCATE(wfn,rbasis,STAT=ierr)
-    CPPostcondition(ierr==0, cp_failure_level, routineP, error, failure)
+    DEALLOCATE(wfn,rbasis)
 
     WRITE(iw,'(" ",79("*"))')
 
@@ -623,21 +599,19 @@ CONTAINS
 !> \brief ...
 !> \param atom ...
 !> \param iw ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE atom_write_upf(atom,iw,error)
+  SUBROUTINE atom_write_upf(atom,iw)
 
     TYPE(atom_type), POINTER                 :: atom
     INTEGER, INTENT(IN)                      :: iw
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'atom_write_upf', &
       routineP = moduleN//':'//routineN
 
     CHARACTER(LEN=default_string_length)     :: string
-    INTEGER                                  :: i, ibeta, ierr, j, k, l, &
-                                                lmax, nbeta, nr, nwfc, nwfn
-    LOGICAL                                  :: failure, up
+    INTEGER                                  :: i, ibeta, j, k, l, lmax, &
+                                                nbeta, nr, nwfc, nwfn
+    LOGICAL                                  :: up
     REAL(KIND=dp)                            :: pf, rl, rmax
     REAL(KIND=dp), ALLOCATABLE, DIMENSION(:) :: beta, corden, dens, ef, &
                                                 locpot, rp
@@ -645,18 +619,17 @@ CONTAINS
       DIMENSION(:, :)                        :: dij
     TYPE(atom_gthpot_type), POINTER          :: pot
 
-    failure = .FALSE.
     IF(.NOT.atom%pp_calc) RETURN
     IF(atom%potential%ppot_type /= GTH_PSEUDO) RETURN
     pot => atom%potential%gth_pot
-    CPPostcondition(.NOT.pot%lsdpot, cp_failure_level, routineP, error, failure)
+    CPASSERT(.NOT.pot%lsdpot)
 
     WRITE(iw,'(A)') '<UPF version="2.0.1">'
 
     WRITE(iw,'(T4,A)') '<PP_INFO>'
     WRITE(iw,'(T8,A)') 'Converted from CP2K GTH format'
     WRITE(iw,'(T8,A)') '<PP_INPUTFILE>'
-    CALL atom_write_pseudo_param(pot,iw,error)
+    CALL atom_write_pseudo_param(pot,iw)
     WRITE(iw,'(T8,A)') '</PP_INPUTFILE>'
     WRITE(iw,'(T4,A)') '</PP_INFO>'
     WRITE(iw,'(T4,A)') '<PP_HEADER'
@@ -744,16 +717,14 @@ CONTAINS
        CALL compose(string,"size",ival=nr)
        WRITE(iw,'(T8,A)') TRIM(string)
        WRITE(iw,'(T8,A)') 'columns="4">'
-       ALLOCATE(corden(nr),STAT=ierr)
-       CPPostcondition(ierr==0,cp_failure_level,routineP,error,failure)
-       CALL atom_core_density(corden,pot,"RHO",atom%basis%grid%rad,error)
+       ALLOCATE(corden(nr))
+       CALL atom_core_density(corden,pot,"RHO",atom%basis%grid%rad)
        IF(up) THEN
           WRITE(iw,'(T8,4ES25.12E3)') (corden(i),i=1,nr)
        ELSE
           WRITE(iw,'(T8,4ES25.12E3)') (corden(i),i=nr,1,-1)
        END IF
-       DEALLOCATE(corden,STAT=ierr)
-       CPPostcondition(ierr==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE(corden)
        WRITE(iw,'(T4,A)') '</PP_NLCC>'
     END IF
 
@@ -762,22 +733,19 @@ CONTAINS
     CALL compose(string,"size",ival=nr)
     WRITE(iw,'(T8,A)') TRIM(string)
     WRITE(iw,'(T8,A)') 'columns="4">'
-    ALLOCATE(locpot(nr),STAT=ierr)
-    CPPostcondition(ierr==0,cp_failure_level,routineP,error,failure)
-    CALL atom_local_potential(locpot,pot,atom%basis%grid%rad,error)
+    ALLOCATE(locpot(nr))
+    CALL atom_local_potential(locpot,pot,atom%basis%grid%rad)
     IF(up) THEN
        WRITE(iw,'(T8,4ES25.12E3)') (2.0_dp*locpot(i),i=1,nr)
     ELSE
        WRITE(iw,'(T8,4ES25.12E3)') (2.0_dp*locpot(i),i=nr,1,-1)
     END IF
-    DEALLOCATE(locpot,STAT=ierr)
-    CPPostcondition(ierr==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(locpot)
     WRITE(iw,'(T4,A)') '</PP_LOCAL>'
 
     ! nonlocal PP
     WRITE(iw,'(T4,A)') '<PP_NONLOCAL>'
-    ALLOCATE(rp(nr),ef(nr),beta(nr),STAT=ierr)
-    CPPostcondition(ierr==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(rp(nr),ef(nr),beta(nr))
     ibeta = 0
     DO l=0,3
        IF(pot%nl(l) == 0) CYCLE
@@ -808,11 +776,9 @@ CONTAINS
           WRITE(iw,'(T8,A)') TRIM(string)
        END DO
     END DO
-    DEALLOCATE(rp,ef,beta,STAT=ierr)
-    CPPostcondition(ierr==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(rp,ef,beta)
     ! nonlocal PP matrix elements
-    ALLOCATE(dij(nbeta,nbeta),STAT=ierr)
-    CPPostcondition(ierr==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(dij(nbeta,nbeta))
     dij = 0._dp
     DO l=0,3
        IF(pot%nl(l) == 0) CYCLE
@@ -824,13 +790,11 @@ CONTAINS
     WRITE(iw,'(T12,A)') 'columns="4">'
     WRITE(iw,'(T12,4ES25.12E3)') ((0.5_dp*dij(i,j),j=1,nbeta),i=1,nbeta)
     WRITE(iw,'(T8,A)') '</PP_DIJ>'
-    DEALLOCATE(dij,STAT=ierr)
-    CPPostcondition(ierr==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(dij)
     WRITE(iw,'(T4,A)') '</PP_NONLOCAL>'
 
     ! atomic wavefunctions
-    ALLOCATE(beta(nr),STAT=ierr)
-    CPPostcondition(ierr==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(beta(nr))
     WRITE(iw,'(T4,A)') '<PP_PSWFC>'
     nwfn=0
     DO l=0,3
@@ -861,26 +825,23 @@ CONTAINS
        END DO
     END DO
     WRITE(iw,'(T4,A)') '</PP_PSWFC>'
-    DEALLOCATE(beta,STAT=ierr)
-    CPPostcondition(ierr==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(beta)
 
     ! atomic charge
-    ALLOCATE(dens(nr),STAT=ierr)
-    CPPostcondition(ierr==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(dens(nr))
     WRITE(iw,'(T4,A)') '<PP_RHOATOM type="real"'
     CALL compose(string,"size",ival=nr)
     WRITE(iw,'(T8,A)') TRIM(string)
     WRITE(iw,'(T8,A)') 'columns="4">'
     CALL atom_density(dens,atom%orbitals%pmat,atom%basis,atom%state%maxl_occ,&
-         "RHO",atom%basis%grid%rad,error)
+         "RHO",atom%basis%grid%rad)
     IF(up) THEN
        WRITE(iw,'(T8,4ES25.12E3)') (4._dp*pi*dens(j)*atom%basis%grid%rad2(j),j=1,nr)
     ELSE
        WRITE(iw,'(T8,4ES25.12E3)') (4._dp*pi*dens(j)*atom%basis%grid%rad2(j),j=nr,1,-1)
     END IF
     WRITE(iw,'(T4,A)') '</PP_RHOATOM>'
-    DEALLOCATE(dens,STAT=ierr)
-    CPPostcondition(ierr==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(dens)
 
     WRITE(iw,'(A)') '</UPF>'
 

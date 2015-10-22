@@ -46,7 +46,6 @@ MODULE mp2_gpw
                                              distribution_2d_type
   USE distribution_methods,            ONLY: distribute_molecules_1d,&
                                              distribute_molecules_2d
-  USE input_constants,                 ONLY: use_orb_basis_set
   USE input_section_types,             ONLY: section_vals_val_get
   USE kinds,                           ONLY: dp,&
                                              int_8
@@ -106,10 +105,9 @@ MODULE mp2_gpw
   USE task_list_types,                 ONLY: allocate_task_list,&
                                              deallocate_task_list,&
                                              task_list_type
-  USE timings,                         ONLY: timeset,&
-                                             timestop
   USE util,                            ONLY: get_limit
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -136,14 +134,13 @@ MODULE mp2_gpw
 !> \param unit_nr ...
 !> \param calc_forces ...
 !> \param calc_ex ...
-!> \param error ...
 !> \param do_ri_mp2 ...
 !> \param do_ri_rpa ...
 !> \param do_ri_sos_laplace_mp2 ...
 !> \author Mauro Del Ben and Joost VandeVondele
 ! *****************************************************************************
   SUBROUTINE mp2_gpw_main(qs_env,mp2_env,Emp2,Emp2_Cou,Emp2_EX,Emp2_S,Emp2_T,&
-                          mos_mp2,para_env,unit_nr,calc_forces,calc_ex,error,do_ri_mp2,do_ri_rpa,&
+                          mos_mp2,para_env,unit_nr,calc_forces,calc_ex,do_ri_mp2,do_ri_rpa,&
                           do_ri_sos_laplace_mp2)
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(mp2_type), POINTER                  :: mp2_env
@@ -155,7 +152,6 @@ MODULE mp2_gpw
     INTEGER                                  :: unit_nr
     LOGICAL, INTENT(IN)                      :: calc_forces
     LOGICAL                                  :: calc_ex
-    TYPE(cp_error_type), INTENT(inout)       :: error
     LOGICAL, OPTIONAL                        :: do_ri_mp2, do_ri_rpa, &
                                                 do_ri_sos_laplace_mp2
 
@@ -166,14 +162,14 @@ MODULE mp2_gpw
       gw_corr_lev_occ, gw_corr_lev_occ_beta, gw_corr_lev_virt, &
       gw_corr_lev_virt_beta, handle, homo, homo_beta, i, i_multigrid, &
       local_unit_nr, my_group_L_end, my_group_L_size, my_group_L_start, &
-      n_multigrid, natom, nelectron, nelectron_beta, nkind, nmo, nspins, stat
+      n_multigrid, natom, nelectron, nelectron_beta, nkind, nmo, nspins
     INTEGER, ALLOCATABLE, DIMENSION(:) :: ends_array, ends_B_all, &
       ends_B_virtual, ends_B_virtual_beta, sizes_array, sizes_B_all, &
       sizes_B_virtual, sizes_B_virtual_beta, starts_array, starts_B_all, &
       starts_B_virtual, starts_B_virtual_beta
     INTEGER, DIMENSION(:), POINTER           :: row_blk_sizes
-    LOGICAL :: blacs_repeatable, failure, my_do_gw, my_do_ri_mp2, &
-      my_do_ri_rpa, my_do_ri_sos_laplace_mp2, skip_load_balance_distributed
+    LOGICAL :: blacs_repeatable, my_do_gw, my_do_ri_mp2, my_do_ri_rpa, &
+      my_do_ri_sos_laplace_mp2, skip_load_balance_distributed
     LOGICAL, ALLOCATABLE, DIMENSION(:)       :: orb_present
     REAL(dp), ALLOCATABLE, DIMENSION(:)      :: orb_radius
     REAL(dp), ALLOCATABLE, DIMENSION(:, :)   :: pair_radius
@@ -185,7 +181,8 @@ MODULE mp2_gpw
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :, :)                     :: BIb_C, BIb_C_beta, BIb_C_gw, &
                                                 BIb_C_gw_beta
-    REAL(KIND=dp), DIMENSION(:), POINTER     :: mo_eigenvalues
+    REAL(KIND=dp), DIMENSION(:), POINTER     :: mo_eigenvalues, &
+                                                mo_eigenvalues_beta
     TYPE(atomic_kind_type), DIMENSION(:), &
       POINTER                                :: atomic_kind_set
     TYPE(cell_type), POINTER                 :: cell
@@ -194,7 +191,6 @@ MODULE mp2_gpw
     TYPE(cp_dbcsr_type), POINTER :: mo_coeff_all, mo_coeff_all_beta, &
       mo_coeff_gw, mo_coeff_gw_beta, mo_coeff_o, mo_coeff_o_beta, mo_coeff_v, &
       mo_coeff_v_beta
-    TYPE(cp_error_type)                      :: error_sub
     TYPE(cp_fm_type), POINTER                :: mo_coeff, mo_coeff_beta
     TYPE(cp_logger_type), POINTER            :: logger, logger_sub
     TYPE(cp_para_env_type), POINTER          :: para_env_sub
@@ -223,7 +219,6 @@ MODULE mp2_gpw
     TYPE(task_list_type), POINTER            :: task_list_sub
 
     CALL timeset(routineN,handle)
-    failure=.FALSE.
 
     ! check if we want to do ri-mp2
     my_do_ri_mp2=.FALSE.
@@ -237,20 +232,28 @@ MODULE mp2_gpw
     my_do_ri_sos_laplace_mp2=.FALSE.
     IF(PRESENT(do_ri_sos_laplace_mp2)) my_do_ri_sos_laplace_mp2=do_ri_sos_laplace_mp2
 
+    ! Get the number of spins
+    nspins=SIZE(mos_mp2)
+
     ! ... setup needed to be able to qs_integrate in a subgroup.
-    CALL get_qs_env(qs_env=qs_env, dft_control=dft_control, error=error)
+    CALL get_qs_env(qs_env=qs_env, dft_control=dft_control)
     CALL get_mo_set(mo_set=mos_mp2(1)%mo_set, nelectron=nelectron,&
                     eigenvalues=mo_eigenvalues,nmo=nmo,homo=homo,&
                     mo_coeff=mo_coeff,nao=dimen)
+    IF (nspins==2) THEN                
+      CALL get_mo_set(mo_set=mos_mp2(2)%mo_set, nelectron=nelectron_beta,&
+                      eigenvalues=mo_eigenvalues_beta,homo=homo_beta,&
+                      mo_coeff=mo_coeff_beta)
+    ENDIF
 
     ! a para_env
     color_sub=para_env%mepos/mp2_env%mp2_num_proc
     CALL mp_comm_split_direct(para_env%group,comm_sub,color_sub)
     NULLIFY(para_env_sub)
-    CALL cp_para_env_create(para_env_sub,comm_sub,error=error)
+    CALL cp_para_env_create(para_env_sub,comm_sub)
 
     ! each of the sub groups might need to generate output
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
     IF (para_env%mepos==para_env%source) THEN
        local_unit_nr=cp_logger_get_default_unit_nr(logger,local=.FALSE.)
     ELSE
@@ -272,9 +275,7 @@ MODULE mp2_gpw
     CALL cp_logger_set(logger_sub,local_filename="MP2_localLog")
     ! set to a custom print level (we could also have a different print level for para_env%source)
     logger_sub%iter_info%print_level=mp2_env%mp2_gpw%print_level
-
-    ! a error
-    CALL cp_error_init(error_sub, logger=logger_sub)
+    CALL cp_add_default_logger(logger_sub)
 
     ! a blacs_env (ignore the globenv stored defaults for now)
     blacs_grid_layout=BLACS_GRID_SQUARE
@@ -282,7 +283,7 @@ MODULE mp2_gpw
     NULLIFY(blacs_env_sub)
     CALL cp_blacs_env_create(blacs_env_sub,para_env_sub,&
                              blacs_grid_layout,&
-                             blacs_repeatable,error=error_sub)
+                             blacs_repeatable)
 
     ! get stuff
     CALL get_qs_env(qs_env,&
@@ -293,8 +294,7 @@ MODULE mp2_gpw
                     atomic_kind_set=atomic_kind_set,&
                     molecule_set=molecule_set,&
                     molecule_kind_set=molecule_kind_set,&
-                    dft_control=dft_control,&
-                    error=error)
+                    dft_control=dft_control)
 
     ! re-init the radii to be able to generate pair lists with MP2-appropriate screening
     eps_pgf_orb_old=dft_control%qs_control%eps_pgf_orb
@@ -304,7 +304,7 @@ MODULE mp2_gpw
     dft_control%qs_control%eps_pgf_orb   =mp2_env%mp2_gpw%eps_grid
     dft_control%qs_control%eps_rho_rspace=mp2_env%mp2_gpw%eps_grid
     dft_control%qs_control%eps_gvg_rspace=mp2_env%mp2_gpw%eps_grid
-    CALL init_interaction_radii(dft_control%qs_control,atomic_kind_set, qs_kind_set, error_sub)
+    CALL init_interaction_radii(dft_control%qs_control,atomic_kind_set, qs_kind_set)
 
     ! get a distribution_1d
     NULLIFY(local_particles_sub,local_molecules_sub)
@@ -314,8 +314,7 @@ MODULE mp2_gpw
                                  molecule_kind_set=molecule_kind_set,&
                                  molecule_set=molecule_set,&
                                  local_molecules=local_molecules_sub,&
-                                 force_env_section=qs_env%input,&
-                                 error=error_sub)
+                                 force_env_section=qs_env%input)
 
     ! get a distribution_2d
     NULLIFY(distribution_2d_sub)
@@ -327,53 +326,44 @@ MODULE mp2_gpw
                                  molecule_set=molecule_set,&
                                  distribution_2d=distribution_2d_sub,&
                                  blacs_env=blacs_env_sub,&
-                                 force_env_section=qs_env%input, error=error_sub)
+                                 force_env_section=qs_env%input)
 
     ! Build the sub  orbital-orbital overlap neighbor lists
     NULLIFY(sab_orb_sub)
-    CALL section_vals_val_get(qs_env%input,"DFT%SUBCELLS",r_val=subcells,error=error)
+    CALL section_vals_val_get(qs_env%input,"DFT%SUBCELLS",r_val=subcells)
     nkind = SIZE(atomic_kind_set)
-    ALLOCATE (orb_present(nkind),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE (orb_radius(nkind),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (orb_present(nkind))
+    ALLOCATE (orb_radius(nkind))
     orb_radius(:) = 0.0_dp
-    ALLOCATE (pair_radius(nkind,nkind),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE (atom2d(nkind),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (pair_radius(nkind,nkind))
+    ALLOCATE (atom2d(nkind))
 
     CALL atom2d_build(atom2d,orb_radius,orb_present,local_particles_sub,distribution_2d_sub,&
                       atomic_kind_set,qs_kind_set,molecule_set,molecule_only=.FALSE.,dftb=.FALSE.,&
-                      particle_set=particle_set,error=error)
-    CALL pair_radius_setup(orb_present,orb_present,orb_radius,orb_radius,pair_radius,error)
+                      particle_set=particle_set)
+    CALL pair_radius_setup(orb_present,orb_present,orb_radius,orb_radius,pair_radius)
     CALL build_neighbor_lists(sab_orb_sub,particle_set,atom2d,cell,pair_radius,&
-                              mic=.FALSE.,subcells=subcells,molecular=.FALSE.,name="sab_orb_sub",error=error)
-    CALL atom2d_cleanup(atom2d,error)
-    DEALLOCATE (atom2d,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    DEALLOCATE(orb_present,orb_radius,pair_radius,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+                              mic=.FALSE.,subcells=subcells,molecular=.FALSE.,name="sab_orb_sub")
+    CALL atom2d_cleanup(atom2d)
+    DEALLOCATE (atom2d)
+    DEALLOCATE(orb_present,orb_radius,pair_radius)
 
     ! a dbcsr_dist
-    ALLOCATE(dbcsr_dist_sub,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    CALL cp_dbcsr_dist2d_to_dist (distribution_2d_sub, dbcsr_dist_sub, unit_nr, error_sub)
+    ALLOCATE(dbcsr_dist_sub)
+    CALL cp_dbcsr_dist2d_to_dist (distribution_2d_sub, dbcsr_dist_sub, unit_nr)
 
     ! build a dbcsr matrix the hard way
     natom = SIZE(particle_set)
-    ALLOCATE (row_blk_sizes(natom), STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    CALL get_particle_set(particle_set, qs_kind_set, nsgf=row_blk_sizes,error=error)
-    ALLOCATE(mat_munu%matrix, STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    CALL cp_dbcsr_init(mat_munu%matrix,error=error_sub)
+    ALLOCATE (row_blk_sizes(natom))
+    CALL get_particle_set(particle_set, qs_kind_set, nsgf=row_blk_sizes)
+    ALLOCATE(mat_munu%matrix)
+    CALL cp_dbcsr_init(mat_munu%matrix)
     CALL cp_dbcsr_create(matrix=mat_munu%matrix,&
                name="(ai|munu)",&
                dist=dbcsr_dist_sub, matrix_type=dbcsr_type_symmetric,&
                row_blk_size=row_blk_sizes, col_blk_size=row_blk_sizes, &
-               nblks=0, nze=0, error=error_sub)
-    CALL cp_dbcsr_alloc_block_from_nbl(mat_munu%matrix,sab_orb_sub,error_sub)
+               nze=0)
+    CALL cp_dbcsr_alloc_block_from_nbl(mat_munu%matrix,sab_orb_sub)
     DEALLOCATE(row_blk_sizes)
 
     ! check if we want to do ri-g0w0 on top of ri-rpa
@@ -382,42 +372,35 @@ MODULE mp2_gpw
     gw_corr_lev_virt=mp2_env%ri_g0w0%corr_mos_virt
 
     ! and the array of mos
-    ALLOCATE(Eigenval(dimen),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(Eigenval(dimen))
     Eigenval(:)=mo_eigenvalues(:)
+    IF (nspins==2) THEN
+       ALLOCATE(Eigenval_beta(dimen))
+       Eigenval_beta(:)=mo_eigenvalues_beta(:)
+    ENDIF
 
     ! new routine: replicate a full matrix from one para_env to a smaller one
     ! keeping the memory usage as small as possible in this case the 
     ! output the two part of the C matrix (virtual, occupied)
     CALL replicate_mat_to_subgroup(mp2_env,para_env,para_env_sub,mo_coeff,dimen,homo,mat_munu,&
                                    mo_coeff_o,mo_coeff_v,mo_coeff_all,mo_coeff_gw,my_do_gw,&
-                                   gw_corr_lev_occ,gw_corr_lev_virt,blacs_env_sub,&
-                                   unit_nr,error,error_sub)
+                                   gw_corr_lev_occ,gw_corr_lev_virt)
 
     ! if open shell case replicate also the coefficient matrix for the beta orbitals 
-    nspins=SIZE(mos_mp2)
     IF(nspins==2) THEN
-      CALL get_mo_set(mo_set=mos_mp2(2)%mo_set, nelectron=nelectron_beta,&
-                      eigenvalues=mo_eigenvalues,homo=homo_beta,&
-                      mo_coeff=mo_coeff_beta)
-      ALLOCATE(Eigenval_beta(dimen),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-      Eigenval_beta(:)=mo_eigenvalues(:)
 
       gw_corr_lev_occ_beta=mp2_env%ri_g0w0%corr_mos_occ_beta
       gw_corr_lev_virt_beta=mp2_env%ri_g0w0%corr_mos_virt_beta
 
       CALL replicate_mat_to_subgroup(mp2_env,para_env,para_env_sub,mo_coeff_beta,dimen,homo_beta,mat_munu,&
                                      mo_coeff_o_beta,mo_coeff_v_beta,mo_coeff_all_beta,mo_coeff_gw_beta,&
-                                     my_do_gw,gw_corr_lev_occ_beta,gw_corr_lev_virt_beta,blacs_env_sub,&
-                                     unit_nr,error,error_sub)
+                                     my_do_gw,gw_corr_lev_occ_beta,gw_corr_lev_virt_beta)
     END IF
 
     ! hack hack hack XXXXXXXXXXXXXXX rebuilds the pw_en with the new cutoffs
     progression_factor=dft_control%qs_control%progression_factor
     n_multigrid=SIZE(dft_control%qs_control%e_cutoff)
-    ALLOCATE(e_cutoff_old(n_multigrid), STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(e_cutoff_old(n_multigrid))
     e_cutoff_old(:)=dft_control%qs_control%e_cutoff
     cutoff_old=dft_control%qs_control%cutoff
 
@@ -433,37 +416,37 @@ MODULE mp2_gpw
 
     ! a pw_env
     NULLIFY(pw_env_sub)
-    CALL pw_env_create(pw_env_sub,error_sub)
-    CALL pw_env_rebuild(pw_env_sub,qs_env,para_env_sub,error_sub)
+    CALL pw_env_create(pw_env_sub)
+    CALL pw_env_rebuild(pw_env_sub,qs_env,para_env_sub)
 
     CALL pw_env_get(pw_env_sub, auxbas_pw_pool=auxbas_pw_pool,&
-                    poisson_env=poisson_env,error=error_sub)
+                    poisson_env=poisson_env)
     ! hack hack hack XXXXXXXXXXXXXXX
 
     ! now we need a task list, hard code skip_load_balance_distributed
     NULLIFY(task_list_sub)
     skip_load_balance_distributed=dft_control%qs_control%skip_load_balance_distributed
-    CALL allocate_task_list(task_list_sub,error_sub)
+    CALL allocate_task_list(task_list_sub)
     CALL generate_qs_task_list(ks_env, task_list_sub, &
                  reorder_rs_grid_ranks=.TRUE., soft_valid=.FALSE., &
                  skip_load_balance_distributed=skip_load_balance_distributed,&
-                 pw_env_external=pw_env_sub, sab_orb_external=sab_orb_sub, error=error_sub)
+                 pw_env_external=pw_env_sub, sab_orb_external=sab_orb_sub)
 
     ! get some of the grids ready
     NULLIFY(rho_r%pw,rho_g%pw,pot_g%pw)
     CALL pw_pool_create_pw(auxbas_pw_pool,rho_r%pw,&
                             use_data=REALDATA3D,&
-                            in_space=REALSPACE,error=error_sub)
+                            in_space=REALSPACE)
     CALL pw_pool_create_pw(auxbas_pw_pool,rho_g%pw,&
                             use_data=COMPLEXDATA1D,&
-                            in_space=RECIPROCALSPACE,error=error_sub)
+                            in_space=RECIPROCALSPACE)
     CALL pw_pool_create_pw(auxbas_pw_pool,pot_g%pw,&
                             use_data=COMPLEXDATA1D,&
-                            in_space=RECIPROCALSPACE,error=error_sub)
+                            in_space=RECIPROCALSPACE)
 
     ! run the FFT once, to set up buffers and to take into account the memory
     rho_r%pw%cr3d = 0.0D0
-    CALL pw_transfer(rho_r%pw, rho_g%pw, error=error_sub)
+    CALL pw_transfer(rho_r%pw, rho_g%pw)
 
     ! now we're kind of ready to go....
     Emp2_S=0.0_dp
@@ -478,9 +461,9 @@ MODULE mp2_gpw
                                    atomic_kind_set, qs_kind_set,mo_coeff,nmo,homo,rho_r,rho_g,pot_g,&
                                    mat_munu,sab_orb_sub,pw_env_sub,poisson_env,auxbas_pw_pool,task_list_sub,&
                                    mo_coeff_o,mo_coeff_v,mo_coeff_all,mo_coeff_gw,mp2_env%mp2_gpw%eps_filter,unit_nr,&
-                                   mp2_env%mp2_memory,mp2_env%calc_PQ_cond_num,calc_forces,error,blacs_env_sub,my_do_gw,&
+                                   mp2_env%mp2_memory,mp2_env%calc_PQ_cond_num,calc_forces,blacs_env_sub,my_do_gw,&
                                    starts_B_all,sizes_B_all,ends_B_all,gw_corr_lev_occ,gw_corr_lev_virt,&
-                                   mp2_env%ri_g0w0%cutoff_rad_gw,mp2_env%ri_g0w0%do_truncation,error_sub,&
+                                   mp2_env%ri_g0w0%cutoff_rad_gw,mp2_env%ri_g0w0%do_truncation,&
                                    BIb_C_beta,BIb_C_gw_beta,ends_B_virtual_beta,sizes_B_virtual_beta,starts_B_virtual_beta,&
                                    homo_beta,mo_coeff_o_beta,mo_coeff_v_beta,mo_coeff_all_beta,mo_coeff_gw_beta)
       ELSE
@@ -491,9 +474,9 @@ MODULE mp2_gpw
                                    atomic_kind_set, qs_kind_set,mo_coeff,nmo,homo,rho_r,rho_g,pot_g,&
                                    mat_munu,sab_orb_sub,pw_env_sub,poisson_env,auxbas_pw_pool,task_list_sub,&
                                    mo_coeff_o,mo_coeff_v,mo_coeff_all,mo_coeff_gw,mp2_env%mp2_gpw%eps_filter,unit_nr,&
-                                   mp2_env%mp2_memory,mp2_env%calc_PQ_cond_num,calc_forces,error,blacs_env_sub,my_do_gw,&
+                                   mp2_env%mp2_memory,mp2_env%calc_PQ_cond_num,calc_forces,blacs_env_sub,my_do_gw,&
                                    starts_B_all,sizes_B_all,ends_B_all,gw_corr_lev_occ,gw_corr_lev_virt,&
-                                   mp2_env%ri_g0w0%cutoff_rad_gw,mp2_env%ri_g0w0%do_truncation,error_sub)
+                                   mp2_env%ri_g0w0%cutoff_rad_gw,mp2_env%ri_g0w0%do_truncation)
       END IF
     ELSE
       ! Canonical MP2-GPW
@@ -503,9 +486,9 @@ MODULE mp2_gpw
         IF (unit_nr>0) WRITE(unit_nr,'(T3,A)') 'Alpha (ia|'
         CALL mp2_gpw_compute(Emp2,Emp2_Cou,Emp2_EX,qs_env,para_env,para_env_sub,color_sub,dft_control,cell,particle_set,&
                              atomic_kind_set,qs_kind_set,mo_coeff,Eigenval,nmo,homo,rho_r,rho_g,pot_g,&
-                             mat_munu,sab_orb_sub,pw_env_sub,poisson_env,auxbas_pw_pool,task_list_sub,&
+                             mat_munu,pw_env_sub,poisson_env,auxbas_pw_pool,task_list_sub,&
                              mo_coeff_o,mo_coeff_v,mp2_env%mp2_gpw%eps_filter,unit_nr,&
-                             mp2_env%mp2_memory,calc_ex,blacs_env_sub,error_sub,&
+                             mp2_env%mp2_memory,calc_ex,blacs_env_sub,&
                              homo_beta,mo_coeff_o_beta,mo_coeff_v_beta,Eigenval_beta,Emp2_AB)
 
         ! beta-beta component
@@ -513,94 +496,91 @@ MODULE mp2_gpw
         IF (unit_nr>0) WRITE(unit_nr,'(T3,A)') 'Beta (ia|'
         CALL mp2_gpw_compute(Emp2_BB,Emp2_Cou_BB,Emp2_EX_BB,qs_env,para_env,para_env_sub,color_sub,dft_control,cell,particle_set,&
                              atomic_kind_set,qs_kind_set,mo_coeff_beta,Eigenval_beta,nmo,homo_beta,rho_r,rho_g,pot_g,&
-                             mat_munu,sab_orb_sub,pw_env_sub,poisson_env,auxbas_pw_pool,task_list_sub,&
+                             mat_munu,pw_env_sub,poisson_env,auxbas_pw_pool,task_list_sub,&
                              mo_coeff_o_beta,mo_coeff_v_beta,mp2_env%mp2_gpw%eps_filter,unit_nr,&
-                             mp2_env%mp2_memory,calc_ex,blacs_env_sub,error_sub)
+                             mp2_env%mp2_memory,calc_ex,blacs_env_sub)
         
       ELSE 
         ! closed shell case
         CALL mp2_gpw_compute(Emp2,Emp2_Cou,Emp2_EX,qs_env,para_env,para_env_sub,color_sub,dft_control,cell,particle_set,&
                              atomic_kind_set,qs_kind_set,mo_coeff,Eigenval,nmo,homo,rho_r,rho_g,pot_g,&
-                             mat_munu,sab_orb_sub,pw_env_sub,poisson_env,auxbas_pw_pool,task_list_sub,&
+                             mat_munu,pw_env_sub,poisson_env,auxbas_pw_pool,task_list_sub,&
                              mo_coeff_o,mo_coeff_v,mp2_env%mp2_gpw%eps_filter,unit_nr,&
-                             mp2_env%mp2_memory,calc_ex,blacs_env_sub,error_sub)
+                             mp2_env%mp2_memory,calc_ex,blacs_env_sub)
       END IF
     END IF
 
     ! and now free the whole lot
-    CALL pw_pool_give_back_pw(auxbas_pw_pool,rho_r%pw,error=error_sub)
-    CALL pw_pool_give_back_pw(auxbas_pw_pool,rho_g%pw,error=error_sub)
-    CALL pw_pool_give_back_pw(auxbas_pw_pool,pot_g%pw,error=error_sub)
+    CALL pw_pool_give_back_pw(auxbas_pw_pool,rho_r%pw)
+    CALL pw_pool_give_back_pw(auxbas_pw_pool,rho_g%pw)
+    CALL pw_pool_give_back_pw(auxbas_pw_pool,pot_g%pw)
 
     ! Free possibly large buffers allocated by dbcsr on the GPU,
     ! large hybrid dgemm/pdgemm's coming later will need the space.
-    CALL cp_dbcsr_clear_mempools(error_sub)
+    CALL cp_dbcsr_clear_mempools()
 
     ! moved down
-    ! CALL deallocate_task_list(task_list_sub,error=error_sub)
-    ! CALL pw_env_release(pw_env_sub, error=error_sub)
+    ! CALL deallocate_task_list(task_list_sub)
+    ! CALL pw_env_release(pw_env_sub)
 
     IF(calc_forces) THEN
       ! make a copy of mo_coeff_o and mo_coeff_v
       NULLIFY(mp2_env%ri_grad%mo_coeff_o)
-      CALL cp_dbcsr_init_p(mp2_env%ri_grad%mo_coeff_o,error=error_sub)
-      CALL cp_dbcsr_copy(mp2_env%ri_grad%mo_coeff_o,mo_coeff_o,name="mo_coeff_o",error=error_sub)
+      CALL cp_dbcsr_init_p(mp2_env%ri_grad%mo_coeff_o)
+      CALL cp_dbcsr_copy(mp2_env%ri_grad%mo_coeff_o,mo_coeff_o,name="mo_coeff_o")
       NULLIFY(mp2_env%ri_grad%mo_coeff_v)
-      CALL cp_dbcsr_init_p(mp2_env%ri_grad%mo_coeff_v,error=error_sub)
-      CALL cp_dbcsr_copy(mp2_env%ri_grad%mo_coeff_v,mo_coeff_v,name="mo_coeff_v",error=error_sub)
+      CALL cp_dbcsr_init_p(mp2_env%ri_grad%mo_coeff_v)
+      CALL cp_dbcsr_copy(mp2_env%ri_grad%mo_coeff_v,mo_coeff_v,name="mo_coeff_v")
+      IF (nspins == 2) THEN
+         NULLIFY(mp2_env%ri_grad%mo_coeff_o_beta)
+         CALL cp_dbcsr_init_p(mp2_env%ri_grad%mo_coeff_o_beta)
+         CALL cp_dbcsr_copy(mp2_env%ri_grad%mo_coeff_o_beta,mo_coeff_o_beta,name="mo_coeff_o_b")
+         NULLIFY(mp2_env%ri_grad%mo_coeff_v_beta)
+         CALL cp_dbcsr_init_p(mp2_env%ri_grad%mo_coeff_v_beta)
+         CALL cp_dbcsr_copy(mp2_env%ri_grad%mo_coeff_v_beta,mo_coeff_v_beta,name="mo_coeff_v_b")
+      ENDIF
       my_group_L_size=sizes_array(color_sub)
       my_group_L_start=starts_array(color_sub)
       my_group_L_end=ends_array(color_sub)
     END IF
 
-    CALL cp_dbcsr_release(mo_coeff_o,error=error_sub)
-    DEALLOCATE(mo_coeff_o, STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    CALL cp_dbcsr_release(mo_coeff_v,error=error_sub)
-    DEALLOCATE(mo_coeff_v, STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    CALL cp_dbcsr_release(mo_coeff_o)
+    DEALLOCATE(mo_coeff_o)
+    CALL cp_dbcsr_release(mo_coeff_v)
+    DEALLOCATE(mo_coeff_v)
     IF(my_do_gw) THEN
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-      CALL cp_dbcsr_release(mo_coeff_all,error=error_sub)
-      DEALLOCATE(mo_coeff_all, STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      CALL cp_dbcsr_release(mo_coeff_all)
+      DEALLOCATE(mo_coeff_all)
     END IF
 
     IF(nspins==2) THEN
-      CALL cp_dbcsr_release(mo_coeff_o_beta,error=error_sub)
-      DEALLOCATE(mo_coeff_o_beta, STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-      CALL cp_dbcsr_release(mo_coeff_v_beta,error=error_sub)
-      DEALLOCATE(mo_coeff_v_beta, STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      CALL cp_dbcsr_release(mo_coeff_o_beta)
+      DEALLOCATE(mo_coeff_o_beta)
+      CALL cp_dbcsr_release(mo_coeff_v_beta)
+      DEALLOCATE(mo_coeff_v_beta)
       IF(my_do_gw) THEN
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)   
-        CALL cp_dbcsr_release(mo_coeff_all_beta,error=error_sub)
-        DEALLOCATE(mo_coeff_all_beta, STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        CALL cp_dbcsr_release(mo_coeff_all_beta)
+        DEALLOCATE(mo_coeff_all_beta)
       END IF
     END IF
 
     IF(.NOT.calc_forces) THEN
       ! release stuff
-      CALL cp_dbcsr_release(mat_munu%matrix,error=error_sub)
-      DEALLOCATE(mat_munu%matrix, STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      CALL cp_dbcsr_release(mat_munu%matrix)
+      DEALLOCATE(mat_munu%matrix)
 
       CALL cp_dbcsr_distribution_release(dbcsr_dist_sub)
-      DEALLOCATE(dbcsr_dist_sub,STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      DEALLOCATE(dbcsr_dist_sub)
 
       DO i=1,SIZE(sab_orb_sub)
          CALL deallocate_neighbor_list_set(sab_orb_sub(i)%neighbor_list_set)
       END DO
-      DEALLOCATE(sab_orb_sub,stat=stat)
-      CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+      DEALLOCATE(sab_orb_sub)
 
-      CALL distribution_2d_release(distribution_2d_sub,error=error_sub)
+      CALL distribution_2d_release(distribution_2d_sub)
 
-      CALL distribution_1d_release(local_particles_sub,error=error_sub)
-      CALL distribution_1d_release(local_molecules_sub,error=error_sub)
+      CALL distribution_1d_release(local_particles_sub)
+      CALL distribution_1d_release(local_molecules_sub)
     END IF
 
     ! decide if to doing RI-RPA or RI-MP2
@@ -611,7 +591,7 @@ MODULE mp2_gpw
                                ends_array,ends_B_virtual,ends_B_all,sizes_array,sizes_B_virtual,sizes_B_all,&
                                starts_array,starts_B_virtual,starts_B_all,&
                                Eigenval,nmo,homo,dimen_RI,gw_corr_lev_occ,gw_corr_lev_virt,&
-                               unit_nr,error,error_sub,my_do_ri_sos_laplace_mp2,my_do_gw,&
+                               unit_nr,my_do_ri_sos_laplace_mp2,my_do_gw,&
                                BIb_C_beta,homo_beta,Eigenval_beta,&
                                ends_B_virtual_beta,sizes_B_virtual_beta, starts_B_virtual_beta,&
                                BIb_C_gw_beta,gw_corr_lev_occ_beta,gw_corr_lev_virt_beta)
@@ -620,7 +600,7 @@ MODULE mp2_gpw
                                ends_array,ends_B_virtual,ends_B_all,sizes_array,sizes_B_virtual,sizes_B_all,&
                                starts_array,starts_B_virtual,starts_B_all,&
                                Eigenval,nmo,homo,dimen_RI,gw_corr_lev_occ,gw_corr_lev_virt,&
-                               unit_nr,error,error_sub,my_do_ri_sos_laplace_mp2,my_do_gw)
+                               unit_nr,my_do_ri_sos_laplace_mp2,my_do_gw)
       END IF
     ELSE
       IF(my_do_ri_mp2) THEN
@@ -629,20 +609,20 @@ MODULE mp2_gpw
           ! alpha-alpha component
           CALL mp2_ri_gpw_compute_en(Emp2,Emp2_Cou,Emp2_EX,BIb_C,mp2_env,para_env,para_env_sub,color_sub,&
                                      ends_array,ends_B_virtual,sizes_array,sizes_B_virtual,starts_array,starts_B_virtual,&
-                                     Eigenval,nmo,homo,dimen_RI,unit_nr,calc_forces,calc_ex,error,error_sub,&
+                                     Eigenval,nmo,homo,dimen_RI,unit_nr,calc_forces,calc_ex,&
                                      open_shell_SS=.TRUE.)
  
           ! beta-beta component
           CALL mp2_ri_gpw_compute_en(Emp2_BB,Emp2_Cou_BB,Emp2_EX_BB,BIb_C_beta,mp2_env,para_env,para_env_sub,color_sub,&
                                      ends_array,ends_B_virtual_beta,sizes_array,&
                                      sizes_B_virtual_beta,starts_array,starts_B_virtual_beta,&
-                                     Eigenval_beta,nmo,homo_beta,dimen_RI,unit_nr,calc_forces,calc_ex,error,error_sub,&
+                                     Eigenval_beta,nmo,homo_beta,dimen_RI,unit_nr,calc_forces,calc_ex,&
                                      open_shell_SS=.TRUE.)
 
           ! alpha-beta case
           CALL mp2_ri_gpw_compute_en(Emp2_d_AB,Emp2_AB,Emp2_d2_AB,BIb_C,mp2_env,para_env,para_env_sub,color_sub,&
                                      ends_array,ends_B_virtual,sizes_array,sizes_B_virtual,starts_array,starts_B_virtual,&
-                                     Eigenval,nmo,homo,dimen_RI,unit_nr,calc_forces,.FALSE.,error,error_sub,&
+                                     Eigenval,nmo,homo,dimen_RI,unit_nr,calc_forces,.FALSE.,&
                                      .FALSE.,BIb_C_beta,homo_beta,Eigenval_beta,&
                                      ends_B_virtual_beta,sizes_B_virtual_beta, starts_B_virtual_beta)
 
@@ -650,80 +630,91 @@ MODULE mp2_gpw
           ! closed shell case
           CALL mp2_ri_gpw_compute_en(Emp2,Emp2_Cou,Emp2_EX,BIb_C,mp2_env,para_env,para_env_sub,color_sub,&
                                      ends_array,ends_B_virtual,sizes_array,sizes_B_virtual,starts_array,starts_B_virtual,&
-                                     Eigenval,nmo,homo,dimen_RI,unit_nr,calc_forces,calc_ex,error,error_sub)
+                                     Eigenval,nmo,homo,dimen_RI,unit_nr,calc_forces,calc_ex)
         END IF
         ! if we need forces time to calculate the MP2 non-separable contribution 
-        ! and start coputing the largrangian
+        ! and start coputing the Largrangian
         IF(calc_forces) THEN
           ! since we have to compute again integrals reinitialize the stuff we need
           ! get some of the grids ready
           NULLIFY(rho_r%pw,rho_g%pw,pot_g%pw)
           CALL pw_pool_create_pw(auxbas_pw_pool,rho_r%pw,&
                                   use_data=REALDATA3D,&
-                                  in_space=REALSPACE,error=error_sub)
+                                  in_space=REALSPACE)
           CALL pw_pool_create_pw(auxbas_pw_pool,rho_g%pw,&
                                   use_data=COMPLEXDATA1D,&
-                                  in_space=RECIPROCALSPACE,error=error_sub)
+                                  in_space=RECIPROCALSPACE)
           CALL pw_pool_create_pw(auxbas_pw_pool,pot_g%pw,&
                                   use_data=COMPLEXDATA1D,&
-                                  in_space=RECIPROCALSPACE,error=error_sub)
+                                  in_space=RECIPROCALSPACE)
 
           ! the mu_nu matrix (again)
           ! XXXXXXXXXXXXXXXXXXXXXXXXX
           ! ! build a dbcsr matrix the hard way
-          ! CALL get_particle_set(particle_set=particle_set,nsgf=rbs,error=error)
+          ! CALL get_particle_set(particle_set=particle_set,nsgf=rbs)
           ! CALL array_nullify (row_blk_sizes)
           ! CALL array_new (row_blk_sizes, rbs, gift=.TRUE.)
           ! ALLOCATE(mat_munu%matrix, STAT=stat)
-          ! CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-          ! CALL cp_dbcsr_init(mat_munu%matrix,error=error_sub)
+          ! CPPostcondition(stat==0,cp_failure_level,routineP,failure)
+          ! CALL cp_dbcsr_init(mat_munu%matrix)
           ! CALL cp_dbcsr_create(matrix=mat_munu%matrix,&
           !            name="(ai|munu)",&
           !            dist=dbcsr_dist_sub, &
           !            matrix_type=dbcsr_type_symmetric,&
           !            ! matrix_type=dbcsr_type_no_symmetry,&
           !            row_blk_size=row_blk_sizes, col_blk_size=row_blk_sizes, &
-          !            nblks=0, nze=0, error=error_sub)
-          ! CALL cp_dbcsr_alloc_block_from_nbl(mat_munu%matrix,sab_orb_sub,error_sub)
+          !            nze=0)
+          ! CALL cp_dbcsr_alloc_block_from_nbl(mat_munu%matrix,sab_orb_sub)
           ! CALL array_release (row_blk_sizes)
 
-          CALL  calc_ri_mp2_nonsep(qs_env,mp2_env,para_env,para_env_sub,color_sub,dft_control,cell,particle_set,&
-                                   atomic_kind_set,qs_kind_set,mo_coeff,nmo,homo,dimen_RI,Eigenval,&
+          IF (nspins==2) THEN  ! Open shell
+             CALL  calc_ri_mp2_nonsep(qs_env,mp2_env,para_env,para_env_sub,dft_control,cell, &
+                         particle_set,atomic_kind_set,qs_kind_set,mo_coeff,nmo,homo,dimen_RI,Eigenval,&
+                                 my_group_L_start,my_group_L_end,my_group_L_size,rho_r,rho_g,pot_g,&
+                                 mat_munu,pw_env_sub,poisson_env,auxbas_pw_pool,task_list_sub,&
+                                 blacs_env_sub,Eigenval_beta,homo_beta,mo_coeff_beta)
+          ELSE ! Closed shell
+             CALL  calc_ri_mp2_nonsep(qs_env,mp2_env,para_env,para_env_sub,dft_control,cell, &
+                         particle_set,atomic_kind_set,qs_kind_set,mo_coeff,nmo,homo,dimen_RI,Eigenval,&
                                    my_group_L_start,my_group_L_end,my_group_L_size,rho_r,rho_g,pot_g,&
-                                   mat_munu,sab_orb_sub,pw_env_sub,poisson_env,auxbas_pw_pool,task_list_sub,&
-                                   unit_nr,blacs_env_sub,error,error_sub)
+                                   mat_munu,pw_env_sub,poisson_env,auxbas_pw_pool,task_list_sub,&
+                                   blacs_env_sub)
+          ENDIF
 
           ! release
-          CALL pw_pool_give_back_pw(auxbas_pw_pool,rho_r%pw,error=error_sub)
-          CALL pw_pool_give_back_pw(auxbas_pw_pool,rho_g%pw,error=error_sub)
-          CALL pw_pool_give_back_pw(auxbas_pw_pool,pot_g%pw,error=error_sub)
+          CALL pw_pool_give_back_pw(auxbas_pw_pool,rho_r%pw)
+          CALL pw_pool_give_back_pw(auxbas_pw_pool,rho_g%pw)
+          CALL pw_pool_give_back_pw(auxbas_pw_pool,pot_g%pw)
 
-          CALL cp_dbcsr_release(mp2_env%ri_grad%mo_coeff_o,error=error_sub)
-          DEALLOCATE(mp2_env%ri_grad%mo_coeff_o, STAT=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          CALL cp_dbcsr_release(mp2_env%ri_grad%mo_coeff_o)
+          DEALLOCATE(mp2_env%ri_grad%mo_coeff_o)
 
-          CALL cp_dbcsr_release(mp2_env%ri_grad%mo_coeff_v,error=error_sub)
-          DEALLOCATE(mp2_env%ri_grad%mo_coeff_v, STAT=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          CALL cp_dbcsr_release(mp2_env%ri_grad%mo_coeff_v)
+          DEALLOCATE(mp2_env%ri_grad%mo_coeff_v)
 
-          CALL cp_dbcsr_release(mat_munu%matrix,error=error_sub)
-          DEALLOCATE(mat_munu%matrix, STAT=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          IF (nspins == 2) THEN 
+             CALL cp_dbcsr_release(mp2_env%ri_grad%mo_coeff_o_beta)
+             DEALLOCATE(mp2_env%ri_grad%mo_coeff_o_beta)
+        
+             CALL cp_dbcsr_release(mp2_env%ri_grad%mo_coeff_v_beta)
+             DEALLOCATE(mp2_env%ri_grad%mo_coeff_v_beta)
+          ENDIF
+
+          CALL cp_dbcsr_release(mat_munu%matrix)
+          DEALLOCATE(mat_munu%matrix)
 
           CALL cp_dbcsr_distribution_release(dbcsr_dist_sub)
-          DEALLOCATE(dbcsr_dist_sub,STAT=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          DEALLOCATE(dbcsr_dist_sub)
 
           DO i=1,SIZE(sab_orb_sub)
              CALL deallocate_neighbor_list_set(sab_orb_sub(i)%neighbor_list_set)
           END DO
-          DEALLOCATE(sab_orb_sub,stat=stat)
-          CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+          DEALLOCATE(sab_orb_sub)
 
-          CALL distribution_2d_release(distribution_2d_sub,error=error_sub)
+          CALL distribution_2d_release(distribution_2d_sub)
 
-          CALL distribution_1d_release(local_particles_sub,error=error_sub)
-          CALL distribution_1d_release(local_molecules_sub,error=error_sub)
+          CALL distribution_1d_release(local_particles_sub)
+          CALL distribution_1d_release(local_molecules_sub)
 
         END IF
       END IF
@@ -749,67 +740,68 @@ MODULE mp2_gpw
     !XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXx
     ! moved from above
     IF(my_do_gw) THEN
-      CALL cp_dbcsr_release(mo_coeff_gw,error=error_sub)
-      DEALLOCATE(mo_coeff_gw, STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      CALL cp_dbcsr_release(mo_coeff_gw)
+      DEALLOCATE(mo_coeff_gw)
       IF(nspins==2) THEN
-        CALL cp_dbcsr_release(mo_coeff_gw_beta,error=error_sub)
-        DEALLOCATE(mo_coeff_gw_beta, STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        CALL cp_dbcsr_release(mo_coeff_gw_beta)
+        DEALLOCATE(mo_coeff_gw_beta)
       END IF
     END IF
 
 
-    CALL deallocate_task_list(task_list_sub,error=error_sub)
+    CALL deallocate_task_list(task_list_sub)
 
-    CALL pw_env_release(pw_env_sub, error=error_sub)
+    CALL pw_env_release(pw_env_sub)
 
     ! CALL cp_dbcsr_distribution_release(dbcsr_dist_sub)
     ! DEALLOCATE(dbcsr_dist_sub,STAT=stat)
-    ! CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ! CPPostcondition(stat==0,cp_failure_level,routineP,failure)
 
     ! DO i=1,SIZE(sab_orb_sub)
     !    CALL deallocate_neighbor_list_set(sab_orb_sub(i)%neighbor_list_set)
     ! END DO
     ! DEALLOCATE(sab_orb_sub,stat=stat)
-    ! CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+    ! CPPostconditionNoFail(stat==0,cp_warning_level,routineP)
 
-    ! CALL distribution_2d_release(distribution_2d_sub,error=error_sub)
+    ! CALL distribution_2d_release(distribution_2d_sub)
 
-    ! CALL distribution_1d_release(local_particles_sub,error=error_sub)
-    ! CALL distribution_1d_release(local_molecules_sub,error=error_sub)
+    ! CALL distribution_1d_release(local_particles_sub)
+    ! CALL distribution_1d_release(local_molecules_sub)
     !XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXx
 
     ! re-init the radii to be able to generate pair lists with MP2-appropriate screening
     dft_control%qs_control%eps_pgf_orb=eps_pgf_orb_old
     dft_control%qs_control%eps_rho_rspace=eps_rho_rspace_old
     dft_control%qs_control%eps_gvg_rspace=eps_gvg_rspace_old
-    CALL init_interaction_radii(dft_control%qs_control,atomic_kind_set, qs_kind_set, error_sub)
+    CALL init_interaction_radii(dft_control%qs_control,atomic_kind_set, qs_kind_set)
 
     ! restore the initial value of the cutoff
     dft_control%qs_control%e_cutoff=e_cutoff_old
     dft_control%qs_control%cutoff=cutoff_old
     dft_control%qs_control%relative_cutoff=relative_cutoff_old
 
-    CALL cp_blacs_env_release(blacs_env_sub, error=error_sub)
+    CALL cp_blacs_env_release(blacs_env_sub)
 
-    CALL cp_error_dealloc_ref(error_sub,error=error)
-
+    CALL cp_rm_default_logger()
     CALL cp_logger_release(logger_sub)
 
-    CALL cp_para_env_release(para_env_sub,error=error)
+    CALL cp_para_env_release(para_env_sub)
 
     ! finally solve the z-vector equation if forces are required
     IF(calc_forces) THEN
-      CALL solve_z_vector_eq(qs_env,mp2_env,para_env,dft_control,cell,particle_set,&
-                             atomic_kind_set,mo_coeff,nmo,homo,Eigenval,unit_nr,error)
+      IF (nspins==2) THEN
+         CALL solve_z_vector_eq(qs_env,mp2_env,para_env,dft_control,&
+                             atomic_kind_set,mo_coeff,nmo,homo,Eigenval,unit_nr,&
+                             Eigenval_beta,homo_beta,mo_coeff_beta)
+      ELSE
+         CALL solve_z_vector_eq(qs_env,mp2_env,para_env,dft_control,&
+                             atomic_kind_set,mo_coeff,nmo,homo,Eigenval,unit_nr)
+      ENDIF
     END IF   
 
-    DEALLOCATE(Eigenval,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(Eigenval)
     IF(nspins==2) THEN
-      DEALLOCATE(Eigenval_beta,STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      DEALLOCATE(Eigenval_beta)
     END IF
 
     CALL timestop(handle)
@@ -838,7 +830,6 @@ MODULE mp2_gpw
 !> \param rho_g ...
 !> \param pot_g ...
 !> \param mat_munu ...
-!> \param sab_orb_sub ...
 !> \param pw_env_sub ...
 !> \param poisson_env ...
 !> \param auxbas_pw_pool ...
@@ -850,7 +841,6 @@ MODULE mp2_gpw
 !> \param mp2_memory ...
 !> \param calc_ex ...
 !> \param blacs_env_sub ...
-!> \param error_sub ...
 !> \param homo_beta ...
 !> \param mo_coeff_o_beta ...
 !> \param mo_coeff_v_beta ...
@@ -859,9 +849,9 @@ MODULE mp2_gpw
 ! *****************************************************************************
   SUBROUTINE mp2_gpw_compute(Emp2,Emp2_Cou,Emp2_EX,qs_env,para_env,para_env_sub,color_sub,dft_control,&
                  cell,particle_set,atomic_kind_set,qs_kind_set,mo_coeff,Eigenval,nmo,homo,&
-                 rho_r,rho_g,pot_g,mat_munu,sab_orb_sub,pw_env_sub,&
+                 rho_r,rho_g,pot_g,mat_munu,pw_env_sub,&
                  poisson_env,auxbas_pw_pool,task_list_sub,mo_coeff_o,mo_coeff_v,eps_filter,unit_nr,&
-                 mp2_memory,calc_ex,blacs_env_sub,error_sub,homo_beta,mo_coeff_o_beta,mo_coeff_v_beta,Eigenval_beta,Emp2_AB)
+                 mp2_memory,calc_ex,blacs_env_sub,homo_beta,mo_coeff_o_beta,mo_coeff_v_beta,Eigenval_beta,Emp2_AB)
 
     REAL(KIND=dp)                            :: Emp2, Emp2_Cou, Emp2_EX
     TYPE(qs_environment_type), POINTER       :: qs_env
@@ -880,8 +870,6 @@ MODULE mp2_gpw
     INTEGER                                  :: nmo, homo
     TYPE(pw_p_type)                          :: rho_r, rho_g, pot_g
     TYPE(cp_dbcsr_p_type)                    :: mat_munu
-    TYPE(neighbor_list_set_p_type), &
-      DIMENSION(:), POINTER                  :: sab_orb_sub
     TYPE(pw_env_type), POINTER               :: pw_env_sub
     TYPE(pw_poisson_type), POINTER           :: poisson_env
     TYPE(pw_pool_type), POINTER              :: auxbas_pw_pool
@@ -892,7 +880,6 @@ MODULE mp2_gpw
     REAL(KIND=dp)                            :: mp2_memory
     LOGICAL                                  :: calc_ex
     TYPE(cp_blacs_env_type), POINTER         :: blacs_env_sub
-    TYPE(cp_error_type), INTENT(inout)       :: error_sub
     INTEGER, OPTIONAL                        :: homo_beta
     TYPE(cp_dbcsr_type), OPTIONAL, POINTER   :: mo_coeff_o_beta, &
                                                 mo_coeff_v_beta
@@ -912,8 +899,8 @@ MODULE mp2_gpw
       my_I_batch_size, my_I_occupied_end, my_I_occupied_start, my_q_position, &
       ncol_local, nfullcols_total, nfullrows_total, ngroup, nrow_local, one, p
     INTEGER :: p_best, proc_receive, proc_send, q, q_best, row, row_offset, &
-      row_size, size_EX, size_EX_send, size_of_exchange_group, stat, &
-      sub_sub_color, virtual, virtual_beta, wfn_calc, wfn_calc_best
+      row_size, size_EX, size_EX_send, size_of_exchange_group, sub_sub_color, &
+      virtual, virtual_beta, wfn_calc, wfn_calc_best
     INTEGER(KIND=int_8)                      :: mem
     INTEGER, ALLOCATABLE, DIMENSION(:) :: proc_map, sub_proc_map, &
       vector_B_sizes, vector_batch_A_size_group, vector_batch_I_size_group
@@ -921,7 +908,7 @@ MODULE mp2_gpw
                                                 exchange_group_sizes, &
                                                 local_col_row_info
     INTEGER, DIMENSION(:), POINTER           :: col_indices, row_indices
-    LOGICAL                                  :: do_alpha_beta, failure
+    LOGICAL                                  :: do_alpha_beta
     REAL(KIND=dp)                            :: mem_min, mem_real, mem_try, &
                                                 pair_energy, wfn_size
     REAL(KIND=dp), ALLOCATABLE, &
@@ -942,7 +929,6 @@ MODULE mp2_gpw
       DIMENSION(:)                           :: psi_i
 
     CALL timeset(routineN,handle)
-    failure=.FALSE.
 
     do_alpha_beta=.FALSE.
     IF(PRESENT(homo_beta).AND.&
@@ -952,18 +938,18 @@ MODULE mp2_gpw
        PRESENT(Emp2_AB)) do_alpha_beta=.TRUE.
 
     ! initialize and create the matrix (ia|jnu)
-    CALL cp_dbcsr_init(matrix_ia_jnu,error=error_sub)
-    CALL cp_dbcsr_create(matrix_ia_jnu,template=mo_coeff_o,error=error_sub)
+    CALL cp_dbcsr_init(matrix_ia_jnu)
+    CALL cp_dbcsr_create(matrix_ia_jnu,template=mo_coeff_o)
 
     ! Allocate Sparse matrices: (ia|jb)
-    CALL cp_dbcsr_init(matrix_ia_jb,error=error_sub)
+    CALL cp_dbcsr_init(matrix_ia_jb)
     CALL cp_dbcsr_m_by_n_from_template(matrix_ia_jb,template=mo_coeff_o,m=homo,n=nmo-homo,&
-                                       sym=dbcsr_type_no_symmetry,error=error_sub)
+                                       sym=dbcsr_type_no_symmetry)
 
     ! set all to zero in such a way that the memory is actually allocated
-    CALL cp_dbcsr_set(matrix_ia_jnu,0.0_dp,error=error_sub)
-    CALL cp_dbcsr_set(matrix_ia_jb,0.0_dp,error=error_sub)
-    CALL cp_dbcsr_set(mat_munu%matrix,0.0_dp,error=error_sub)
+    CALL cp_dbcsr_set(matrix_ia_jnu,0.0_dp)
+    CALL cp_dbcsr_set(matrix_ia_jb,0.0_dp)
+    CALL cp_dbcsr_set(mat_munu%matrix,0.0_dp)
 
     IF(calc_ex) THEN
       ! create the analogous of matrix_ia_jb in fm type
@@ -971,24 +957,22 @@ MODULE mp2_gpw
       NULLIFY(fm_struct)
       CALL cp_dbcsr_get_info(matrix_ia_jb,nfullrows_total=nfullrows_total,nfullcols_total=nfullcols_total)
       CALL cp_fm_struct_create(fm_struct,context=blacs_env_sub,nrow_global=nfullrows_total,&
-                               ncol_global=nfullcols_total,para_env=para_env_sub,error=error_sub)
-      CALL cp_fm_create(fm_BIb_jb,fm_struct,name="fm_BIb_jb",error=error_sub)
+                               ncol_global=nfullcols_total,para_env=para_env_sub)
+      CALL cp_fm_create(fm_BIb_jb,fm_struct,name="fm_BIb_jb")
 
-      CALL copy_dbcsr_to_fm(matrix_ia_jb, fm_BIb_jb, error=error_sub)
-      CALL cp_fm_struct_release(fm_struct,error=error_sub)
+      CALL copy_dbcsr_to_fm(matrix_ia_jb, fm_BIb_jb)
+      CALL cp_fm_struct_release(fm_struct)
       
       CALL cp_fm_get_info(matrix=fm_BIb_jb,&
                           nrow_local=nrow_local,&
                           ncol_local=ncol_local,&
                           row_indices=row_indices,&
-                          col_indices=col_indices,&
-                          error=error_sub)
+                          col_indices=col_indices)
 
       max_row_col_local=MAX(nrow_local,ncol_local)
       CALL mp_max(max_row_col_local,para_env_sub%group)
 
-      ALLOCATE(local_col_row_info(0:max_row_col_local,2),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
+      ALLOCATE(local_col_row_info(0:max_row_col_local,2))
       local_col_row_info=0
       ! 0,1 nrows
       local_col_row_info(0,1)=nrow_local
@@ -1000,18 +984,18 @@ MODULE mp2_gpw
 
     IF(do_alpha_beta) THEN
       ! initialize and create the matrix (ia|jnu)
-      CALL cp_dbcsr_init(matrix_ia_jnu_beta,error=error_sub)
-      CALL cp_dbcsr_create(matrix_ia_jnu_beta,template=mo_coeff_o_beta,error=error_sub)
+      CALL cp_dbcsr_init(matrix_ia_jnu_beta)
+      CALL cp_dbcsr_create(matrix_ia_jnu_beta,template=mo_coeff_o_beta)
 
       ! Allocate Sparse matrices: (ia|jb)
-      CALL cp_dbcsr_init(matrix_ia_jb_beta,error=error_sub)
+      CALL cp_dbcsr_init(matrix_ia_jb_beta)
       CALL cp_dbcsr_m_by_n_from_template(matrix_ia_jb_beta,template=mo_coeff_o_beta,m=homo_beta,n=nmo-homo_beta,&
-                                         sym=dbcsr_type_no_symmetry,error=error_sub)
+                                         sym=dbcsr_type_no_symmetry)
 
       virtual_beta=nmo-homo_beta
 
-      CALL cp_dbcsr_set(matrix_ia_jnu_beta,0.0_dp,error=error_sub)
-      CALL cp_dbcsr_set(matrix_ia_jb_beta,0.0_dp,error=error_sub)
+      CALL cp_dbcsr_set(matrix_ia_jnu_beta,0.0_dp)
+      CALL cp_dbcsr_set(matrix_ia_jb_beta,0.0_dp)
     END IF
 
     CALL m_memory(mem)
@@ -1077,10 +1061,8 @@ MODULE mp2_gpw
             "MP2_GPW| max. batch size for the virtual states:",max_batch_size_A
     ENDIF
 
-    ALLOCATE(vector_batch_I_size_group(0:p_best-1),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
-    ALLOCATE(vector_batch_A_size_group(0:q_best-1),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
+    ALLOCATE(vector_batch_I_size_group(0:p_best-1))
+    ALLOCATE(vector_batch_A_size_group(0:q_best-1))
 
     vector_batch_I_size_group=max_batch_size_I
     IF(SUM(vector_batch_I_size_group)/=homo) THEN
@@ -1139,17 +1121,16 @@ MODULE mp2_gpw
     ! replicate on a local array on proc 0 the occupied and virtual wavevectior
     ! needed for the calculation of the WF's by calculate_wavefunction
     ! (external vector)
-    CALL grep_occ_virt_wavefunc(para_env_sub,nmo,homo,virtual,&
+    CALL grep_occ_virt_wavefunc(para_env_sub,nmo,&
                                 my_I_occupied_start,my_I_occupied_end,my_I_batch_size,&
                                 my_A_virtual_start,my_A_virtual_end,my_A_batch_size,&
-                                mo_coeff_o,mo_coeff_v,my_Cocc,my_Cvirt,unit_nr,error_sub)
+                                mo_coeff_o,mo_coeff_v,my_Cocc,my_Cvirt)
 
 
     ! divide the b states in the sub_group in such a way to create
     ! b_start and b_end for each proc inside the sub_group
     max_b_size=(virtual+para_env_sub%num_pe-1)/para_env_sub%num_pe
-    ALLOCATE(vector_B_sizes(0:para_env_sub%num_pe-1),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
+    ALLOCATE(vector_B_sizes(0:para_env_sub%num_pe-1))
     vector_B_sizes=max_b_size
     IF(SUM(vector_B_sizes)/=virtual) THEN
       one=1
@@ -1178,8 +1159,7 @@ MODULE mp2_gpw
     ! create an array containing a different "color" for each pair of
     ! A_start and B_start, communication will take place only among
     ! those proc that have the same A_start and B_start
-    ALLOCATE(color_array(0:para_env_sub%num_pe-1,0:q_best-1),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
+    ALLOCATE(color_array(0:para_env_sub%num_pe-1,0:q_best-1))
     color_array=0
     color_counter=0
     DO j=0, q_best-1
@@ -1197,7 +1177,7 @@ MODULE mp2_gpw
     ! in mp_comm_split_direct the color is give by my_a_virtual_start and my_b_virtual_start
     CALL mp_comm_split_direct(para_env%group,comm_exchange,sub_sub_color)
     NULLIFY(para_env_exchange)
-    CALL cp_para_env_create(para_env_exchange,comm_exchange,error=error_sub)
+    CALL cp_para_env_create(para_env_exchange,comm_exchange)
 
     ! crate the proc maps
     ALLOCATE(proc_map(-para_env_exchange%num_pe:2*para_env_exchange%num_pe-1))
@@ -1227,19 +1207,18 @@ MODULE mp2_gpw
     NULLIFY(psi_a%pw)
     CALL pw_pool_create_pw(auxbas_pw_pool,psi_a%pw,&
                             use_data=REALDATA3D,&
-                            in_space=REALSPACE,error=error_sub)
+                            in_space=REALSPACE)
 
 
-    ALLOCATE(psi_i(my_I_occupied_start:my_I_occupied_end),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
+    ALLOCATE(psi_i(my_I_occupied_start:my_I_occupied_end))
     DO i=my_I_occupied_start, my_I_occupied_end
       NULLIFY(psi_i(i)%pw)
       CALL pw_pool_create_pw(auxbas_pw_pool,psi_i(i)%pw,&
                             use_data=REALDATA3D,&
-                            in_space=REALSPACE,error=error_sub)
+                            in_space=REALSPACE)
       CALL calculate_wavefunction(mo_coeff,i,psi_i(i),rho_g, atomic_kind_set,&
                         qs_kind_set,cell,dft_control,particle_set, &
-                        pw_env_sub,external_vector=my_Cocc(:,i-my_I_occupied_start+1),error=error_sub)
+                        pw_env_sub,external_vector=my_Cocc(:,i-my_I_occupied_start+1))
     END DO
 
     Emp2=0.0_dp
@@ -1247,8 +1226,7 @@ MODULE mp2_gpw
     Emp2_EX=0.0_dp
     IF(do_alpha_beta) Emp2_AB=0.0_dp
     IF(calc_ex) THEN
-      ALLOCATE(BIb_C(my_B_size,homo,my_I_batch_size),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
+      ALLOCATE(BIb_C(my_B_size,homo,my_I_batch_size))
     END IF
 
     CALL timeset(routineN//"_loop",handle2)
@@ -1259,7 +1237,7 @@ MODULE mp2_gpw
       ! psi_a
       CALL calculate_wavefunction(mo_coeff,a,psi_a,rho_g, atomic_kind_set,&
                       qs_kind_set,cell,dft_control,particle_set, &
-                      pw_env_sub,external_vector=my_Cvirt(:,a-(homo+my_A_virtual_start)+1),error=error_sub)
+                      pw_env_sub,external_vector=my_Cvirt(:,a-(homo+my_A_virtual_start)+1))
       i_counter=0
       DO i=my_I_occupied_start, my_I_occupied_end
         i_counter=i_counter+1
@@ -1267,37 +1245,37 @@ MODULE mp2_gpw
         ! potential
         CALL timeset(routineN//"_pot",handle3)
         rho_r%pw%cr3d = psi_i(i)%pw%cr3d * psi_a%pw%cr3d
-        CALL pw_transfer(rho_r%pw, rho_g%pw, error=error_sub)
-        CALL pw_poisson_solve(poisson_env,rho_g%pw, pair_energy, pot_g%pw,error=error_sub)
-        CALL pw_transfer(pot_g%pw, rho_r%pw, error=error_sub)
-        CALL pw_scale(rho_r%pw,rho_r%pw%pw_grid%dvol, error=error_sub)
+        CALL pw_transfer(rho_r%pw, rho_g%pw)
+        CALL pw_poisson_solve(poisson_env,rho_g%pw, pair_energy, pot_g%pw)
+        CALL pw_transfer(pot_g%pw, rho_r%pw)
+        CALL pw_scale(rho_r%pw,rho_r%pw%pw_grid%dvol)
         CALL timestop(handle3)
 
 
         ! and finally (ia|munu)
         CALL timeset(routineN//"_int",handle3)
-        CALL cp_dbcsr_set(mat_munu%matrix,0.0_dp,error=error_sub)
+        CALL cp_dbcsr_set(mat_munu%matrix,0.0_dp)
         CALL integrate_v_rspace(rho_r,hmat=mat_munu,qs_env=qs_env,calculate_forces=.FALSE.,compute_tau=.FALSE.,gapw=.FALSE.,&
-           basis_set_id=use_orb_basis_set, pw_env_external=pw_env_sub, task_list_external=task_list_sub, error=error_sub)
+             pw_env_external=pw_env_sub, task_list_external=task_list_sub)
         CALL timestop(handle3)
 
         ! multiply and goooooooo ...
         CALL timeset(routineN//"_mult_o",handle3)
         CALL cp_dbcsr_multiply("N", "N", 1.0_dp, mat_munu%matrix, mo_coeff_o, &
-                                0.0_dp, matrix_ia_jnu, filter_eps=eps_filter, error=error_sub)
+                                0.0_dp, matrix_ia_jnu, filter_eps=eps_filter)
         IF(do_alpha_beta) THEN
           ! transform orbitals using the beta coeff matrix
           CALL cp_dbcsr_multiply("N", "N", 1.0_dp, mat_munu%matrix, mo_coeff_o_beta, &
-                                0.0_dp, matrix_ia_jnu_beta, filter_eps=eps_filter, error=error_sub)
+                                0.0_dp, matrix_ia_jnu_beta, filter_eps=eps_filter)
         END IF      
         CALL timestop(handle3)
         CALL timeset(routineN//"_mult_v",handle3)
         CALL cp_dbcsr_multiply("T", "N", 1.0_dp, matrix_ia_jnu, mo_coeff_v, &
-                                0.0_dp, matrix_ia_jb, filter_eps=eps_filter, error=error_sub)
+                                0.0_dp, matrix_ia_jb, filter_eps=eps_filter)
         IF(do_alpha_beta) THEN
           ! transform orbitals using the beta coeff matrix
           CALL cp_dbcsr_multiply("T", "N", 1.0_dp, matrix_ia_jnu_beta, mo_coeff_v_beta, &
-                                0.0_dp, matrix_ia_jb_beta, filter_eps=eps_filter, error=error_sub)
+                                0.0_dp, matrix_ia_jb_beta, filter_eps=eps_filter)
         END IF
         CALL timestop(handle3)
 
@@ -1339,11 +1317,10 @@ MODULE mp2_gpw
         ! b_start, b_end
         IF(calc_ex) THEN
           CALL timeset(routineN//"_E_Ex_1",handle3)
-          CALL copy_dbcsr_to_fm(matrix_ia_jb, fm_BIb_jb, error=error_sub)
+          CALL copy_dbcsr_to_fm(matrix_ia_jb, fm_BIb_jb)
           CALL grep_my_integrals(para_env_sub,fm_BIb_jb,BIb_C(1:my_B_size,1:homo,i_counter),max_row_col_local,&
-                                 homo,virtual,sub_proc_map,local_col_row_info,&
-                                 my_B_virtual_end,my_B_virtual_start,my_B_size,&
-                                 error_sub)
+                                 sub_proc_map,local_col_row_info,&
+                                 my_B_virtual_end,my_B_virtual_start)
           CALL timestop(handle3)
         END IF
 
@@ -1372,16 +1349,14 @@ MODULE mp2_gpw
           EX_end=exchange_group_sizes(proc_receive,2)
           size_EX=exchange_group_sizes(proc_receive,3)
 
-          ALLOCATE(BIb_EX(my_B_size,my_I_batch_size,size_EX),STAT=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
+          ALLOCATE(BIb_EX(my_B_size,my_I_batch_size,size_EX))
           BIb_EX=0.0_dp
 
           EX_start_send=exchange_group_sizes(proc_send,1)
           EX_end_send=exchange_group_sizes(proc_send,2)
           size_EX_send=exchange_group_sizes(proc_send,3)
 
-          ALLOCATE(BIb_send(my_B_size,size_EX_send,my_I_batch_size),STAT=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
+          ALLOCATE(BIb_send(my_B_size,size_EX_send,my_I_batch_size))
           BIb_send(1:my_B_size,1:size_EX_send,1:my_I_batch_size)=BIb_C(1:my_B_size,EX_start_send:EX_end_send,1:my_I_batch_size)
 
           ! send and receive the exchange array
@@ -1416,7 +1391,7 @@ MODULE mp2_gpw
     DEALLOCATE(my_Cvirt)
 
     IF(calc_ex) THEN
-      CALL cp_fm_release(fm_BIb_jb, error=error_sub)
+      CALL cp_fm_release(fm_BIb_jb)
       DEALLOCATE(local_col_row_info)
       DEALLOCATE(BIb_C)
     END IF
@@ -1424,21 +1399,21 @@ MODULE mp2_gpw
     DEALLOCATE(sub_proc_map)
     DEALLOCATE(exchange_group_sizes)
 
-    CALL cp_para_env_release(para_env_exchange,error=error_sub)
+    CALL cp_para_env_release(para_env_exchange)
 
-    CALL cp_dbcsr_release(matrix_ia_jnu,error=error_sub)
-    CALL cp_dbcsr_release(matrix_ia_jb,error=error_sub)
+    CALL cp_dbcsr_release(matrix_ia_jnu)
+    CALL cp_dbcsr_release(matrix_ia_jb)
     IF(do_alpha_beta) THEN
-      CALL cp_dbcsr_release(matrix_ia_jnu_beta,error=error_sub)
-      CALL cp_dbcsr_release(matrix_ia_jb_beta,error=error_sub)
+      CALL cp_dbcsr_release(matrix_ia_jnu_beta)
+      CALL cp_dbcsr_release(matrix_ia_jb_beta)
     END IF
 
     DO i=my_I_occupied_start, my_I_occupied_end
-      CALL pw_release(psi_i(i)%pw,error=error_sub)
+      CALL pw_release(psi_i(i)%pw)
     END DO
     DEALLOCATE(psi_i)
 
-    CALL pw_pool_give_back_pw(auxbas_pw_pool,psi_a%pw,error=error_sub)
+    CALL pw_pool_give_back_pw(auxbas_pw_pool,psi_a%pw)
 
     CALL timestop(handle)
 
@@ -1490,29 +1465,22 @@ MODULE mp2_gpw
 !> \param fm_BIb_jb ...
 !> \param BIb_jb ...
 !> \param max_row_col_local ...
-!> \param homo ...
-!> \param virtual ...
 !> \param proc_map ...
 !> \param local_col_row_info ...
 !> \param my_B_virtual_end ...
 !> \param my_B_virtual_start ...
-!> \param my_B_size ...
-!> \param error_sub ...
 ! *****************************************************************************
   SUBROUTINE grep_my_integrals(para_env_sub,fm_BIb_jb,BIb_jb,max_row_col_local,&
-                               homo,virtual,proc_map,local_col_row_info,&
-                               my_B_virtual_end,my_B_virtual_start,my_B_size,&
-                               error_sub)
+                               proc_map,local_col_row_info,&
+                               my_B_virtual_end,my_B_virtual_start)
     TYPE(cp_para_env_type), POINTER          :: para_env_sub
     TYPE(cp_fm_type), POINTER                :: fm_BIb_jb
     REAL(KIND=dp), DIMENSION(:, :)           :: BIb_jb
-    INTEGER                                  :: max_row_col_local, homo, &
-                                                virtual
+    INTEGER                                  :: max_row_col_local
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: proc_map
     INTEGER, ALLOCATABLE, DIMENSION(:, :)    :: local_col_row_info
     INTEGER                                  :: my_B_virtual_end, &
-                                                my_B_virtual_start, my_B_size
-    TYPE(cp_error_type), INTENT(inout)       :: error_sub
+                                                my_B_virtual_start
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'grep_my_integrals', &
       routineP = moduleN//':'//routineN
@@ -1520,29 +1488,23 @@ MODULE mp2_gpw
     INTEGER                                  :: i_global, iiB, j_global, jjB, &
                                                 ncol_rec, nrow_rec, &
                                                 proc_receive, proc_send, &
-                                                proc_shift, stat
+                                                proc_shift
     INTEGER, ALLOCATABLE, DIMENSION(:, :)    :: rec_col_row_info
     INTEGER, DIMENSION(:), POINTER           :: col_indices_rec, &
                                                 row_indices_rec
-    LOGICAL                                  :: failure
     REAL(KIND=dp), DIMENSION(:, :), POINTER  :: local_BI, rec_BI
 
-    failure=.FALSE.
-
-    ALLOCATE(rec_col_row_info(0:max_row_col_local,2),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
+    ALLOCATE(rec_col_row_info(0:max_row_col_local,2))
 
     rec_col_row_info(:,:)=local_col_row_info
 
     nrow_rec=rec_col_row_info(0,1)
     ncol_rec=rec_col_row_info(0,2)
 
-    ALLOCATE(row_indices_rec(nrow_rec),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
+    ALLOCATE(row_indices_rec(nrow_rec))
     row_indices_rec=rec_col_row_info(1:nrow_rec,1)
 
-    ALLOCATE(col_indices_rec(ncol_rec),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
+    ALLOCATE(col_indices_rec(ncol_rec))
     col_indices_rec=rec_col_row_info(1:ncol_rec,2)
 
     ! accumulate data on BIb_jb buffer starting from myself
@@ -1573,16 +1535,13 @@ MODULE mp2_gpw
         nrow_rec=rec_col_row_info(0,1)
         ncol_rec=rec_col_row_info(0,2)
 
-        ALLOCATE(row_indices_rec(nrow_rec),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
+        ALLOCATE(row_indices_rec(nrow_rec))
         row_indices_rec=rec_col_row_info(1:nrow_rec,1)
 
-        ALLOCATE(col_indices_rec(ncol_rec),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
+        ALLOCATE(col_indices_rec(ncol_rec))
         col_indices_rec=rec_col_row_info(1:ncol_rec,2)
 
-        ALLOCATE(rec_BI(nrow_rec,ncol_rec),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
+        ALLOCATE(rec_BI(nrow_rec,ncol_rec))
         rec_BI=0.0_dp
 
         ! then send and receive the real data
@@ -1627,15 +1586,10 @@ MODULE mp2_gpw
 !> \param my_do_gw ...
 !> \param gw_corr_lev_occ ...
 !> \param gw_corr_lev_virt ...
-!> \param blacs_env_sub ...
-!> \param unit_nr ...
-!> \param error ...
-!> \param error_sub ...
 ! *****************************************************************************
   SUBROUTINE replicate_mat_to_subgroup(mp2_env,para_env,para_env_sub,mo_coeff,dimen,homo,mat_munu,&
                                        mo_coeff_o,mo_coeff_v,mo_coeff_all,mo_coeff_gw,my_do_gw,&
-                                       gw_corr_lev_occ,gw_corr_lev_virt,blacs_env_sub,&
-                                       unit_nr,error,error_sub)
+                                       gw_corr_lev_occ,gw_corr_lev_virt)
     TYPE(mp2_type), POINTER                  :: mp2_env
     TYPE(cp_para_env_type), POINTER          :: para_env, para_env_sub
     TYPE(cp_fm_type), POINTER                :: mo_coeff
@@ -1646,9 +1600,6 @@ MODULE mp2_gpw
     LOGICAL                                  :: my_do_gw
     INTEGER                                  :: gw_corr_lev_occ, &
                                                 gw_corr_lev_virt
-    TYPE(cp_blacs_env_type), POINTER         :: blacs_env_sub
-    INTEGER                                  :: unit_nr
-    TYPE(cp_error_type), INTENT(inout)       :: error, error_sub
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'replicate_mat_to_subgroup', &
       routineP = moduleN//':'//routineN
@@ -1657,14 +1608,13 @@ MODULE mp2_gpw
       itmp(2), j_global, jjB, max_row_col_local, my_mu_end, my_mu_size, &
       my_mu_start, ncol_local, ncol_rec, nrow_local, nrow_rec, proc_receive, &
       proc_receive_static, proc_send, proc_send_static, proc_shift, row, &
-      row_offset, row_size, stat, virtual
+      row_offset, row_size, virtual
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: ends_array, proc_map, &
                                                 sizes_array, starts_array
     INTEGER, ALLOCATABLE, DIMENSION(:, :)    :: local_col_row_info, &
                                                 rec_col_row_info
     INTEGER, DIMENSION(:), POINTER           :: col_indices, col_indices_rec, &
                                                 row_indices, row_indices_rec
-    LOGICAL                                  :: failure
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :)                        :: C, Cgw, Cocc, Cvirt, rec_C
     REAL(KIND=dp), DIMENSION(:, :), POINTER  :: data_block, local_C, &
@@ -1673,15 +1623,11 @@ MODULE mp2_gpw
     TYPE(cp_fm_struct_type), POINTER         :: fm_struct_coeff
 
     CALL timeset(routineN,handle)
-    failure=.FALSE.
 
-    ALLOCATE(sizes_array(0:para_env_sub%num_pe-1),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(starts_array(0:para_env_sub%num_pe-1),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(sizes_array(0:para_env_sub%num_pe-1))
+    ALLOCATE(starts_array(0:para_env_sub%num_pe-1))
     starts_array=0
-    ALLOCATE(ends_array(0:para_env_sub%num_pe-1),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(ends_array(0:para_env_sub%num_pe-1))
     ends_array=0
 
     DO iproc=0,para_env_sub%num_pe-1
@@ -1696,16 +1642,14 @@ MODULE mp2_gpw
     my_mu_end=ends_array(para_env_sub%mepos)
 
     ! local storage for the C matrix
-    ALLOCATE(C(my_mu_size,dimen),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(C(my_mu_size,dimen))
     C=0.0_dp
 
     ! proc_map, vector that replicate the processor numbers also
     ! for negative and positive number > num_pe
     ! needed to know which is the processor, to respect to another one,
     ! for a given shift
-    ALLOCATE(proc_map(-para_env%num_pe:2*para_env%num_pe-1),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(proc_map(-para_env%num_pe:2*para_env%num_pe-1))
     DO iiB=0,para_env%num_pe-1
       proc_map(iiB)=iiB
       proc_map(-iiB-1)=para_env%num_pe-iiB-1
@@ -1718,19 +1662,16 @@ MODULE mp2_gpw
                         ncol_local=ncol_local,&
                         row_indices=row_indices,&
                         col_indices=col_indices,&
-                        local_data=local_C_internal,&
-                        error=error)
+                        local_data=local_C_internal)
 
-    ALLOCATE(local_C(nrow_local,ncol_local),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(local_C(nrow_local,ncol_local))
     local_C=local_C_internal(1:nrow_local,1:ncol_local)
     NULLIFY(local_C_internal) 
 
     max_row_col_local=MAX(nrow_local,ncol_local)
     CALL mp_max(max_row_col_local,para_env%group)
 
-    ALLOCATE(local_col_row_info(0:max_row_col_local,2),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(local_col_row_info(0:max_row_col_local,2))
     local_col_row_info=0
     ! 0,1 nrows
     local_col_row_info(0,1)=nrow_local
@@ -1739,8 +1680,7 @@ MODULE mp2_gpw
     local_col_row_info(0,2)=ncol_local
     local_col_row_info(1:ncol_local,2)=col_indices(1:ncol_local)
 
-    ALLOCATE(rec_col_row_info(0:max_row_col_local,2),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(rec_col_row_info(0:max_row_col_local,2))
 
     ! accumulate data on C buffer starting from myself
     DO iiB=1, nrow_local
@@ -1766,16 +1706,13 @@ MODULE mp2_gpw
       nrow_rec=rec_col_row_info(0,1)
       ncol_rec=rec_col_row_info(0,2)
 
-      ALLOCATE(row_indices_rec(nrow_rec),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(row_indices_rec(nrow_rec))
       row_indices_rec=rec_col_row_info(1:nrow_rec,1)
 
-      ALLOCATE(col_indices_rec(ncol_rec),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(col_indices_rec(ncol_rec))
       col_indices_rec=rec_col_row_info(1:ncol_rec,2)
 
-      ALLOCATE(rec_C(nrow_rec,ncol_rec),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(rec_C(nrow_rec,ncol_rec))
       rec_C=0.0_dp
 
       ! then send and receive the real data
@@ -1794,8 +1731,7 @@ MODULE mp2_gpw
 
       local_col_row_info(:,:)=rec_col_row_info
       DEALLOCATE(local_C)
-      ALLOCATE(local_C(nrow_rec,ncol_rec),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(local_C(nrow_rec,ncol_rec))
       local_C=rec_C
 
       DEALLOCATE(col_indices_rec)
@@ -1808,8 +1744,7 @@ MODULE mp2_gpw
     DEALLOCATE(proc_map)
 
     ! proc_map, for the sub_group
-    ALLOCATE(proc_map(-para_env_sub%num_pe:2*para_env_sub%num_pe-1),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(proc_map(-para_env_sub%num_pe:2*para_env_sub%num_pe-1))
     DO iiB=0,para_env_sub%num_pe-1
       proc_map(iiB)=iiB
       proc_map(-iiB-1)=para_env_sub%num_pe-iiB-1
@@ -1817,13 +1752,11 @@ MODULE mp2_gpw
     END DO
 
     ! split the C matrix into occupied and virtual
-    ALLOCATE(Cocc(my_mu_size,homo),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(Cocc(my_mu_size,homo))
     Cocc(1:my_mu_size,1:homo)=C(1:my_mu_size,1:homo)
  
     virtual=dimen-homo
-    ALLOCATE(Cvirt(my_mu_size,virtual),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(Cvirt(my_mu_size,virtual))
     Cvirt(1:my_mu_size,1:virtual)=C(1:my_mu_size,homo+1:dimen)
 
     ! create and fill mo_coeff_o, mo_coeff_v and mo_coeff_all
@@ -1832,19 +1765,18 @@ MODULE mp2_gpw
                                 col_offset,i_global,j_global,my_mu_start,my_mu_end,&
                                 mat_munu,iter,&
                                 data_block,ends_array,proc_map, &
-                                sizes_array,starts_array,error,error_sub)
+                                sizes_array,starts_array)
 
     CALL build_mo_coeff_v_o_all(mp2_env,para_env_sub,mo_coeff_v,Cvirt,&
                                 virtual,blk,row,col,row_size,col_size,row_offset,&
                                 col_offset,i_global,j_global,my_mu_start,my_mu_end,&
                                 mat_munu,iter,&
                                 data_block,ends_array,proc_map, &
-                                sizes_array,starts_array,error,error_sub)
+                                sizes_array,starts_array)
     IF (my_do_gw) THEN
 
       ! also cut levels homo-gw_corr_lev_occ+1, ..., lumo+gw_corr_lev_virt-1 of C
-      ALLOCATE(Cgw(my_mu_size,gw_corr_lev_occ+gw_corr_lev_virt),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(Cgw(my_mu_size,gw_corr_lev_occ+gw_corr_lev_virt))
       Cgw(1:my_mu_size,1:(gw_corr_lev_occ+gw_corr_lev_virt))=&
                              C(1:my_mu_size,homo-gw_corr_lev_occ+1:homo+gw_corr_lev_virt)
       CALL build_mo_coeff_v_o_all(mp2_env,para_env_sub,mo_coeff_gw,Cgw,&
@@ -1853,14 +1785,14 @@ MODULE mp2_gpw
                                   col_offset,i_global,j_global,my_mu_start,my_mu_end,&
                                   mat_munu,iter,&
                                   data_block,ends_array,proc_map, &
-                                  sizes_array,starts_array,error,error_sub)
+                                  sizes_array,starts_array)
       ! all levels
       CALL build_mo_coeff_v_o_all(mp2_env,para_env_sub,mo_coeff_all,C,&
                                   dimen,blk,row,col,row_size,col_size,row_offset,&
                                   col_offset,i_global,j_global,my_mu_start,my_mu_end,&
                                   mat_munu,iter,&
                                   data_block,ends_array,proc_map, &
-                                  sizes_array,starts_array,error,error_sub)
+                                  sizes_array,starts_array)
 
     ELSE
       DEALLOCATE(C)
@@ -1880,8 +1812,6 @@ MODULE mp2_gpw
 !> \brief ...
 !> \param para_env_sub ...
 !> \param dimen ...
-!> \param homo ...
-!> \param virtual ...
 !> \param my_I_occupied_start ...
 !> \param my_I_occupied_end ...
 !> \param my_I_batch_size ...
@@ -1892,22 +1822,18 @@ MODULE mp2_gpw
 !> \param mo_coeff_v ...
 !> \param my_Cocc ...
 !> \param my_Cvirt ...
-!> \param unit_nr ...
-!> \param error_sub ...
 ! *****************************************************************************
-  SUBROUTINE grep_occ_virt_wavefunc(para_env_sub,dimen,homo,virtual,&
+  SUBROUTINE grep_occ_virt_wavefunc(para_env_sub,dimen,&
                                     my_I_occupied_start,my_I_occupied_end,my_I_batch_size,&
                                     my_A_virtual_start,my_A_virtual_end,my_A_batch_size,&
-                                    mo_coeff_o,mo_coeff_v,my_Cocc,my_Cvirt,unit_nr,error_sub)
+                                    mo_coeff_o,mo_coeff_v,my_Cocc,my_Cvirt)
 
     TYPE(cp_para_env_type), POINTER          :: para_env_sub
-    INTEGER :: dimen, homo, virtual, my_I_occupied_start, my_I_occupied_end, &
+    INTEGER :: dimen, my_I_occupied_start, my_I_occupied_end, &
       my_I_batch_size, my_A_virtual_start, my_A_virtual_end, my_A_batch_size
     TYPE(cp_dbcsr_type), POINTER             :: mo_coeff_o, mo_coeff_v
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :)                        :: my_Cocc, my_Cvirt
-    INTEGER                                  :: unit_nr
-    TYPE(cp_error_type), INTENT(inout)       :: error_sub
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'grep_occ_virt_wavefunc', &
       routineP = moduleN//':'//routineN
@@ -1915,20 +1841,16 @@ MODULE mp2_gpw
     INTEGER                                  :: blk, col, col_offset, &
                                                 col_size, handle, i, &
                                                 i_global, j, j_global, row, &
-                                                row_offset, row_size, stat
-    LOGICAL                                  :: failure
+                                                row_offset, row_size
     REAL(KIND=dp), DIMENSION(:, :), POINTER  :: data_block
     TYPE(cp_dbcsr_iterator)                  :: iter
 
     CALL timeset(routineN,handle)
-    failure=.FALSE.
 
-    ALLOCATE(my_Cocc(dimen,my_I_batch_size),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
+    ALLOCATE(my_Cocc(dimen,my_I_batch_size))
     my_Cocc=0.0_dp
 
-    ALLOCATE(my_Cvirt(dimen,my_A_batch_size),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
+    ALLOCATE(my_Cvirt(dimen,my_A_batch_size))
     my_Cvirt=0.0_dp
 
     ! accumulate data from mo_coeff_o into Cocc
@@ -2000,8 +1922,6 @@ MODULE mp2_gpw
 !> \param proc_map ...
 !> \param sizes_array ...
 !> \param starts_array ...
-!> \param error ...
-!> \param error_sub ...
 !> \author Jan Wilhelm
 ! *****************************************************************************
   SUBROUTINE build_mo_coeff_v_o_all(mp2_env,para_env_sub,mo_coeff_to_build,Cread,&
@@ -2009,7 +1929,7 @@ MODULE mp2_gpw
                                     col_offset,i_global,j_global,my_mu_start,my_mu_end,&
                                     mat_munu,iter,&
                                     data_block,ends_array,proc_map, &
-                                    sizes_array,starts_array,error,error_sub)
+                                    sizes_array,starts_array)
     TYPE(mp2_type), POINTER                  :: mp2_env
     TYPE(cp_para_env_type), POINTER          :: para_env_sub
     TYPE(cp_dbcsr_type), POINTER             :: mo_coeff_to_build
@@ -2022,25 +1942,24 @@ MODULE mp2_gpw
     REAL(KIND=dp), DIMENSION(:, :), POINTER  :: data_block
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: ends_array, proc_map, &
                                                 sizes_array, starts_array
-    TYPE(cp_error_type), INTENT(inout)       :: error, error_sub
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'build_mo_coeff_v_o_all', &
       routineP = moduleN//':'//routineN
 
-    INTEGER :: handle, i, j, proc_receive, proc_send, proc_shift, rec_mu_end, &
-      rec_mu_size, rec_mu_start, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: handle, i, j, proc_receive, &
+                                                proc_send, proc_shift, &
+                                                rec_mu_end, rec_mu_size, &
+                                                rec_mu_start
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :)                        :: rec_C
 
     CALL timeset(routineN,handle)
-    failure=.FALSE.
 
     NULLIFY(mo_coeff_to_build)
-    CALL cp_dbcsr_init_p(mo_coeff_to_build,error=error_sub)
+    CALL cp_dbcsr_init_p(mo_coeff_to_build)
     CALL cp_dbcsr_m_by_n_from_row_template(mo_coeff_to_build,template=mat_munu%matrix,n=number_of_level,&
-                                           sym=dbcsr_type_no_symmetry,data_type=dbcsr_type_real_default,error=error)
-    CALL cp_dbcsr_reserve_all_blocks(mo_coeff_to_build,error)
+                                           sym=dbcsr_type_no_symmetry,data_type=dbcsr_type_real_default)
+    CALL cp_dbcsr_reserve_all_blocks(mo_coeff_to_build)
 
 
     ! accumulate data on mo_coeff_to_build starting from myself
@@ -2071,8 +1990,7 @@ MODULE mp2_gpw
       rec_mu_end=ends_array(proc_receive)
       rec_mu_size=sizes_array(proc_receive)
 
-      ALLOCATE(rec_C(rec_mu_size,number_of_level),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(rec_C(rec_mu_size,number_of_level))
       rec_C=0.0_dp
 
       ! then send and receive the real data
@@ -2099,7 +2017,7 @@ MODULE mp2_gpw
       DEALLOCATE(rec_C)
 
     END DO
-    CALL cp_dbcsr_filter(mo_coeff_to_build,mp2_env%mp2_gpw%eps_filter,error=error_sub)
+    CALL cp_dbcsr_filter(mo_coeff_to_build,mp2_env%mp2_gpw%eps_filter)
 
     DEALLOCATE(Cread)
 

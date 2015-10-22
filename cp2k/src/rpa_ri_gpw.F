@@ -55,10 +55,9 @@ MODULE rpa_ri_gpw
   USE rpa_communication,               ONLY: fm_redistribute,&
                                              initialize_buffer,&
                                              release_buffer
-  USE timings,                         ONLY: timeset,&
-                                             timestop
   USE util,                            ONLY: get_limit
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -96,8 +95,6 @@ MODULE rpa_ri_gpw
 !> \param gw_corr_lev_occ ...
 !> \param gw_corr_lev_virt ...
 !> \param unit_nr ...
-!> \param error ...
-!> \param error_sub ...
 !> \param do_ri_sos_laplace_mp2 ...
 !> \param my_do_gw ...
 !> \param BIb_C_beta ...
@@ -114,7 +111,7 @@ MODULE rpa_ri_gpw
                                ends_array,ends_B_virtual,ends_B_all,sizes_array,sizes_B_virtual,sizes_B_all,&
                                starts_array,starts_B_virtual,starts_B_all,&
                                Eigenval,nmo,homo,dimen_RI,gw_corr_lev_occ,gw_corr_lev_virt,&
-                               unit_nr,error,error_sub,do_ri_sos_laplace_mp2,my_do_gw,&
+                               unit_nr,do_ri_sos_laplace_mp2,my_do_gw,&
                                BIb_C_beta,homo_beta,Eigenval_beta,&
                                ends_B_virtual_beta,sizes_B_virtual_beta, starts_B_virtual_beta,&
                                BIb_C_gw_beta,gw_corr_lev_occ_beta,gw_corr_lev_virt_beta)
@@ -131,7 +128,6 @@ MODULE rpa_ri_gpw
     INTEGER                                  :: nmo, homo, dimen_RI, &
                                                 gw_corr_lev_occ, &
                                                 gw_corr_lev_virt, unit_nr
-    TYPE(cp_error_type), INTENT(inout)       :: error, error_sub
     LOGICAL                                  :: do_ri_sos_laplace_mp2, &
                                                 my_do_gw
     REAL(KIND=dp), ALLOCATABLE, &
@@ -159,14 +155,14 @@ MODULE rpa_ri_gpw
       my_group_L_end, my_group_L_size, my_group_L_start, my_homo_beta, &
       my_ia_end, my_ia_end_beta, my_ia_size, my_ia_size_beta, my_ia_start, &
       my_ia_start_beta, my_nm_gw_end, my_nm_gw_size, my_nm_gw_start
-    INTEGER :: ngroup, num_integ_group, num_integ_points, num_poles, &
-      pos_integ_group, virtual, virtual_beta
+    INTEGER :: ncol_block_mat, ngroup, nrow_block_mat, num_integ_group, &
+      num_integ_points, num_poles, pos_integ_group, virtual, virtual_beta
     INTEGER(KIND=int_8)                      :: mem
     INTEGER, ALLOCATABLE, DIMENSION(:) :: ends_ia, ends_ia_beta, ends_nm_gw, &
       sizes_ia, sizes_ia_beta, sizes_nm_gw, starts_ia, starts_ia_beta, &
       starts_nm_gw, sub_proc_map
     LOGICAL                                  :: check_fit, do_minimax_quad, &
-                                                failure, my_open_shell, &
+                                                my_open_shell, &
                                                 skip_integ_group_opt
     REAL(KIND=dp) :: allowed_memory, avail_mem, E_Range, Emax, Emax_beta, &
       Emin, Emin_beta, ext_scaling, fermi_level_offset, mem_for_iaK, &
@@ -182,7 +178,6 @@ MODULE rpa_ri_gpw
     TYPE(cp_para_env_type), POINTER          :: para_env_RPA
 
     CALL timeset(routineN,handle)
-    failure=.FALSE.
   
     CALL cite_reference(DelBen2013)
     CALL cite_reference(DelBen2015)
@@ -225,16 +220,15 @@ MODULE rpa_ri_gpw
           IF(ierr==0) EXIT
         END DO
       END IF
-      CPPostcondition(num_integ_points>=1,cp_failure_level,routineP,error_sub,failure)
+      CPASSERT(num_integ_points>=1)
     ELSE
       num_integ_points=mp2_env%ri_rpa%rpa_num_quad_points
       input_integ_group_size=mp2_env%ri_rpa%rpa_integ_group_size
       do_minimax_quad=mp2_env%ri_rpa%minimax_quad
       IF(do_minimax_quad.AND.num_integ_points>20) THEN
-        CALL cp_assert(.FALSE.,cp_warning_level,cp_assertion_failed,routineP,&
-                       "The required number of quadrature point exceeds the maximum possible in the "//&
-                       "Minimax quadrature scheme. The number of quadrature point has been reset to 20.",&
-                       only_ionode=.TRUE.)
+        CALL cp_warn(__LOCATION__,&
+             "The required number of quadrature point exceeds the maximum possible in the "//&
+             "Minimax quadrature scheme. The number of quadrature point has been reset to 20.")
         num_integ_points=20
       END IF
     END IF
@@ -261,14 +255,14 @@ MODULE rpa_ri_gpw
 
     mem_min=2.0_dp*REAL(homo,KIND=dp)*MAXVAL(sizes_B_virtual)*MAXVAL(sizes_array)*8.0_dp/(1024**2)
  
-    IF (unit_nr>0) WRITE(unit_nr,'(T3,A,T69,F9.2,A3)') 'RI_INFO| Minimum required memory per MPI process:',&
-                                                        mem_min, ' MB'
+    IF (unit_nr>0) WRITE(unit_nr,'(T3,A,T68,F9.2,A4)') 'RI_INFO| Minimum required memory per MPI process:',&
+                                                        mem_min, ' MiB'
    
     mem_real=allowed_memory-mem_real
     mem_real=MAX(mem_real,mem_min)
 
-    IF (unit_nr>0) WRITE(unit_nr,'(T3,A,T69,F9.2,A3)') 'RI_INFO| Available memory per MPI process:',&
-                                                        mem_real, ' MB'
+    IF (unit_nr>0) WRITE(unit_nr,'(T3,A,T68,F9.2,A4)') 'RI_INFO| Available memory per MPI process:',&
+                                                        mem_real, ' MiB'
     
     mem_per_group=mem_real*para_env_sub%num_pe
 
@@ -413,7 +407,7 @@ MODULE rpa_ri_gpw
                             sizes_ia,starts_ia,ends_ia,&
                             sizes_B_virtual,starts_B_virtual,ends_B_virtual,&
                             sub_proc_map,my_ia_size,my_ia_start,my_ia_end,my_group_L_size,&
-                            my_B_size,my_B_virtual_start,error_sub,error)
+                            my_B_size,my_B_virtual_start)
     DEALLOCATE(BIb_C)
     DEALLOCATE(starts_B_virtual)
     DEALLOCATE(ends_B_virtual)
@@ -426,7 +420,7 @@ MODULE rpa_ri_gpw
                               sizes_ia_beta,starts_ia_beta,ends_ia_beta,&
                               sizes_B_virtual_beta,starts_B_virtual_beta,ends_B_virtual_beta,&
                               sub_proc_map,my_ia_size_beta,my_ia_start_beta,my_ia_end_beta,my_group_L_size,&
-                              my_B_size_beta,my_B_virtual_start_beta,error_sub,error)
+                              my_B_size_beta,my_B_virtual_start_beta)
 
       DEALLOCATE(BIb_C_beta)
       DEALLOCATE(starts_B_virtual_beta)
@@ -442,7 +436,7 @@ MODULE rpa_ri_gpw
                               sizes_nm_gw,starts_nm_gw,ends_nm_gw,&
                               sizes_B_all,starts_B_all,ends_B_all,&
                               sub_proc_map,my_nm_gw_size,my_nm_gw_start,my_nm_gw_end,my_group_L_size,&
-                              my_B_all_size,my_B_all_start,error_sub,error)
+                              my_B_all_size,my_B_all_start)
 
       ! The same for open shell
       IF(my_open_shell) THEN
@@ -452,7 +446,7 @@ MODULE rpa_ri_gpw
                                 sizes_nm_gw,starts_nm_gw,ends_nm_gw,&
                                 sizes_B_all,starts_B_all,ends_B_all,&
                                 sub_proc_map,my_nm_gw_size,my_nm_gw_start,my_nm_gw_end,my_group_L_size,&
-                                my_B_all_size,my_B_all_start,error_sub,error)
+                                my_B_all_size,my_B_all_start)
         DEALLOCATE(BIb_C_gw_beta)
       END IF
 
@@ -472,8 +466,9 @@ MODULE rpa_ri_gpw
                           dimen_RI,dimen_ia,dimen_ia,color_rpa_group,&
                           mp2_env%block_size_row,mp2_env%block_size_col,unit_nr,&
                           my_ia_size,my_ia_start,my_ia_end,&
-                          sizes_array,starts_array,ends_array,my_group_L_size,my_group_L_start,my_group_L_end,&
-                          para_env_RPA,fm_mat_S,fm_mat_Q_gemm,fm_mat_Q,error,error_sub)
+                          my_group_L_size,my_group_L_start,my_group_L_end,&
+                          para_env_RPA,fm_mat_S,fm_mat_Q_gemm,fm_mat_Q,&
+                          nrow_block_mat,ncol_block_mat)
 
     ! for GW, we need other matrix fm_mat_S  
     IF(my_do_gw) THEN
@@ -481,27 +476,29 @@ MODULE rpa_ri_gpw
 !                            dimen_RI,dimen_nm_gw,dimen_ia,color_rpa_group,&
 !                            mp2_env%block_size_row,mp2_env%block_size_col,unit_nr,&
 !                            my_nm_gw_size,my_nm_gw_start,my_nm_gw_end,&
-!                            sizes_array,starts_array,ends_array,my_group_L_size,my_group_L_start,my_group_L_end,&
-!                            para_env_RPA,fm_mat_S_gw,fm_mat_R_gw_gemm,fm_mat_R_gw,error,error_sub,&
+!                            my_group_L_size,my_group_L_start,my_group_L_end,&
+!                            para_env_RPA,fm_mat_S_gw,fm_mat_R_gw_gemm,fm_mat_R_gw,&
 !                            .TRUE.,fm_mat_Q%matrix_struct%context,fm_mat_S%matrix_struct%context)
       CALL create_integ_mat(BIb_C_2D_gw,para_env,para_env_sub,color_sub,ngroup,integ_group_size,&
                             dimen_RI,dimen_nm_gw,dimen_ia,color_rpa_group,&
                             mp2_env%block_size_row,mp2_env%block_size_col,unit_nr,&
                             my_nm_gw_size,my_nm_gw_start,my_nm_gw_end,&
-                            sizes_array,starts_array,ends_array,my_group_L_size,my_group_L_start,my_group_L_end,&
-                            para_env_RPA,fm_mat_S_gw,fm_mat_R_gw_gemm,fm_mat_R_gw,error,error_sub,&
+                            my_group_L_size,my_group_L_start,my_group_L_end,&
+                            para_env_RPA,fm_mat_S_gw,fm_mat_R_gw_gemm,fm_mat_R_gw,&
+                            nrow_block_mat,ncol_block_mat,&
                             .TRUE.,fm_mat_Q%matrix_struct%context,fm_mat_Q%matrix_struct%context)
 
       ! for GW, we don't need fm_mat_R_gw_gemm (in contrast to RPA)
-      CALL cp_fm_release(fm_mat_R_gw_gemm,error=error)
+      CALL cp_fm_release(fm_mat_R_gw_gemm)
 
       IF(my_open_shell) THEN
         CALL create_integ_mat(BIb_C_2D_gw_beta,para_env,para_env_sub,color_sub,ngroup,integ_group_size,&
                               dimen_RI,dimen_nm_gw,dimen_ia,color_rpa_group,&
                               mp2_env%block_size_row,mp2_env%block_size_col,unit_nr,&
                               my_nm_gw_size,my_nm_gw_start,my_nm_gw_end,&
-                              sizes_array,starts_array,ends_array,my_group_L_size,my_group_L_start,my_group_L_end,&
-                              para_env_RPA,fm_mat_S_gw_beta,fm_mat_R_gw_gemm_beta,fm_mat_R_gw_beta,error,error_sub,&
+                              my_group_L_size,my_group_L_start,my_group_L_end,&
+                              para_env_RPA,fm_mat_S_gw_beta,fm_mat_R_gw_gemm_beta,fm_mat_R_gw_beta,&
+                              nrow_block_mat,ncol_block_mat,&
                               .TRUE.,fm_mat_Q%matrix_struct%context,fm_mat_Q%matrix_struct%context,.TRUE.)
 
       END IF
@@ -514,15 +511,16 @@ MODULE rpa_ri_gpw
                             dimen_RI,dimen_ia_beta,dimen_ia_beta,color_rpa_group,&
                             mp2_env%block_size_row,mp2_env%block_size_col,unit_nr,&
                             my_ia_size_beta,my_ia_start_beta,my_ia_end_beta,&
-                            sizes_array,starts_array,ends_array,my_group_L_size,my_group_L_start,my_group_L_end,&
-                            para_env_RPA,fm_mat_S_beta,fm_mat_Q_gemm_beta,fm_mat_Q_beta,error,error_sub,&
+                            my_group_L_size,my_group_L_start,my_group_L_end,&
+                            para_env_RPA,fm_mat_S_beta,fm_mat_Q_gemm_beta,fm_mat_Q_beta,&
+                            nrow_block_mat,ncol_block_mat,&
                             .TRUE.,fm_mat_Q%matrix_struct%context)
 
       IF(do_ri_sos_laplace_mp2) THEN
         ! go with laplace MINIMAX MP2
         CALL laplace_minimax_approx(Erpa,para_env,para_env_RPA,unit_nr,homo,virtual,dimen_RI,dimen_ia,Eigenval,&
                                     num_integ_points,num_integ_group,color_rpa_group,&
-                                    fm_mat_S,fm_mat_Q_gemm,fm_mat_Q,error,&
+                                    fm_mat_S,fm_mat_Q_gemm,fm_mat_Q,&
                                     homo_beta,virtual_beta,dimen_ia_beta,Eigenval_beta,fm_mat_S_beta,&
                                     fm_mat_Q_gemm_beta,fm_mat_Q_beta)
       ELSE
@@ -534,7 +532,7 @@ MODULE rpa_ri_gpw
                                  my_do_gw,gw_corr_lev_occ,gw_corr_lev_virt,num_poles,ext_scaling,omega_max_fit,&
                                  stop_crit,check_fit,fermi_level_offset,crossing_search,&
                                  max_iter_fit,&
-                                 mp2_env%ri_rpa%mm_style,do_minimax_quad,error,&
+                                 mp2_env%ri_rpa%mm_style,do_minimax_quad,&
                                  homo_beta,virtual_beta,dimen_ia_beta,Eigenval_beta,fm_mat_S_beta,&
                                  fm_mat_Q_gemm_beta,fm_mat_Q_beta,fm_mat_S_gw_beta,&
                                  gw_corr_lev_occ_beta,gw_corr_lev_virt_beta)
@@ -544,7 +542,7 @@ MODULE rpa_ri_gpw
         ! go with laplace MINIMAX MP2
         CALL laplace_minimax_approx(Erpa,para_env,para_env_RPA,unit_nr,homo,virtual,dimen_RI,dimen_ia,Eigenval,&
                                     num_integ_points,num_integ_group,color_rpa_group,&
-                                    fm_mat_S,fm_mat_Q_gemm,fm_mat_Q,error)
+                                    fm_mat_S,fm_mat_Q_gemm,fm_mat_Q)
       ELSE
         ! go with clenshaw-curtius/minimax quadrature
         ! here, we also do the quasi-particle-energy correction for G0W0
@@ -555,7 +553,7 @@ MODULE rpa_ri_gpw
                                  my_do_gw,gw_corr_lev_occ,gw_corr_lev_virt,num_poles,ext_scaling,omega_max_fit,&
                                  stop_crit,check_fit,fermi_level_offset,crossing_search,&
                                  max_iter_fit,&
-                                 mp2_env%ri_rpa%mm_style,do_minimax_quad,error)
+                                 mp2_env%ri_rpa%mm_style,do_minimax_quad)
       END IF
     END IF
 
@@ -569,30 +567,30 @@ MODULE rpa_ri_gpw
     DEALLOCATE(starts_array)
     DEALLOCATE(ends_array)
 
-    CALL cp_para_env_release(para_env_RPA,error=error_sub)
+    CALL cp_para_env_release(para_env_RPA)
 
-    CALL cp_fm_release(fm_mat_S,error=error)
-    !XXX CALL cp_fm_release(fm_mat_G,error=error)
-    CALL cp_fm_release(fm_mat_Q_gemm,error=error)
-    CALL cp_fm_release(fm_mat_Q,error=error)
+    CALL cp_fm_release(fm_mat_S)
+    !XXX CALL cp_fm_release(fm_mat_G)
+    CALL cp_fm_release(fm_mat_Q_gemm)
+    CALL cp_fm_release(fm_mat_Q)
     IF(my_open_shell) THEN
       DEALLOCATE(sizes_ia_beta)
       DEALLOCATE(starts_ia_beta)
       DEALLOCATE(ends_ia_beta)
-      CALL cp_fm_release(fm_mat_S_beta,error=error)
-      !XXX CALL cp_fm_release(fm_mat_G_beta,error=error)
-      CALL cp_fm_release(fm_mat_Q_gemm_beta,error=error)
-      CALL cp_fm_release(fm_mat_Q_beta,error=error)
+      CALL cp_fm_release(fm_mat_S_beta)
+      !XXX CALL cp_fm_release(fm_mat_G_beta)
+      CALL cp_fm_release(fm_mat_Q_gemm_beta)
+      CALL cp_fm_release(fm_mat_Q_beta)
     END IF
 
     IF(my_do_gw) THEN
       DEALLOCATE(sizes_nm_gw)
       DEALLOCATE(starts_nm_gw)
       DEALLOCATE(ends_nm_gw)
-      CALL cp_fm_release(fm_mat_S_gw,error=error)
-      CALL cp_fm_release(fm_mat_R_gw,error=error)
+      CALL cp_fm_release(fm_mat_S_gw)
+      CALL cp_fm_release(fm_mat_R_gw)
       IF(my_open_shell) THEN
-        CALL cp_fm_release(fm_mat_S_gw_beta,error=error)
+        CALL cp_fm_release(fm_mat_S_gw_beta)
       END IF
     END IF
 
@@ -625,15 +623,13 @@ MODULE rpa_ri_gpw
 !> \param my_group_L_size ...
 !> \param my_B_size ...
 !> \param my_B_virtual_start ...
-!> \param error_sub ...
-!> \param error ...
 !> \author Jan Wilhelm, 03/2015
 ! *****************************************************************************
     SUBROUTINE calculate_BIb_C_2D(BIb_C_2D,BIb_C,para_env_sub,dimen_ia,homo,virtual,&
                                   sizes_ia,starts_ia,ends_ia,&
                                   sizes_B_virtual,starts_B_virtual,ends_B_virtual,&
                                   sub_proc_map,my_ia_size,my_ia_start,my_ia_end,my_group_L_size,&
-                                  my_B_size,my_B_virtual_start,error_sub,error)
+                                  my_B_size,my_B_virtual_start)
 
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :)                        :: BIb_C_2D
@@ -646,7 +642,6 @@ MODULE rpa_ri_gpw
     INTEGER                                  :: my_ia_size, my_ia_start, &
                                                 my_ia_end, my_group_L_size, &
                                                 my_B_size, my_B_virtual_start
-    TYPE(cp_error_type), INTENT(inout)       :: error_sub, error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'calculate_BIb_C_2D', &
       routineP = moduleN//':'//routineN
@@ -654,20 +649,16 @@ MODULE rpa_ri_gpw
 
     INTEGER :: ia_global, iiB, iproc, itmp(2), jjB, occ_high, occ_low, &
       proc_receive, proc_send, proc_shift, rec_B_size, rec_B_virtual_end, &
-      rec_B_virtual_start, stat
-    LOGICAL                                  :: failure
+      rec_B_virtual_start
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :, :)                     :: BIb_C_rec
 
     dimen_ia=homo*virtual
-    ALLOCATE(sizes_ia(0:para_env_sub%num_pe-1),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(sizes_ia(0:para_env_sub%num_pe-1))
     sizes_ia=0
-    ALLOCATE(starts_ia(0:para_env_sub%num_pe-1),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(starts_ia(0:para_env_sub%num_pe-1))
     starts_ia=0
-    ALLOCATE(ends_ia(0:para_env_sub%num_pe-1),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(ends_ia(0:para_env_sub%num_pe-1))
     ends_ia=0
 
     DO iproc=0, para_env_sub%num_pe-1
@@ -682,8 +673,7 @@ MODULE rpa_ri_gpw
     my_ia_size=sizes_ia(para_env_sub%mepos)
 
     ! reorder data
-    ALLOCATE(BIb_C_2D(my_ia_size,my_group_L_size),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(BIb_C_2D(my_ia_size,my_group_L_size))
 
     !$OMP PARALLEL DO DEFAULT(NONE) PRIVATE(jjB,ia_global) &
     !$OMP          SHARED(homo,my_B_size,virtual,my_B_virtual_start,my_ia_start,my_ia_end,BIb_C,BIb_C_2D,&
@@ -707,9 +697,8 @@ MODULE rpa_ri_gpw
 
       ! do this in chunks to avoid high memory overhead  for both BIb_C_rec and buffers in mp_sendrecv 
       ! TODO: fix this more cleanly with a rewrite sending only needed data etc.
-      ! TODO: occ_chunk should presumably be precomputed so that messages are limited to e.g. 100Mb.
-      ALLOCATE(BIb_C_rec(my_group_L_size,rec_B_size,MIN(homo,occ_chunk)),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
+      ! TODO: occ_chunk should presumably be precomputed so that messages are limited to e.g. 100MiB.
+      ALLOCATE(BIb_C_rec(my_group_L_size,rec_B_size,MIN(homo,occ_chunk)))
 
       DO occ_low=1,homo,occ_chunk
          occ_high=MIN(homo,occ_low+occ_chunk-1)
@@ -752,9 +741,6 @@ MODULE rpa_ri_gpw
 !> \param my_ia_size ...
 !> \param my_ia_start ...
 !> \param my_ia_end ...
-!> \param sizes_array ...
-!> \param starts_array ...
-!> \param ends_array ...
 !> \param my_group_L_size ...
 !> \param my_group_L_start ...
 !> \param my_group_L_end ...
@@ -762,8 +748,8 @@ MODULE rpa_ri_gpw
 !> \param fm_mat_S ...
 !> \param fm_mat_Q_gemm ...
 !> \param fm_mat_Q ...
-!> \param error ...
-!> \param error_sub ...
+!> \param nrow_block_mat ...
+!> \param ncol_block_mat ...
 !> \param beta_case ...
 !> \param blacs_env_ext ...
 !> \param blacs_env_ext_S ...
@@ -773,8 +759,9 @@ MODULE rpa_ri_gpw
                                 dimen_RI,dimen_ia,dimen_ia_for_block_size,color_rpa_group,&
                                 ext_row_block_size,ext_col_block_size,unit_nr,&
                                 my_ia_size,my_ia_start,my_ia_end,&
-                                sizes_array,starts_array,ends_array,my_group_L_size,my_group_L_start,my_group_L_end,&
-                                para_env_RPA,fm_mat_S,fm_mat_Q_gemm,fm_mat_Q,error,error_sub,beta_case,&
+                                my_group_L_size,my_group_L_start,my_group_L_end,&
+                                para_env_RPA,fm_mat_S,fm_mat_Q_gemm,fm_mat_Q,&
+                                nrow_block_mat,ncol_block_mat,beta_case,&
                                 blacs_env_ext,blacs_env_ext_S,do_gw_open_shell)
 
     REAL(KIND=dp), ALLOCATABLE, &
@@ -782,16 +769,12 @@ MODULE rpa_ri_gpw
     TYPE(cp_para_env_type), POINTER          :: para_env, para_env_sub
     INTEGER :: color_sub, ngroup, integ_group_size, dimen_RI, dimen_ia, &
       dimen_ia_for_block_size, color_rpa_group, ext_row_block_size, &
-      ext_col_block_size, unit_nr, my_ia_size, my_ia_start, my_ia_end
-    INTEGER, ALLOCATABLE, DIMENSION(:)       :: sizes_array, starts_array, &
-                                                ends_array
-    INTEGER                                  :: my_group_L_size, &
-                                                my_group_L_start, &
-                                                my_group_L_end
+      ext_col_block_size, unit_nr, my_ia_size, my_ia_start, my_ia_end, &
+      my_group_L_size, my_group_L_start, my_group_L_end
     TYPE(cp_para_env_type), POINTER          :: para_env_RPA
     TYPE(cp_fm_type), POINTER                :: fm_mat_S, fm_mat_Q_gemm, &
                                                 fm_mat_Q
-    TYPE(cp_error_type), INTENT(inout)       :: error, error_sub
+    INTEGER                                  :: nrow_block_mat, ncol_block_mat
     LOGICAL, OPTIONAL                        :: beta_case
     TYPE(cp_blacs_env_type), OPTIONAL, &
       POINTER                                :: blacs_env_ext, blacs_env_ext_S
@@ -804,16 +787,14 @@ MODULE rpa_ri_gpw
       end_row_block, grid_2D(2), handle, handle2, handle3, i, i_global, &
       i_local, i_sub, iiB, iii, iproc, iproc_col, iproc_row, itmp(2), &
       j_global, j_local, j_sub, jjB, mepos_in_RPA_group, my_num_col_blocks, &
-      my_num_row_blocks, mypcol, myprow, ncol_block, ncol_block_mat, &
-      ncol_local, npcol, nprow, nrow_block, nrow_block_mat, nrow_local, &
-      num_rec_cols, number_of_rec, number_of_send, proc_receive, &
-      proc_receive_static, proc_send, proc_send_static, proc_shift, &
-      rec_counter, rec_ia_end, rec_ia_size, rec_ia_start, rec_L_end, &
-      rec_L_size
-    INTEGER :: rec_L_start, rec_pcol, rec_prow, ref_send_pcol, ref_send_prow, &
-      row_col_proc_ratio, send_counter, send_pcol, send_prow, &
-      size_rec_buffer, size_send_buffer, start_col_block, start_row_block, &
-      stat, sub_sub_color
+      my_num_row_blocks, mypcol, myprow, ncol_block, ncol_local, npcol, &
+      nprow, nrow_block, nrow_local, num_rec_cols, number_of_rec, &
+      number_of_send, proc_receive, proc_receive_static, proc_send, &
+      proc_send_static, proc_shift, rec_counter, rec_ia_end, rec_ia_size, &
+      rec_ia_start, rec_L_end, rec_L_size, rec_L_start, rec_pcol, rec_prow
+    INTEGER :: ref_send_pcol, ref_send_prow, row_col_proc_ratio, &
+      send_counter, send_pcol, send_prow, size_rec_buffer, size_send_buffer, &
+      start_col_block, start_row_block, sub_sub_color
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: iii_vet, index_col_rec, &
                                                 map_rec_size, map_send_size, &
                                                 req_send, RPA_proc_map
@@ -822,8 +803,8 @@ MODULE rpa_ri_gpw
       group_grid_2_mepos, mepos_2_grid, RPA_info_end, RPA_info_size, &
       RPA_info_start
     INTEGER, DIMENSION(:), POINTER           :: col_indices, row_indices
-    LOGICAL                                  :: failure, my_beta_case, &
-                                                my_blacs_ext, my_blacs_S_ext, &
+    LOGICAL                                  :: my_beta_case, my_blacs_ext, &
+                                                my_blacs_S_ext, &
                                                 my_gw_open_shell
     REAL(KIND=dp)                            :: part_ia, part_RI
     REAL(KIND=dp), ALLOCATABLE, &
@@ -835,7 +816,6 @@ MODULE rpa_ri_gpw
       ALLOCATABLE, DIMENSION(:)              :: buffer_rec, buffer_send
 
     CALL timeset(routineN,handle)
-    failure=.FALSE.
 
     my_beta_case=.FALSE.
     IF(PRESENT(beta_case)) my_beta_case=beta_case
@@ -853,7 +833,7 @@ MODULE rpa_ri_gpw
     IF(.NOT.my_beta_case) THEN
       CALL mp_comm_split_direct(para_env%group,comm_rpa,color_rpa_group)
       NULLIFY(para_env_RPA)
-      CALL cp_para_env_create(para_env_RPA,comm_rpa,error=error)
+      CALL cp_para_env_create(para_env_RPA,comm_rpa)
     END IF
 
     ! create the RPA blacs env 
@@ -862,7 +842,7 @@ MODULE rpa_ri_gpw
       blacs_env=>blacs_env_ext_S
       NULLIFY(fm_struct)
       CALL cp_fm_struct_create(fm_struct,context=blacs_env,nrow_global=dimen_ia,&
-                               ncol_global=dimen_RI,para_env=para_env_RPA,error=error)     
+                               ncol_global=dimen_RI,para_env=para_env_RPA)     
     ELSE
       NULLIFY(blacs_env)
       IF(para_env_RPA%num_pe>1) THEN
@@ -887,14 +867,14 @@ MODULE rpa_ri_gpw
       ELSE
         grid_2D=1
       END IF
-      CALL cp_blacs_env_create(blacs_env=blacs_env, para_env=para_env_RPA, grid_2d=grid_2d, error=error)
+      CALL cp_blacs_env_create(blacs_env=blacs_env, para_env=para_env_RPA, grid_2d=grid_2d)
       IF (unit_nr>0) THEN
         WRITE (UNIT=unit_nr,FMT="(T3,A,T75,i6)")&
                                    "MATRIX_INFO| Number row processes:", grid_2D(1)
         WRITE (UNIT=unit_nr,FMT="(T3,A,T75,i6)")&
                                    "MATRIX_INFO| Number column processes:", grid_2D(2)
       END IF
-      ! CALL cp_blacs_env_create(blacs_env=blacs_env, para_env=para_env_RPA, error=error)
+      ! CALL cp_blacs_env_create(blacs_env=blacs_env, para_env=para_env_RPA)
 
       ! define the block_size for the row
       IF(ext_row_block_size>0) THEN 
@@ -923,16 +903,16 @@ MODULE rpa_ri_gpw
       ! and homo*virtual rows
       NULLIFY(fm_struct)
       ! CALL cp_fm_struct_create(fm_struct,context=blacs_env,nrow_global=dimen_ia,&
-      !                          ncol_global=dimen_RI,para_env=para_env_RPA,error=error)
+      !                          ncol_global=dimen_RI,para_env=para_env_RPA)
       CALL cp_fm_struct_create(fm_struct,context=blacs_env,nrow_global=dimen_ia,&
                                ncol_global=dimen_RI,para_env=para_env_RPA,&
-                               nrow_block=nrow_block_mat, ncol_block=ncol_block_mat, force_block=.TRUE.,error=error)
+                               nrow_block=nrow_block_mat, ncol_block=ncol_block_mat, force_block=.TRUE.)
     END IF
 
     NULLIFY(fm_mat_S)
-    CALL cp_fm_create(fm_mat_S,fm_struct,name="fm_mat_S",error=error)
+    CALL cp_fm_create(fm_mat_S,fm_struct,name="fm_mat_S")
 
-    CALL cp_fm_set_all(matrix=fm_mat_S,alpha=0.0_dp,error=error)
+    CALL cp_fm_set_all(matrix=fm_mat_S,alpha=0.0_dp)
 
     ! fill the matrix
     CALL cp_fm_get_info(matrix=fm_mat_S,&
@@ -941,16 +921,14 @@ MODULE rpa_ri_gpw
                         row_indices=row_indices,&
                         col_indices=col_indices,&
                         nrow_block=nrow_block,&
-                        ncol_block=ncol_block,&
-                        error=error)
+                        ncol_block=ncol_block)
     myprow=fm_mat_S%matrix_struct%context%mepos(1)
     mypcol=fm_mat_S%matrix_struct%context%mepos(2)
     nprow =fm_mat_S%matrix_struct%context%num_pe(1)
     npcol =fm_mat_S%matrix_struct%context%num_pe(2)
 
     ! create the RPA proc_map
-    ALLOCATE(RPA_proc_map(-para_env_RPA%num_pe:2*para_env_RPA%num_pe-1),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
+    ALLOCATE(RPA_proc_map(-para_env_RPA%num_pe:2*para_env_RPA%num_pe-1))
     RPA_proc_map=0
     DO i=0,para_env_RPA%num_pe-1
       RPA_proc_map(i)=i
@@ -959,14 +937,11 @@ MODULE rpa_ri_gpw
     END DO
 
     ! create the info array, first index: 1-> L info, 2-> ia info
-    ALLOCATE(RPA_info_start(2,0:para_env_RPA%num_pe-1),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
+    ALLOCATE(RPA_info_start(2,0:para_env_RPA%num_pe-1))
     RPA_info_start=0
-    ALLOCATE(RPA_info_end(2,0:para_env_RPA%num_pe-1),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
+    ALLOCATE(RPA_info_end(2,0:para_env_RPA%num_pe-1))
     RPA_info_end=0
-    ALLOCATE(RPA_info_size(2,0:para_env_RPA%num_pe-1),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
+    ALLOCATE(RPA_info_size(2,0:para_env_RPA%num_pe-1))
     RPA_info_size=0
 
     RPA_info_start(1,para_env_RPA%mepos)=my_group_L_start
@@ -987,11 +962,9 @@ MODULE rpa_ri_gpw
       ! new replication scheme
       ! 0) create array with processes positions
       CALL timeset(routineN//"_info",handle3)
-      ALLOCATE(grid_2_mepos(0:nprow-1,0:npcol-1),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
+      ALLOCATE(grid_2_mepos(0:nprow-1,0:npcol-1))
       grid_2_mepos=0
-      ALLOCATE(mepos_2_grid(0:para_env_RPA%num_pe-1,2),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
+      ALLOCATE(mepos_2_grid(0:para_env_RPA%num_pe-1,2))
       mepos_2_grid=0
 
       grid_2_mepos(myprow,mypcol)=para_env_RPA%mepos
@@ -1002,8 +975,7 @@ MODULE rpa_ri_gpw
       CALL mp_sum(mepos_2_grid,para_env_RPA%group)
 
       ! 1) loop over my local data and define a map for the proc to send data
-      ALLOCATE(map_send_size(0:para_env_RPA%num_pe-1),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
+      ALLOCATE(map_send_size(0:para_env_RPA%num_pe-1))
       map_send_size=0
       DO jjB=my_group_L_start, my_group_L_end
         send_pcol=cp_fm_indxg2p(jjB,ncol_block,dummy_proc,&
@@ -1017,12 +989,10 @@ MODULE rpa_ri_gpw
       END DO  
 
       ! 2) loop over my local data of fm_mat_S and define a map for the proc from which rec data
-      ALLOCATE(map_rec_size(0:para_env_RPA%num_pe-1),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
+      ALLOCATE(map_rec_size(0:para_env_RPA%num_pe-1))
       map_rec_size=0
       mepos_in_RPA_group=MOD(color_sub,integ_group_size)
-      ALLOCATE(group_grid_2_mepos(0:para_env_sub%num_pe-1,0:integ_group_size-1),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
+      ALLOCATE(group_grid_2_mepos(0:para_env_sub%num_pe-1,0:integ_group_size-1))
       group_grid_2_mepos=0
       group_grid_2_mepos(para_env_sub%mepos,mepos_in_RPA_group)=para_env_RPA%mepos
       CALL mp_sum(group_grid_2_mepos,para_env_RPA%group)
@@ -1093,13 +1063,11 @@ MODULE rpa_ri_gpw
         END IF
       END DO
 
-      ALLOCATE(buffer_send(number_of_send),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
+      ALLOCATE(buffer_send(number_of_send))
 
       ! this array given a pair (ref_send_prow,ref_send_pcol) returns
       ! the position in the buffer_send associated to that process
-      ALLOCATE(grid_ref_2_send_pos(0:nprow-1,0:npcol-1),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
+      ALLOCATE(grid_ref_2_send_pos(0:nprow-1,0:npcol-1))
       grid_ref_2_send_pos=0
 
       send_counter=0
@@ -1110,8 +1078,7 @@ MODULE rpa_ri_gpw
         IF(map_send_size(proc_send)>0) THEN
           send_counter=send_counter+1
           ! prepare the sending buffer
-          ALLOCATE(buffer_send(send_counter)%msg(size_send_buffer),STAT=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
+          ALLOCATE(buffer_send(send_counter)%msg(size_send_buffer))
           buffer_send(send_counter)%msg=0.0_dp
           buffer_send(send_counter)%proc=proc_send
 
@@ -1140,8 +1107,7 @@ MODULE rpa_ri_gpw
 
       ! loop over the locally held data and fill the buffer_send
       ! for doing that we need an array index 
-      ALLOCATE(iii_vet(number_of_send),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
+      ALLOCATE(iii_vet(number_of_send))
     
       iii_vet=0
       DO iiB=my_ia_start, my_ia_end
@@ -1175,8 +1141,7 @@ MODULE rpa_ri_gpw
         END IF
       END DO
   
-      ALLOCATE(buffer_rec(number_of_rec),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
+      ALLOCATE(buffer_rec(number_of_rec))
 
       rec_counter=0
       DO proc_shift=1, para_env_RPA%num_pe-1
@@ -1186,8 +1151,7 @@ MODULE rpa_ri_gpw
         IF(map_rec_size(proc_receive)>0) THEN
           rec_counter=rec_counter+1
           ! prepare the buffer for receive
-          ALLOCATE(buffer_rec(rec_counter)%msg(size_rec_buffer),STAT=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
+          ALLOCATE(buffer_rec(rec_counter)%msg(size_rec_buffer))
           buffer_rec(rec_counter)%msg=0.0_dp
           buffer_rec(rec_counter)%proc=proc_receive
 
@@ -1197,8 +1161,7 @@ MODULE rpa_ri_gpw
       END DO
 
       ! 6) send data
-      ALLOCATE(req_send(number_of_send),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
+      ALLOCATE(req_send(number_of_send))
       send_counter=0
       DO proc_shift=1, para_env_RPA%num_pe-1
         proc_send=RPA_proc_map(para_env_RPA%mepos+proc_shift)
@@ -1220,8 +1183,7 @@ MODULE rpa_ri_gpw
         IF(ABS(row_indices(iiB+1)-row_indices(iiB))==1) CYCLE
         my_num_row_blocks=my_num_row_blocks+1
       END DO
-      ALLOCATE(blocks_ranges_row(2,my_num_row_blocks),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
+      ALLOCATE(blocks_ranges_row(2,my_num_row_blocks))
       blocks_ranges_row=0
       blocks_ranges_row(1,1)=row_indices(1)
       iii=1
@@ -1239,8 +1201,7 @@ MODULE rpa_ri_gpw
         IF(ABS(col_indices(jjB+1)-col_indices(jjB))==1) CYCLE
         my_num_col_blocks=my_num_col_blocks+1
       END DO
-      ALLOCATE(blocks_ranges_col(2,my_num_col_blocks),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
+      ALLOCATE(blocks_ranges_col(2,my_num_col_blocks))
       blocks_ranges_col=0
       blocks_ranges_col(1,1)=col_indices(1)
       iii=1
@@ -1272,8 +1233,7 @@ MODULE rpa_ri_gpw
               num_rec_cols=num_rec_cols+1
             END DO
           END DO
-          ALLOCATE(index_col_rec(num_rec_cols),STAT=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
+          ALLOCATE(index_col_rec(num_rec_cols))
           index_col_rec=0
           iii=0
           DO jjB=1, my_num_col_blocks
@@ -1396,8 +1356,7 @@ MODULE rpa_ri_gpw
         rec_ia_start=RPA_info_start(2,proc_receive)
         rec_ia_end=RPA_info_end(2,proc_receive)
 
-        ALLOCATE(BIb_C_rec(rec_ia_size,rec_L_size),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
+        ALLOCATE(BIb_C_rec(rec_ia_size,rec_L_size))
         BIb_C_rec=0.0_dp
 
         CALL  mp_sendrecv(BIb_C_2D,proc_send_static,&
@@ -1417,8 +1376,7 @@ MODULE rpa_ri_gpw
         END DO
 
         DEALLOCATE(BIb_C_2D)
-        ALLOCATE(BIb_C_2D(rec_ia_size,rec_L_size),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error_sub,failure)
+        ALLOCATE(BIb_C_2D(rec_ia_size,rec_L_size))
         BIb_C_2D(:,:)=BIb_C_rec
 
         DEALLOCATE(BIb_C_rec)
@@ -1437,56 +1395,56 @@ MODULE rpa_ri_gpw
     sub_sub_color=para_env_RPA%mepos
     CALL mp_comm_split_direct(para_env%group,comm_exchange,sub_sub_color)
     NULLIFY(para_env_exchange)
-    CALL cp_para_env_create(para_env_exchange,comm_exchange,error=error_sub)
+    CALL cp_para_env_create(para_env_exchange,comm_exchange)
 
     CALL timeset(routineN//"_sum",handle2)
     CALL mp_sum(fm_mat_S%local_data,para_env_exchange%group)
     CALL timestop(handle2)
 
-    CALL cp_para_env_release(para_env_exchange,error=error_sub)
+    CALL cp_para_env_release(para_env_exchange)
 
     ! create the twin matrix for the mat-mat-mul (mat_Q)
-    !XXX CALL cp_fm_create(fm_mat_G,fm_struct,name="fm_mat_G",error=error)
-    !XXX CALL cp_fm_set_all(matrix=fm_mat_G,alpha=0.0_dp,error=error)
+    !XXX CALL cp_fm_create(fm_mat_G,fm_struct,name="fm_mat_G")
+    !XXX CALL cp_fm_set_all(matrix=fm_mat_G,alpha=0.0_dp)
 
-    CALL cp_fm_struct_release(fm_struct,error=error)
+    CALL cp_fm_struct_release(fm_struct)
     
     IF(.NOT. my_gw_open_shell) THEN
       ! create the Q matrix dimen_RIxdimen_RI where the result of the mat-mat-mult will be stored
       NULLIFY(fm_mat_Q_gemm)
       NULLIFY(fm_struct)
       !CALL cp_fm_struct_create(fm_struct,context=blacs_env,nrow_global=dimen_RI,&
-      !                         ncol_global=dimen_RI,para_env=para_env_RPA,error=error)
+      !                         ncol_global=dimen_RI,para_env=para_env_RPA)
       CALL cp_fm_struct_create(fm_struct,context=blacs_env,nrow_global=dimen_RI,&
                                ncol_global=dimen_RI,para_env=para_env_RPA,&
-                               nrow_block=nrow_block_mat, ncol_block=ncol_block_mat, force_block=.TRUE.,error=error)
-      CALL cp_fm_create(fm_mat_Q_gemm,fm_struct,name="fm_mat_Q_gemm",error=error)
-      CALL cp_fm_struct_release(fm_struct,error=error)
+                               nrow_block=nrow_block_mat, ncol_block=ncol_block_mat, force_block=.TRUE.)
+      CALL cp_fm_create(fm_mat_Q_gemm,fm_struct,name="fm_mat_Q_gemm")
+      CALL cp_fm_struct_release(fm_struct)
   
-      CALL cp_fm_set_all(matrix=fm_mat_Q_gemm,alpha=0.0_dp,error=error)
+      CALL cp_fm_set_all(matrix=fm_mat_Q_gemm,alpha=0.0_dp)
   
       ! create the Q matrix with a different blacs env
       NULLIFY(blacs_env_Q)
       IF(my_blacs_ext) THEN 
         blacs_env_Q=>blacs_env_ext
       ELSE
-        CALL cp_blacs_env_create(blacs_env=blacs_env_Q, para_env=para_env_RPA, error=error)
+        CALL cp_blacs_env_create(blacs_env=blacs_env_Q, para_env=para_env_RPA)
       END IF
   
       NULLIFY(fm_mat_Q)
       NULLIFY(fm_struct)
       CALL cp_fm_struct_create(fm_struct,context=blacs_env_Q,nrow_global=dimen_RI,&
-                               ncol_global=dimen_RI,para_env=para_env_RPA,error=error)
-      CALL cp_fm_create(fm_mat_Q,fm_struct,name="fm_mat_Q",error=error)
+                               ncol_global=dimen_RI,para_env=para_env_RPA)
+      CALL cp_fm_create(fm_mat_Q,fm_struct,name="fm_mat_Q")
   
-      CALL cp_fm_struct_release(fm_struct,error=error)
+      CALL cp_fm_struct_release(fm_struct)
   
-      CALL cp_fm_set_all(matrix=fm_mat_Q,alpha=0.0_dp,error=error)
+      CALL cp_fm_set_all(matrix=fm_mat_Q,alpha=0.0_dp)
     END IF
 
     ! release blacs_env
-    IF(.NOT.my_blacs_ext) CALL cp_blacs_env_release(blacs_env_Q,error=error)
-    IF(.NOT.my_blacs_S_ext) CALL cp_blacs_env_release(blacs_env,error=error)
+    IF(.NOT.my_blacs_ext) CALL cp_blacs_env_release(blacs_env_Q)
+    IF(.NOT.my_blacs_S_ext) CALL cp_blacs_env_release(blacs_env)
 
     CALL timestop(handle)
 
@@ -1526,7 +1484,6 @@ MODULE rpa_ri_gpw
 !> \param max_iter_fit ...
 !> \param mm_style ...
 !> \param do_minimax_quad ...
-!> \param error ...
 !> \param homo_beta ...
 !> \param virtual_beta ...
 !> \param dimen_ia_beta ...
@@ -1544,7 +1501,7 @@ MODULE rpa_ri_gpw
                                    fm_mat_S,fm_mat_Q_gemm,fm_mat_Q,fm_mat_S_gw,fm_mat_R_gw,&
                                    my_do_gw,gw_corr_lev_occ,gw_corr_lev_virt,num_poles,ext_scaling,omega_max_fit,&
                                    stop_crit,check_fit,fermi_level_offset,crossing_search,&
-                                   max_iter_fit,mm_style,do_minimax_quad,error,&
+                                   max_iter_fit,mm_style,do_minimax_quad,&
                                    homo_beta,virtual_beta,dimen_ia_beta,Eigenval_beta,fm_mat_S_beta,&
                                    fm_mat_Q_gemm_beta,fm_mat_Q_beta,fm_mat_S_gw_beta,&
                                    gw_corr_lev_occ_beta,gw_corr_lev_virt_beta)
@@ -1571,7 +1528,6 @@ MODULE rpa_ri_gpw
     INTEGER                                  :: crossing_search, &
                                                 max_iter_fit, mm_style
     LOGICAL                                  :: do_minimax_quad
-    TYPE(cp_error_type), INTENT(inout)       :: error
     INTEGER, OPTIONAL                        :: homo_beta, virtual_beta, &
                                                 dimen_ia_beta
     REAL(KIND=dp), DIMENSION(:), OPTIONAL    :: Eigenval_beta
@@ -1596,7 +1552,7 @@ MODULE rpa_ri_gpw
       j_global, jjB, jquad, m_global, m_global_beta, my_num_dgemm_call, &
       n_global, n_global_beta, n_level_gw, n_level_gw_ref, ncol_local, &
       nm_global, nmo, nrow_local, num_fit_points, num_var, number_of_rec, &
-      number_of_rec_beta, number_of_send, number_of_send_beta, stat
+      number_of_rec_beta, number_of_send, number_of_send_beta
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: map_rec_size, &
                                                 map_rec_size_beta, &
                                                 map_send_size, &
@@ -1605,8 +1561,7 @@ MODULE rpa_ri_gpw
     INTEGER, ALLOCATABLE, DIMENSION(:, :)    :: local_size_source, &
                                                 local_size_source_beta
     INTEGER, DIMENSION(:), POINTER           :: col_indices, row_indices
-    LOGICAL                                  :: failure, first_cycle, &
-                                                my_open_shell
+    LOGICAL                                  :: first_cycle, my_open_shell
     REAL(KIND=dp) :: a_scaling, actual_flop_rate, alpha, e_fermi, E_Range, &
       eigen_diff, Emax, Emax_beta, Emin, Emin_beta, FComega, my_flop_rate, &
       omega, omega_i, omega_old, sign_occ_virt, t_end, t_start
@@ -1623,7 +1578,6 @@ MODULE rpa_ri_gpw
                                                 buffer_send, buffer_send_beta
 
     CALL timeset(routineN,handle)
-    failure=.FALSE.
     
     my_open_shell=.FALSE.
     IF(PRESENT(homo_beta).AND.&
@@ -1634,21 +1588,16 @@ MODULE rpa_ri_gpw
        PRESENT(fm_mat_Q_gemm_beta).AND.&
        PRESENT(fm_mat_Q_beta)) my_open_shell=.TRUE.
 
-    ALLOCATE(tj(num_integ_points),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(tj(num_integ_points))
     tj=0.0_dp
-    ALLOCATE(wj(num_integ_points),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(wj(num_integ_points))
     wj=0.0_dp
-    ALLOCATE(Q_log(dimen_RI),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(trace_Qomega(dimen_RI),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(Q_log(dimen_RI))
+    ALLOCATE(trace_Qomega(dimen_RI))
   
     IF(do_minimax_quad) THEN
       ! MINIMAX quadrature
-      ALLOCATE(x_tw(2*num_integ_points),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(x_tw(2*num_integ_points))
       x_tw=0.0_dp
   
       Emin=Eigenval(homo+1)-Eigenval(homo)
@@ -1664,7 +1613,7 @@ MODULE rpa_ri_gpw
       E_Range=Emax/Emin
   
       ierr=0
-      CALL get_rpa_minimax_coeff(num_integ_points,E_Range,x_tw,ierr,error)
+      CALL get_rpa_minimax_coeff(num_integ_points,E_Range,x_tw,ierr)
   
       DO jquad=1, num_integ_points
         tj(jquad)=x_tw(jquad)
@@ -1698,14 +1647,14 @@ MODULE rpa_ri_gpw
   
       a_scaling=1.0_dp
       IF(my_open_shell) THEN
-        CALL calc_scaling_factor(a_scaling,para_env,para_env_RPA,homo,virtual,dimen_RI,dimen_ia,Eigenval,&
+        CALL calc_scaling_factor(a_scaling,para_env,para_env_RPA,homo,virtual,Eigenval,&
                                  num_integ_points,num_integ_group,color_rpa_group,&
-                                 tj,wj,fm_mat_S,error,&
+                                 tj,wj,fm_mat_S,&
                                  homo_beta,virtual_beta,dimen_ia_beta,Eigenval_beta,fm_mat_S_beta)
       ELSE
-        CALL calc_scaling_factor(a_scaling,para_env,para_env_RPA,homo,virtual,dimen_RI,dimen_ia,Eigenval,&
+        CALL calc_scaling_factor(a_scaling,para_env,para_env_RPA,homo,virtual,Eigenval,&
                                  num_integ_points,num_integ_group,color_rpa_group,&
-                                 tj,wj,fm_mat_S,error)
+                                 tj,wj,fm_mat_S)
       END IF
   
       ! for G0W0, we may set the scaling factor by hand 
@@ -1722,11 +1671,11 @@ MODULE rpa_ri_gpw
     ! initialize buffer for matrix redistribution
     CALL initialize_buffer(fm_mat_Q_gemm,fm_mat_Q,RPA_proc_map,buffer_rec,buffer_send,&
                            number_of_rec,number_of_send,&
-                           map_send_size,map_rec_size,local_size_source,para_env_RPA,error)
+                           map_send_size,map_rec_size,local_size_source,para_env_RPA)
     IF(my_open_shell) THEN
       CALL initialize_buffer(fm_mat_Q_gemm_beta,fm_mat_Q_beta,RPA_proc_map,buffer_rec_beta,buffer_send_beta,&
                              number_of_rec_beta,number_of_send_beta,&
-                             map_send_size_beta,map_rec_size_beta,local_size_source_beta,para_env_RPA,error)
+                             map_send_size_beta,map_rec_size_beta,local_size_source_beta,para_env_RPA)
     END IF
   
     IF(my_open_shell) THEN
@@ -1739,12 +1688,10 @@ MODULE rpa_ri_gpw
       nmo=homo+virtual
       gw_corr_lev_tot=gw_corr_lev_occ+gw_corr_lev_virt
 
-      ALLOCATE(Eigenval_scf(nmo),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(Eigenval_scf(nmo))
       Eigenval_scf(:) = Eigenval(:)
 
-      ALLOCATE(Eigenval_last(nmo),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(Eigenval_last(nmo))
       Eigenval_last(:) = Eigenval(:)
 
       ! in the case of HF_diag approach of X. Blase (PRB 83, 115103 (2011), Sec. IV), we subtract the
@@ -1759,12 +1706,10 @@ MODULE rpa_ri_gpw
 
       ! Eigenval for beta
       IF(my_open_shell) THEN
-        ALLOCATE(Eigenval_scf_beta(nmo),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(Eigenval_scf_beta(nmo))
         Eigenval_scf_beta(:) = Eigenval_beta(:)
   
-        ALLOCATE(Eigenval_last_beta(nmo),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(Eigenval_last_beta(nmo))
         Eigenval_last_beta(:) = Eigenval_beta(:)
   
         ! in the case of HF_diag approach of X. Blase (PRB 83, 115103 (2011), Sec. IV), we subtract the
@@ -1780,22 +1725,20 @@ MODULE rpa_ri_gpw
 
       ! create temporary matrix to store B*([1+Q(iw')]^-1-1), has the same size as B
       NULLIFY(fm_mat_S_gw_work)
-      CALL cp_fm_create(fm_mat_S_gw_work,fm_mat_S_gw%matrix_struct,error=error)
-      CALL cp_fm_set_all(matrix=fm_mat_S_gw_work,alpha=0.0_dp,error=error)
+      CALL cp_fm_create(fm_mat_S_gw_work,fm_mat_S_gw%matrix_struct)
+      CALL cp_fm_set_all(matrix=fm_mat_S_gw_work,alpha=0.0_dp)
 
       IF(my_open_shell) THEN
         NULLIFY(fm_mat_S_gw_work_beta)
-        CALL cp_fm_create(fm_mat_S_gw_work_beta,fm_mat_S_gw%matrix_struct,error=error)
-        CALL cp_fm_set_all(matrix=fm_mat_S_gw_work_beta,alpha=0.0_dp,error=error)
+        CALL cp_fm_create(fm_mat_S_gw_work_beta,fm_mat_S_gw%matrix_struct)
+        CALL cp_fm_set_all(matrix=fm_mat_S_gw_work_beta,alpha=0.0_dp)
       END IF
 
-      ALLOCATE(vec_W_gw(dimen_nm_gw),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(vec_W_gw(dimen_nm_gw))
       vec_W_gw=0.0_dp
 
       IF(my_open_shell) THEN
-        ALLOCATE(vec_W_gw_beta(dimen_nm_gw),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(vec_W_gw_beta(dimen_nm_gw))
         vec_W_gw_beta=0.0_dp
       END IF 
  
@@ -1803,8 +1746,7 @@ MODULE rpa_ri_gpw
       re_unit = (1.0_dp, 0.0_dp)
   
       ! fill the omega_frequency vector
-      ALLOCATE(vec_omega_gw(num_integ_points),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(vec_omega_gw(num_integ_points))
       vec_omega_gw=0.0_dp
   
       DO jquad=1,num_integ_points
@@ -1826,19 +1768,15 @@ MODULE rpa_ri_gpw
       END DO
   
       ! create new arrays containing omega values at which we calculate vec_Sigma_c_gw
-      ALLOCATE(vec_omega_fit_gw(num_fit_points),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(vec_omega_fit_gw(num_fit_points))
  
-      ALLOCATE(vec_omega_fit_gw_sign(num_fit_points),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(vec_omega_fit_gw_sign(num_fit_points))
  
-      ALLOCATE(vec_Sigma_c_gw(gw_corr_lev_tot,num_fit_points),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(vec_Sigma_c_gw(gw_corr_lev_tot,num_fit_points))
       vec_Sigma_c_gw=(0.0_dp,0.0_dp)
  
       IF(my_open_shell) THEN
-        ALLOCATE(vec_Sigma_c_gw_beta(gw_corr_lev_tot,num_fit_points),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(vec_Sigma_c_gw_beta(gw_corr_lev_tot,num_fit_points))
         vec_Sigma_c_gw_beta=(0.0_dp,0.0_dp)
       END IF
 
@@ -1855,46 +1793,34 @@ MODULE rpa_ri_gpw
  
       ! arrays storing the complex fit parameters a_0, a_1, b_1, a_2, b_2, ...
       num_var=2*num_poles+1
-      ALLOCATE(Lambda(num_var),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(Lambda(num_var))
       Lambda=(0.0_dp,0.0_dp)
-      ALLOCATE(Lambda_without_offset(num_var),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(Lambda_without_offset(num_var))
       Lambda_without_offset=(0.0_dp,0.0_dp)
-      ALLOCATE(Lambda_Re(num_var),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(Lambda_Re(num_var))
       Lambda_Re=0.0_dp
-      ALLOCATE(Lambda_Im(num_var),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(Lambda_Im(num_var))
       Lambda_Im=0.0_dp
 
       ! arrays storing the correlation self-energy, stat. error and z-shot value
-      ALLOCATE(vec_gw_energ(gw_corr_lev_tot),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(vec_gw_energ(gw_corr_lev_tot))
       vec_gw_energ=0.0_dp
-      ALLOCATE(vec_gw_energ_error_fit(gw_corr_lev_tot),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(vec_gw_energ_error_fit(gw_corr_lev_tot))
       vec_gw_energ_error_fit=0.0_dp
-      ALLOCATE(z_value(gw_corr_lev_tot),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(z_value(gw_corr_lev_tot))
       z_value=0.0_dp
-      ALLOCATE(m_value(gw_corr_lev_tot),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(m_value(gw_corr_lev_tot))
       m_value=0.0_dp
 
       ! the same for beta
       IF(my_open_shell) THEN
-        ALLOCATE(vec_gw_energ_beta(gw_corr_lev_tot),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(vec_gw_energ_beta(gw_corr_lev_tot))
         vec_gw_energ_beta=0.0_dp
-        ALLOCATE(vec_gw_energ_error_fit_beta(gw_corr_lev_tot),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(vec_gw_energ_error_fit_beta(gw_corr_lev_tot))
         vec_gw_energ_error_fit_beta=0.0_dp
-        ALLOCATE(z_value_beta(gw_corr_lev_tot),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(z_value_beta(gw_corr_lev_tot))
         z_value_beta=0.0_dp
-        ALLOCATE(m_value_beta(gw_corr_lev_tot),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(m_value_beta(gw_corr_lev_tot))
         m_value_beta=0.0_dp
       END IF
  
@@ -1944,15 +1870,15 @@ MODULE rpa_ri_gpw
         END IF
   
         !XXX ! copy fm_mat_S into fm_mat_G
-        !XXX CALL cp_fm_to_fm(source=fm_mat_S,destination=fm_mat_G,error=error)
+        !XXX CALL cp_fm_to_fm(source=fm_mat_S,destination=fm_mat_G)
   
         !XXX ! get info of fm_mat_G
         !XXX CALL cp_fm_get_info(matrix=fm_mat_G,&
         !XXX                     nrow_local=nrow_local,&
         !XXX                     ncol_local=ncol_local,&
         !XXX                     row_indices=row_indices,&
-        !XXX                     col_indices=col_indices,&
-        !XXX                     error=error)
+        !XXX                     col_indices=col_indices)
+        !XXX                     
 
 
         
@@ -1961,8 +1887,7 @@ MODULE rpa_ri_gpw
                             nrow_local=nrow_local,&
                             ncol_local=ncol_local,&
                             row_indices=row_indices,&
-                            col_indices=col_indices,&
-                            error=error)
+                            col_indices=col_indices)
 
 
         ! remove eigenvalue part of S matrix from the last eigenvalue self-c. cycle
@@ -2038,13 +1963,13 @@ MODULE rpa_ri_gpw
            ! waste-fully computes the full symmetrix matrix, but maybe faster than cp_fm_syrk for optimized cp_fm_gemm
            CALL cp_gemm(transa="T",transb="N",m=dimen_RI,n=dimen_RI,k=dimen_ia,alpha=alpha,&
                            matrix_a=fm_mat_S,matrix_b=fm_mat_S,beta=0.0_dp,&
-                           matrix_c=fm_mat_Q_gemm,error=error)
+                           matrix_c=fm_mat_Q_gemm)
         CASE(wfc_mm_style_syrk)
            ! will only compute the upper half of the matrix, which is fine, since we only use it for cholesky later
            CALL cp_fm_syrk(uplo='U',trans='T',k=dimen_ia,alpha=alpha,matrix_a=fm_mat_S,&
-                           ia=1,ja=1,beta=0.0_dp,matrix_c=fm_mat_Q_gemm,error=error)
+                           ia=1,ja=1,beta=0.0_dp,matrix_c=fm_mat_Q_gemm)
         CASE DEFAULT
-           CPPostcondition(.FALSE.,cp_failure_level,routineP,error,failure)
+           CPABORT("")
         END SELECT
         t_end=m_walltime()
   
@@ -2054,30 +1979,29 @@ MODULE rpa_ri_gpw
         my_num_dgemm_call=my_num_dgemm_call+1
   
         ! copy/redistribute fm_mat_Q_gemm to fm_mat_Q
-        CALL cp_fm_set_all(matrix=fm_mat_Q,alpha=0.0_dp,error=error)
+        CALL cp_fm_set_all(matrix=fm_mat_Q,alpha=0.0_dp)
         CALL fm_redistribute(fm_mat_Q_gemm,fm_mat_Q,RPA_proc_map,buffer_rec,buffer_send,&
-                             number_of_rec,number_of_send,&
-                             map_send_size,map_rec_size,local_size_source,para_env_RPA,error)
+                             number_of_send,&
+                             map_send_size,map_rec_size,local_size_source,para_env_RPA)
  
         IF(my_open_shell) THEN
           ! the same for the beta spin
           !XXX ! copy fm_mat_S into fm_mat_G
-          !XXX CALL cp_fm_to_fm(source=fm_mat_S_beta,destination=fm_mat_G_beta,error=error)
+          !XXX CALL cp_fm_to_fm(source=fm_mat_S_beta,destination=fm_mat_G_beta)
           !XXX ! get info of fm_mat_G_beta
           !XXX CALL cp_fm_get_info(matrix=fm_mat_G_beta,&
           !XXX                     nrow_local=nrow_local,&
           !XXX                     ncol_local=ncol_local,&
           !XXX                     row_indices=row_indices,&
-          !XXX                     col_indices=col_indices,&
-          !XXX                     error=error)
+          !XXX                     col_indices=col_indices)
+          !XXX                     
   
           ! get info of fm_mat_S_beta
           CALL cp_fm_get_info(matrix=fm_mat_S_beta,&
                               nrow_local=nrow_local,&
                               ncol_local=ncol_local,&
                               row_indices=row_indices,&
-                              col_indices=col_indices,&
-                              error=error)
+                              col_indices=col_indices)
   
           ! update G matrix with the new value of omega
           IF(first_cycle) THEN
@@ -2123,12 +2047,12 @@ MODULE rpa_ri_gpw
           CASE(wfc_mm_style_gemm)
              CALL cp_gemm(transa="T",transb="N",m=dimen_RI,n=dimen_RI,k=dimen_ia_beta,alpha=alpha,&
                              matrix_a=fm_mat_S_beta,matrix_b=fm_mat_S_beta,beta=0.0_dp,&
-                             matrix_c=fm_mat_Q_gemm_beta,error=error)
+                             matrix_c=fm_mat_Q_gemm_beta)
           CASE(wfc_mm_style_syrk)
              CALL cp_fm_syrk(uplo='U',trans='T',k=dimen_ia_beta,alpha=alpha,matrix_a=fm_mat_S_beta,&
-                             ia=1,ja=1,beta=0.0_dp,matrix_c=fm_mat_Q_gemm_beta,error=error)
+                             ia=1,ja=1,beta=0.0_dp,matrix_c=fm_mat_Q_gemm_beta)
           CASE DEFAULT
-             CPPostcondition(.FALSE.,cp_failure_level,routineP,error,failure)
+             CPABORT("")
           END SELECT
           t_end=m_walltime()
           actual_flop_rate=2.0_dp*REAL(dimen_ia_beta,KIND=dp)*dimen_RI*REAL(dimen_RI,KIND=dp)/(MAX(0.01_dp,t_end-t_start))
@@ -2136,12 +2060,12 @@ MODULE rpa_ri_gpw
           my_num_dgemm_call=my_num_dgemm_call+1
 
           ! copy/redistribute fm_mat_Q_gemm to fm_mat_Q
-          CALL cp_fm_set_all(matrix=fm_mat_Q_beta,alpha=0.0_dp,error=error)
+          CALL cp_fm_set_all(matrix=fm_mat_Q_beta,alpha=0.0_dp)
           CALL fm_redistribute(fm_mat_Q_gemm_beta,fm_mat_Q_beta,RPA_proc_map,buffer_rec_beta,buffer_send_beta,&
-                               number_of_rec_beta,number_of_send_beta,&
-                               map_send_size_beta,map_rec_size_beta,local_size_source_beta,para_env_RPA,error)
+                               number_of_send_beta,&
+                               map_send_size_beta,map_rec_size_beta,local_size_source_beta,para_env_RPA)
   
-          CALL cp_fm_scale_and_add(alpha=1.0_dp,matrix_a=fm_mat_Q,beta=1.0_dp,matrix_b=fm_mat_Q_beta,error=error)
+          CALL cp_fm_scale_and_add(alpha=1.0_dp,matrix_a=fm_mat_Q,beta=1.0_dp,matrix_b=fm_mat_Q_beta)
           ! fm_mat_Q%local_data=fm_mat_Q%local_data+fm_mat_Q_beta%local_data        
   
         END IF
@@ -2151,8 +2075,7 @@ MODULE rpa_ri_gpw
                             nrow_local=nrow_local,&
                             ncol_local=ncol_local,&
                             row_indices=row_indices,&
-                            col_indices=col_indices,&
-                            error=error)
+                            col_indices=col_indices)
   
         ! calcualte the trace of Q and add 1 on the diagonal
         trace_Qomega=0.0_dp
@@ -2171,16 +2094,15 @@ MODULE rpa_ri_gpw
         CALL mp_sum(trace_Qomega,para_env_RPA%group)
   
         ! calculate Trace(Log(Matrix)) as Log(DET(Matrix)) via cholesky decomposition
-        CALL cp_fm_cholesky_decompose(matrix=fm_mat_Q, n=dimen_RI, info_out=info_chol, error=error)
-        CPPostcondition(info_chol==0,cp_failure_level,routineP,error,failure)
+        CALL cp_fm_cholesky_decompose(matrix=fm_mat_Q, n=dimen_RI, info_out=info_chol)
+        CPASSERT(info_chol==0)
   
         ! get info of cholesky_decomposed(fm_mat_Q)
         CALL cp_fm_get_info(matrix=fm_mat_Q,&
                             nrow_local=nrow_local,&
                             ncol_local=ncol_local,&
                             row_indices=row_indices,&
-                            col_indices=col_indices,&
-                            error=error)
+                            col_indices=col_indices)
   
         Q_log=0.0_dp
         !$OMP PARALLEL DO DEFAULT(NONE) PRIVATE(jjB,iiB,i_global,j_global) &
@@ -2216,9 +2138,9 @@ MODULE rpa_ri_gpw
           CALL timeset(routineN//"_G0W0_matrix_operations",handle2)
   
           ! calculate [1+Q(iw')]^-1
-          CALL cp_fm_cholesky_invert(fm_mat_Q,error=error)
+          CALL cp_fm_cholesky_invert(fm_mat_Q)
           ! symmetrize the result, fm_mat_R_gw is only temporary work matrix
-          CALL cp_fm_upper_to_full(fm_mat_Q,fm_mat_R_gw,error=error) 
+          CALL cp_fm_upper_to_full(fm_mat_Q,fm_mat_R_gw) 
   
           ! subtract 1 from the diagonal to get rid of exchange self-energy
           !$OMP PARALLEL DO DEFAULT(NONE) PRIVATE(jjB,iiB,i_global,j_global) &
@@ -2234,23 +2156,23 @@ MODULE rpa_ri_gpw
           END DO
   
           ! copy/redistribute fm_mat_Q to fm_mat_Q_gemm
-  !        CALL cp_fm_set_all(matrix=fm_mat_Q_gemm,alpha=0.0_dp,error=error)
+  !        CALL cp_fm_set_all(matrix=fm_mat_Q_gemm,alpha=0.0_dp)
   !        CALL fm_redistribute(fm_mat_Q,fm_mat_Q_gemm,RPA_proc_map,buffer_rec_gw,buffer_send_gw,&
-  !                             number_of_rec_gw,number_of_send_gw,&
-  !                             map_send_size_gw,map_rec_size_gw,local_size_source_gw,para_env_RPA,error)
+  !                             number_of_send_gw,&
+  !                             map_send_size_gw,map_rec_size_gw,local_size_source_gw,para_env_RPA)
   
           ! S_work_(nm)Q = B_(nm)P * ([1+Q]^-1-1)_PQ
           CALL timeset(routineN//"_mult_B_f(Pi)_gw",handle3)
   !        CALL cp_gemm(transa="N",transb="N",m=dimen_nm_gw,n=dimen_RI,k=dimen_RI,alpha=1.0_dp,&
   !                     matrix_a=fm_mat_S_gw,matrix_b=fm_mat_Q_gemm,beta=0.0_dp,&
-  !                     matrix_c=fm_mat_S_gw_work,error=error)
+  !                     matrix_c=fm_mat_S_gw_work)
           CALL cp_gemm(transa="N",transb="N",m=dimen_nm_gw,n=dimen_RI,k=dimen_RI,alpha=1.0_dp,&
                        matrix_a=fm_mat_S_gw,matrix_b=fm_mat_Q,beta=0.0_dp,&
-                       matrix_c=fm_mat_S_gw_work,error=error)
+                       matrix_c=fm_mat_S_gw_work)
           IF(my_open_shell) THEN 
             CALL cp_gemm(transa="N",transb="N",m=dimen_nm_gw,n=dimen_RI,k=dimen_RI,alpha=1.0_dp,&
                          matrix_a=fm_mat_S_gw_beta,matrix_b=fm_mat_Q,beta=0.0_dp,&
-                         matrix_c=fm_mat_S_gw_work_beta,error=error)
+                         matrix_c=fm_mat_S_gw_work_beta)
           END IF
 
           CALL timestop(handle3)
@@ -2261,8 +2183,7 @@ MODULE rpa_ri_gpw
                               nrow_local=nrow_local,&
                               ncol_local=ncol_local,&
                               row_indices=row_indices,&
-                              col_indices=col_indices,&
-                              error=error)
+                              col_indices=col_indices)
 
           vec_W_gw = 0.0_dp
           IF(my_open_shell) THEN
@@ -2386,14 +2307,14 @@ MODULE rpa_ri_gpw
           CALL fit_and_continuation(vec_gw_energ,vec_gw_energ_error_fit,vec_omega_fit_gw,&
                     z_value,m_value,vec_Sigma_c_gw,Eigenval,n_level_gw,gw_corr_lev_occ,num_poles,&
                     num_fit_points,max_iter_fit,crossing_search,homo,unit_nr,check_fit,stop_crit,&
-                    fermi_level_offset,error)
+                    fermi_level_offset)
 
           IF(my_open_shell) THEN
             CALL fit_and_continuation(vec_gw_energ_beta,vec_gw_energ_error_fit_beta,vec_omega_fit_gw,&
                       z_value_beta,m_value_beta,vec_Sigma_c_gw_beta,Eigenval_beta,n_level_gw,&
                       gw_corr_lev_occ_beta,num_poles,&
                       num_fit_points,max_iter_fit,crossing_search,homo_beta,unit_nr,check_fit,stop_crit,&
-                      fermi_level_offset,error)
+                      fermi_level_offset)
 
           END IF
 
@@ -2420,21 +2341,20 @@ MODULE rpa_ri_gpw
                       z_value,m_value,mp2_env%ri_g0w0%vec_Sigma_x_minus_vxc_gw(:,1),Eigenval,&
                       Eigenval_last,Eigenval_scf,gw_corr_lev_occ,gw_corr_lev_virt,gw_corr_lev_tot,&
                       count_ev_sc_GW,crossing_search,homo,nmo,unit_nr,mp2_env%ri_g0w0%print_gw_details,&
-                      error,do_alpha=.TRUE.)
+                      do_alpha=.TRUE.)
 
           CALL print_and_update_for_ev_sc(vec_gw_energ_beta,vec_gw_energ_error_fit_beta,&
                       z_value_beta,m_value_beta,mp2_env%ri_g0w0%vec_Sigma_x_minus_vxc_gw(:,2),Eigenval_beta,&
                       Eigenval_last_beta,Eigenval_scf_beta,gw_corr_lev_occ_beta,gw_corr_lev_virt_beta,gw_corr_lev_tot,&
                       count_ev_sc_GW,crossing_search,homo_beta,nmo,unit_nr,mp2_env%ri_g0w0%print_gw_details,&
-                      error,do_beta=.TRUE.)
+                      do_beta=.TRUE.)
 
         ELSE 
 
           CALL print_and_update_for_ev_sc(vec_gw_energ,vec_gw_energ_error_fit,&
                       z_value,m_value,mp2_env%ri_g0w0%vec_Sigma_x_minus_vxc_gw(:,1),Eigenval,&
                       Eigenval_last,Eigenval_scf,gw_corr_lev_occ,gw_corr_lev_virt,gw_corr_lev_tot,&
-                      count_ev_sc_GW,crossing_search,homo,nmo,unit_nr,mp2_env%ri_g0w0%print_gw_details,&
-                      error)
+                      count_ev_sc_GW,crossing_search,homo,nmo,unit_nr,mp2_env%ri_g0w0%print_gw_details)
 
         END IF
 
@@ -2448,16 +2368,16 @@ MODULE rpa_ri_gpw
     ! release buffer
     CALL release_buffer(RPA_proc_map,buffer_rec,buffer_send,&
                         number_of_rec,number_of_send,&
-                        map_send_size,map_rec_size,local_size_source,error)
+                        map_send_size,map_rec_size,local_size_source)
 
     IF(my_open_shell) THEN
       CALL release_buffer(RPA_proc_map,buffer_rec_beta,buffer_send_beta,&
                           number_of_rec_beta,number_of_send_beta,&
-                          map_send_size_beta,map_rec_size_beta,local_size_source_beta,error)
+                          map_send_size_beta,map_rec_size_beta,local_size_source_beta)
     END IF
  
     IF(my_do_gw) THEN
-      CALL cp_fm_release(fm_mat_S_gw_work,error=error)
+      CALL cp_fm_release(fm_mat_S_gw_work)
       DEALLOCATE(vec_Sigma_c_gw)
       DEALLOCATE(vec_omega_fit_gw)
       DEALLOCATE(vec_omega_fit_gw_sign)
@@ -2473,7 +2393,7 @@ MODULE rpa_ri_gpw
       DEALLOCATE(Eigenval_last)
       DEALLOCATE(Eigenval_scf)
       IF(my_open_shell) THEN
-        CALL cp_fm_release(fm_mat_S_gw_work_beta,error=error)
+        CALL cp_fm_release(fm_mat_S_gw_work_beta)
         DEALLOCATE(vec_W_gw_beta)
         DEALLOCATE(vec_Sigma_c_gw_beta)
         DEALLOCATE(z_value_beta)
@@ -2501,8 +2421,6 @@ MODULE rpa_ri_gpw
 !> \param para_env_RPA ...
 !> \param homo ...
 !> \param virtual ...
-!> \param dimen_RI ...
-!> \param dimen_ia ...
 !> \param Eigenval ...
 !> \param num_integ_points ...
 !> \param num_integ_group ...
@@ -2510,28 +2428,25 @@ MODULE rpa_ri_gpw
 !> \param tj_ext ...
 !> \param wj_ext ...
 !> \param fm_mat_S ...
-!> \param error ...
 !> \param homo_beta ...
 !> \param virtual_beta ...
 !> \param dimen_ia_beta ...
 !> \param Eigenval_beta ...
 !> \param fm_mat_S_beta ...
 ! *****************************************************************************
-    SUBROUTINE  calc_scaling_factor(a_scaling_ext,para_env,para_env_RPA,homo,virtual,dimen_RI,dimen_ia,Eigenval,&
+    SUBROUTINE  calc_scaling_factor(a_scaling_ext,para_env,para_env_RPA,homo,virtual,Eigenval,&
                                     num_integ_points,num_integ_group,color_rpa_group,&
-                                    tj_ext,wj_ext,fm_mat_S,error,&
+                                    tj_ext,wj_ext,fm_mat_S,&
                                     homo_beta,virtual_beta,dimen_ia_beta,Eigenval_beta,fm_mat_S_beta)
     REAL(KIND=dp)                            :: a_scaling_ext
     TYPE(cp_para_env_type), POINTER          :: para_env, para_env_RPA
-    INTEGER                                  :: homo, virtual, dimen_RI, &
-                                                dimen_ia
+    INTEGER                                  :: homo, virtual
     REAL(KIND=dp), DIMENSION(:)              :: Eigenval
     INTEGER                                  :: num_integ_points, &
                                                 num_integ_group, &
                                                 color_rpa_group
     REAL(KIND=dp), ALLOCATABLE, DIMENSION(:) :: tj_ext, wj_ext
     TYPE(cp_fm_type), POINTER                :: fm_mat_S
-    TYPE(cp_error_type), INTENT(inout)       :: error
     INTEGER, OPTIONAL                        :: homo_beta, virtual_beta, &
                                                 dimen_ia_beta
     REAL(KIND=dp), DIMENSION(:), OPTIONAL    :: Eigenval_beta
@@ -2543,11 +2458,11 @@ MODULE rpa_ri_gpw
     INTEGER :: avirt, color_col, color_col_beta, color_row, color_row_beta, &
       comm_col, comm_col_beta, comm_row, comm_row_beta, handle, i_global, &
       icycle, iiB, iocc, jjB, jquad, ncol_local, ncol_local_beta, nrow_local, &
-      nrow_local_beta, stat
+      nrow_local_beta
     INTEGER, DIMENSION(:), POINTER           :: col_indices, &
                                                 col_indices_beta, &
                                                 row_indices, row_indices_beta
-    LOGICAL                                  :: failure, my_open_shell
+    LOGICAL                                  :: my_open_shell
     REAL(KIND=dp) :: a_high, a_low, a_scaling, conv_param, eigen_diff, eps, &
       first_deriv, four, left_term, one, pig, right_term, right_term_ref, &
       right_term_ref_beta, step, two, zero
@@ -2560,7 +2475,6 @@ MODULE rpa_ri_gpw
                                                 para_env_row_beta
 
     CALL timeset(routineN,handle)
-    failure=.FALSE.
 
     my_open_shell=.FALSE.
     IF(PRESENT(homo_beta).AND.&
@@ -2576,14 +2490,11 @@ MODULE rpa_ri_gpw
     PIG=pi
     eps=1.0E-10_dp
 
-    ALLOCATE(cottj(num_integ_points),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(cottj(num_integ_points))
 
-    ALLOCATE(tj(num_integ_points),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(tj(num_integ_points))
 
-    ALLOCATE(wj(num_integ_points),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(wj(num_integ_points))
 
     ! calculate the cotangent of the abscissa tj
     DO jquad=1, num_integ_points
@@ -2595,17 +2506,15 @@ MODULE rpa_ri_gpw
     ! calculate the (ia|ia) RI integrals 
     ! ----------------------------------
     ! 1) get info fm_mat_S 
-    !XXX CALL cp_fm_to_fm(source=fm_mat_S,destination=fm_mat_G,error=error)
+    !XXX CALL cp_fm_to_fm(source=fm_mat_S,destination=fm_mat_G)
     CALL cp_fm_get_info(matrix=fm_mat_S,&
                         nrow_local=nrow_local,&
                         ncol_local=ncol_local,&
                         row_indices=row_indices,&
-                        col_indices=col_indices,&
-                        error=error)
+                        col_indices=col_indices)
 
     ! allocate the local buffer of iaia_RI integrals (dp kind)
-    ALLOCATE(iaia_RI_dp(nrow_local),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(iaia_RI_dp(nrow_local))
     iaia_RI_dp=0.0_dp
 
     ! 2) perform the local multiplication SUM_K (ia|K)*(ia|K)
@@ -2634,13 +2543,12 @@ MODULE rpa_ri_gpw
     color_row=fm_mat_S%matrix_struct%context%mepos(1)
     CALL mp_comm_split_direct(para_env_RPA%group,comm_row,color_row)
     NULLIFY(para_env_row)
-    CALL cp_para_env_create(para_env_row,comm_row,error=error)
+    CALL cp_para_env_create(para_env_row,comm_row)
     
     CALL mp_sum(iaia_RI_dp,para_env_row%group)
 
     ! convert the iaia_RI_dp into double-double precision
-    ALLOCATE(iaia_RI(nrow_local),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(iaia_RI(nrow_local))
     DO iiB=1, nrow_local
       iaia_RI(iiB)=iaia_RI_dp(iiB)
     END DO
@@ -2650,11 +2558,9 @@ MODULE rpa_ri_gpw
     ! 4) calculate the right hand term, D_ia is the matrix containing the 
     ! orbital energy differences, M_ia is the diagonal of the full RPA 'excitation'
     ! matrix 
-    ALLOCATE(D_ia(nrow_local),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(D_ia(nrow_local))
 
-    ALLOCATE(M_ia(nrow_local),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(M_ia(nrow_local))
 
     DO iiB=1, nrow_local
       i_global=row_indices(iiB)
@@ -2681,23 +2587,21 @@ MODULE rpa_ri_gpw
     color_col=fm_mat_S%matrix_struct%context%mepos(2)
     CALL mp_comm_split_direct(para_env_RPA%group,comm_col,color_col)
     NULLIFY(para_env_col)
-    CALL cp_para_env_create(para_env_col,comm_col,error=error)
+    CALL cp_para_env_create(para_env_col,comm_col)
 
     ! allocate communication array for columns
     CALL mp_sum(right_term_ref,para_env_col%group)    
 
     ! In the open shell case do point 1-2-3 for the beta spin
     IF(my_open_shell) THEN
-      !XXX CALL cp_fm_to_fm(source=fm_mat_S_beta,destination=fm_mat_G_beta,error=error)
+      !XXX CALL cp_fm_to_fm(source=fm_mat_S_beta,destination=fm_mat_G_beta)
       CALL cp_fm_get_info(matrix=fm_mat_S_beta,&
                           nrow_local=nrow_local_beta,&
                           ncol_local=ncol_local_beta,&
                           row_indices=row_indices_beta,&
-                          col_indices=col_indices_beta,&
-                          error=error)
+                          col_indices=col_indices_beta)
 
-      ALLOCATE(iaia_RI_dp_beta(nrow_local_beta),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(iaia_RI_dp_beta(nrow_local_beta))
       iaia_RI_dp_beta=0.0_dp
 
       DO jjB=1, ncol_local_beta
@@ -2709,22 +2613,19 @@ MODULE rpa_ri_gpw
       color_row_beta=fm_mat_S_beta%matrix_struct%context%mepos(1)
       CALL mp_comm_split_direct(para_env_RPA%group,comm_row_beta,color_row_beta)
       NULLIFY(para_env_row_beta)
-      CALL cp_para_env_create(para_env_row_beta,comm_row_beta,error=error)
+      CALL cp_para_env_create(para_env_row_beta,comm_row_beta)
 
       CALL mp_sum(iaia_RI_dp_beta,para_env_row_beta%group)
 
-      ALLOCATE(iaia_RI_beta(nrow_local_beta),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(iaia_RI_beta(nrow_local_beta))
       DO iiB=1, nrow_local_beta
         iaia_RI_beta(iiB)=iaia_RI_dp_beta(iiB)
       END DO
       DEALLOCATE(iaia_RI_dp_beta)
 
-      ALLOCATE(D_ia_beta(nrow_local_beta),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(D_ia_beta(nrow_local_beta))
 
-      ALLOCATE(M_ia_beta(nrow_local_beta),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(M_ia_beta(nrow_local_beta))
 
       DO iiB=1, nrow_local_beta
         i_global=row_indices_beta(iiB)
@@ -2750,7 +2651,7 @@ MODULE rpa_ri_gpw
       color_col_beta=fm_mat_S_beta%matrix_struct%context%mepos(2)
       CALL mp_comm_split_direct(para_env_RPA%group,comm_col_beta,color_col_beta)
       NULLIFY(para_env_col_beta)
-      CALL cp_para_env_create(para_env_col_beta,comm_col_beta,error=error)
+      CALL cp_para_env_create(para_env_col_beta,comm_col_beta)
 
       CALL mp_sum(right_term_ref_beta,para_env_col_beta%group)
 
@@ -2776,7 +2677,7 @@ MODULE rpa_ri_gpw
       a_scaling=a_high
  
       CALL calculate_objfunc(a_scaling,left_term,first_deriv,num_integ_points,my_open_shell,&
-                             ZERO,ONE,FOUR,PIG,M_ia,cottj,wj,D_ia,D_ia_beta,M_ia_beta,&
+                             ZERO,ONE,M_ia,cottj,wj,D_ia,D_ia_beta,M_ia_beta,&
                              nrow_local,nrow_local_beta,num_integ_group,color_rpa_group,&
                              para_env,para_env_row,para_env_row_beta)
       left_term=left_term/FOUR/PIG*a_scaling
@@ -2796,7 +2697,7 @@ MODULE rpa_ri_gpw
           a_scaling=(a_low+a_high)/2.0_dp
 
           CALL calculate_objfunc(a_scaling,left_term,first_deriv,num_integ_points,my_open_shell,&
-                                 ZERO,ONE,FOUR,PIG,M_ia,cottj,wj,D_ia,D_ia_beta,M_ia_beta,&
+                                 ZERO,ONE,M_ia,cottj,wj,D_ia,D_ia_beta,M_ia_beta,&
                                  nrow_local,nrow_local_beta,num_integ_group,color_rpa_group,&
                                  para_env,para_env_row,para_env_row_beta)
           left_term=left_term/FOUR/PIG*a_scaling
@@ -2827,15 +2728,15 @@ MODULE rpa_ri_gpw
     DEALLOCATE(iaia_RI)
     DEALLOCATE(D_ia)
     DEALLOCATE(M_ia)
-    CALL cp_para_env_release(para_env_row,error=error)   
-    CALL cp_para_env_release(para_env_col,error=error)
+    CALL cp_para_env_release(para_env_row)   
+    CALL cp_para_env_release(para_env_col)
 
     IF(my_open_shell) THEN
       DEALLOCATE(iaia_RI_beta)
       DEALLOCATE(D_ia_beta)
       DEALLOCATE(M_ia_beta)
-      CALL cp_para_env_release(para_env_row_beta,error=error)
-      CALL cp_para_env_release(para_env_col_beta,error=error)
+      CALL cp_para_env_release(para_env_row_beta)
+      CALL cp_para_env_release(para_env_col_beta)
     END IF
 
     CALL timestop(handle)
@@ -2851,8 +2752,6 @@ MODULE rpa_ri_gpw
 !> \param my_open_shell ...
 !> \param ZERO ...
 !> \param ONE ...
-!> \param FOUR ...
-!> \param PIG ...
 !> \param M_ia ...
 !> \param cottj ...
 !> \param wj ...
@@ -2868,14 +2767,14 @@ MODULE rpa_ri_gpw
 !> \param para_env_row_beta ...
 ! *****************************************************************************
     SUBROUTINE calculate_objfunc(a_scaling,left_term,first_deriv,num_integ_points,my_open_shell,&
-                                 ZERO,ONE,FOUR,PIG,M_ia,cottj,wj,D_ia,D_ia_beta,M_ia_beta,&
+                                 ZERO,ONE,M_ia,cottj,wj,D_ia,D_ia_beta,M_ia_beta,&
                                  nrow_local,nrow_local_beta,num_integ_group,color_rpa_group,&
                                  para_env,para_env_row,para_env_row_beta)
     REAL(KIND=dp)                            :: a_scaling, left_term, &
                                                 first_deriv
     INTEGER                                  :: num_integ_points
     LOGICAL                                  :: my_open_shell
-    REAL(KIND=dp)                            :: zero, one, four, pig
+    REAL(KIND=dp)                            :: zero, one
     REAL(KIND=dp), ALLOCATABLE, DIMENSION(:) :: M_ia, cottj, wj, D_ia, &
                                                 D_ia_beta, M_ia_beta
     INTEGER                                  :: nrow_local, nrow_local_beta, &
@@ -2951,10 +2850,9 @@ MODULE rpa_ri_gpw
 !> \param num_fit_points ...
 !> \param n_level_gw ...
 !> \param h  ...
-!> \param error ...
 ! *****************************************************************************
     SUBROUTINE calc_mat_N(N_ij,Lambda,Sigma_c,vec_omega_fit_gw,i,j,&
-                          num_poles,num_fit_points,n_level_gw,h,error)
+                          num_poles,num_fit_points,n_level_gw,h)
     REAL(KIND=dp)                            :: N_ij
     COMPLEX(KIND=dp), ALLOCATABLE, &
       DIMENSION(:)                           :: Lambda
@@ -2964,7 +2862,6 @@ MODULE rpa_ri_gpw
     INTEGER                                  :: i, j, num_poles, &
                                                 num_fit_points, n_level_gw
     REAL(KIND=dp)                            :: h
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'calc_mat_N', &
       routineP = moduleN//':'//routineN
@@ -2972,15 +2869,13 @@ MODULE rpa_ri_gpw
     COMPLEX(KIND=dp)                         :: im_unit, re_unit
     COMPLEX(KIND=dp), ALLOCATABLE, &
       DIMENSION(:)                           :: Lambda_tmp
-    INTEGER                                  :: handle, num_var, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: handle, num_var
     REAL(KIND=dp)                            :: chi2, chi2_sum
 
       CALL timeset(routineN,handle)
 
       num_var=2*num_poles+1
-      ALLOCATE(Lambda_tmp(num_var),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(Lambda_tmp(num_var))
       Lambda_tmp=(0.0_dp,0.0_dp)
       chi2_sum=0.0_dp
       re_unit=(1.0_dp,0.0_dp)
@@ -2989,7 +2884,7 @@ MODULE rpa_ri_gpw
       !test
       Lambda_tmp(:) = Lambda(:)
       CALL calc_chi2(chi2,Lambda_tmp,Sigma_c,vec_omega_fit_gw,num_poles,&
-                     num_fit_points,n_level_gw,error)
+                     num_fit_points,n_level_gw)
 
       ! Fitting parameters with offset h
       Lambda_tmp(:) = Lambda(:)
@@ -3004,7 +2899,7 @@ MODULE rpa_ri_gpw
         Lambda_tmp((j+1)/2)=Lambda_tmp((j+1)/2)+h*im_unit
       END IF
       CALL calc_chi2(chi2,Lambda_tmp,Sigma_c,vec_omega_fit_gw,num_poles,&
-                     num_fit_points,n_level_gw,error)
+                     num_fit_points,n_level_gw)
       chi2_sum=chi2_sum+chi2
 
       IF(MODULO(i,2)==0) THEN
@@ -3013,7 +2908,7 @@ MODULE rpa_ri_gpw
         Lambda_tmp((i+1)/2)=Lambda_tmp((i+1)/2)-2.0_dp*h*im_unit
       END IF
       CALL calc_chi2(chi2,Lambda_tmp,Sigma_c,vec_omega_fit_gw,num_poles,&
-                     num_fit_points,n_level_gw,error)
+                     num_fit_points,n_level_gw)
       chi2_sum=chi2_sum-chi2
 
       IF(MODULO(j,2)==0) THEN
@@ -3022,7 +2917,7 @@ MODULE rpa_ri_gpw
         Lambda_tmp((j+1)/2)=Lambda_tmp((j+1)/2)-2.0_dp*h*im_unit
       END IF
       CALL calc_chi2(chi2,Lambda_tmp,Sigma_c,vec_omega_fit_gw,num_poles,&
-                     num_fit_points,n_level_gw,error)
+                     num_fit_points,n_level_gw)
       chi2_sum=chi2_sum+chi2
 
       IF(MODULO(i,2)==0) THEN
@@ -3031,7 +2926,7 @@ MODULE rpa_ri_gpw
         Lambda_tmp((i+1)/2)=Lambda_tmp((i+1)/2)+2.0_dp*h*im_unit
       END IF
       CALL calc_chi2(chi2,Lambda_tmp,Sigma_c,vec_omega_fit_gw,num_poles,&
-                     num_fit_points,n_level_gw,error)
+                     num_fit_points,n_level_gw)
       chi2_sum=chi2_sum-chi2
 
       ! Second derivative with symmetric difference quotient
@@ -3052,10 +2947,9 @@ MODULE rpa_ri_gpw
 !> \param num_poles ...
 !> \param num_fit_points ...
 !> \param n_level_gw ...
-!> \param error ...
 ! *****************************************************************************
     SUBROUTINE calc_chi2(chi2,Lambda,Sigma_c,vec_omega_fit_gw,num_poles,&
-                         num_fit_points,n_level_gw,error)
+                         num_fit_points,n_level_gw)
     REAL(KIND=dp)                            :: chi2
     COMPLEX(KIND=dp), ALLOCATABLE, &
       DIMENSION(:)                           :: Lambda
@@ -3064,7 +2958,6 @@ MODULE rpa_ri_gpw
     REAL(KIND=dp), ALLOCATABLE, DIMENSION(:) :: vec_omega_fit_gw
     INTEGER                                  :: num_poles, num_fit_points, &
                                                 n_level_gw
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'calc_chi2', &
       routineP = moduleN//':'//routineN
@@ -3099,10 +2992,9 @@ MODULE rpa_ri_gpw
 !> \param num_poles ...
 !> \param num_fit_points ...
 !> \param n_level_gw ...
-!> \param error ...
 ! *****************************************************************************
     SUBROUTINE calc_max_dev(max_dev,Lambda,Sigma_c,vec_omega_fit_gw,num_poles,&
-                         num_fit_points,n_level_gw,error)
+                         num_fit_points,n_level_gw)
     REAL(KIND=dp)                            :: max_dev
     COMPLEX(KIND=dp), ALLOCATABLE, &
       DIMENSION(:)                           :: Lambda
@@ -3111,7 +3003,6 @@ MODULE rpa_ri_gpw
     REAL(KIND=dp), ALLOCATABLE, DIMENSION(:) :: vec_omega_fit_gw
     INTEGER                                  :: num_poles, num_fit_points, &
                                                 n_level_gw
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'calc_max_dev', &
       routineP = moduleN//':'//routineN
@@ -3147,16 +3038,14 @@ MODULE rpa_ri_gpw
 !> \param omega real or complex energy
 !> \param e_fermi the Fermi level
 !> \param num_poles ...
-!> \param error ...
 ! *****************************************************************************
-    SUBROUTINE evaluate_fit_function(func_val,Lambda,omega,e_fermi,num_poles,error)
+    SUBROUTINE evaluate_fit_function(func_val,Lambda,omega,e_fermi,num_poles)
     COMPLEX(KIND=dp)                         :: func_val
     COMPLEX(KIND=dp), ALLOCATABLE, &
       DIMENSION(:)                           :: Lambda
     COMPLEX(KIND=dp)                         :: omega
     REAL(KIND=dp)                            :: e_fermi
     INTEGER                                  :: num_poles
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'evaluate_fit_function', &
       routineP = moduleN//':'//routineN
@@ -3197,12 +3086,11 @@ MODULE rpa_ri_gpw
 !> \param check_fit ...
 !> \param stop_crit ...
 !> \param fermi_level_offset ...
-!> \param error ...
 ! *****************************************************************************
     SUBROUTINE fit_and_continuation(vec_gw_energ,vec_gw_energ_error_fit,vec_omega_fit_gw,&
                     z_value,m_value,vec_Sigma_c_gw,Eigenval,n_level_gw,gw_corr_lev_occ,num_poles,&
                     num_fit_points,max_iter_fit,crossing_search,homo,unit_nr,check_fit,stop_crit,&
-                    fermi_level_offset,error)
+                    fermi_level_offset)
     REAL(KIND=dp), ALLOCATABLE, DIMENSION(:) :: vec_gw_energ, &
                                                 vec_gw_energ_error_fit, &
                                                 vec_omega_fit_gw, z_value, &
@@ -3214,7 +3102,6 @@ MODULE rpa_ri_gpw
       max_iter_fit, crossing_search, homo, unit_nr
     LOGICAL                                  :: check_fit
     REAL(KIND=dp)                            :: stop_crit, fermi_level_offset
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'fit_and_continuation', &
       routineP = moduleN//':'//routineN
@@ -3231,9 +3118,9 @@ MODULE rpa_ri_gpw
     INTEGER                                  :: handle4, ierr, iii, iiter, &
                                                 info, integ_range, jjj, &
                                                 jquad, kkk, n_level_gw_ref, &
-                                                num_var, stat, xpos
+                                                num_var, xpos
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: ipiv
-    LOGICAL                                  :: could_exit, failure
+    LOGICAL                                  :: could_exit
     REAL(KIND=dp) :: chi2, chi2_old, e_fermi, gw_energ, Ldown, Lup, &
       range_step, ScalParam, sign_occ_virt, stat_error
     REAL(KIND=dp), ALLOCATABLE, DIMENSION(:) :: Lambda_Im, Lambda_Re, &
@@ -3246,21 +3133,16 @@ MODULE rpa_ri_gpw
       re_unit = (1.0_dp, 0.0_dp)
 
       num_var=2*num_poles+1
-      ALLOCATE(Lambda(num_var),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(Lambda(num_var))
       Lambda=(0.0_dp,0.0_dp)
-      ALLOCATE(Lambda_without_offset(num_var),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(Lambda_without_offset(num_var))
       Lambda_without_offset=(0.0_dp,0.0_dp)
-      ALLOCATE(Lambda_Re(num_var),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(Lambda_Re(num_var))
       Lambda_Re=0.0_dp
-      ALLOCATE(Lambda_Im(num_var),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(Lambda_Im(num_var))
       Lambda_Im=0.0_dp
 
-      ALLOCATE(vec_omega_fit_gw_sign(num_fit_points),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(vec_omega_fit_gw_sign(num_fit_points))
 
       IF(n_level_gw<=gw_corr_lev_occ) THEN
         sign_occ_virt = -1.0_dp
@@ -3287,15 +3169,12 @@ MODULE rpa_ri_gpw
       END DO
 
       CALL calc_chi2(chi2_old,Lambda,vec_Sigma_c_gw,vec_omega_fit_gw_sign,num_poles,&
-                     num_fit_points,n_level_gw,error)
+                     num_fit_points,n_level_gw)
 
 
-      ALLOCATE(mat_A_gw(num_poles+1,num_poles+1),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-      ALLOCATE(vec_b_gw(num_poles+1),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-      ALLOCATE(ipiv(num_poles+1),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(mat_A_gw(num_poles+1,num_poles+1))
+      ALLOCATE(vec_b_gw(num_poles+1))
+      ALLOCATE(ipiv(num_poles+1))
       mat_A_gw=(0.0_dp,0.0_dp)
       vec_b_gw=0.0_dp
       
@@ -3318,10 +3197,10 @@ MODULE rpa_ri_gpw
 
       ! Solve system of linear equations
       CALL ZGETRF(num_poles+1,num_poles+1,mat_A_gw,num_poles+1,ipiv,info)
-      CPPrecondition(info==0,cp_failure_level,routineP,error,failure)
+      CPASSERT(info==0)
 
       CALL ZGETRS('N',num_poles+1,1,mat_A_gw,num_poles+1,ipiv,vec_b_gw,num_poles+1,info)
-      CPPrecondition(info==0,cp_failure_level,routineP,error,failure)
+      CPASSERT(info==0)
 
       Lambda_Re(1)=REAL(vec_b_gw(1))
       Lambda_Im(1)=AIMAG(vec_b_gw(1))
@@ -3335,20 +3214,13 @@ MODULE rpa_ri_gpw
       DEALLOCATE(vec_b_gw)
       DEALLOCATE(ipiv)
 
-      ALLOCATE(mat_A_gw(num_var*2,num_var*2),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-      ALLOCATE(mat_B_gw(num_fit_points,num_var*2),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-      ALLOCATE(dLambda(num_fit_points),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-      ALLOCATE(dLambda_2(num_fit_points),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-      ALLOCATE(vec_b_gw(num_var*2),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-      ALLOCATE(vec_b_gw_copy(num_var*2),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-      ALLOCATE(ipiv(num_var*2),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(mat_A_gw(num_var*2,num_var*2))
+      ALLOCATE(mat_B_gw(num_fit_points,num_var*2))
+      ALLOCATE(dLambda(num_fit_points))
+      ALLOCATE(dLambda_2(num_fit_points))
+      ALLOCATE(vec_b_gw(num_var*2))
+      ALLOCATE(vec_b_gw_copy(num_var*2))
+      ALLOCATE(ipiv(num_var*2))
 
       ScalParam=0.01_dp
       Ldown=1.5_dp
@@ -3421,10 +3293,10 @@ MODULE rpa_ri_gpw
         CALL timeset(routineN//"_fit_lin_eq_2",handle4)
 
         CALL ZGETRF(2*num_var,2*num_var,mat_A_gw,2*num_var,ipiv,info)
-        CPPrecondition(info==0,cp_failure_level,routineP,error,failure)
+        CPASSERT(info==0)
 
         CALL ZGETRS('N',2*num_var,1,mat_A_gw,2*num_var,ipiv,vec_b_gw,2*num_var,info)
-        CPPrecondition(info==0,cp_failure_level,routineP,error,failure)
+        CPASSERT(info==0)
 
         CALL timestop(handle4)
 
@@ -3434,7 +3306,7 @@ MODULE rpa_ri_gpw
 
         ! calculate chi2
         CALL calc_chi2(chi2,Lambda,vec_Sigma_c_gw,vec_omega_fit_gw_sign,num_poles,&
-                       num_fit_points,n_level_gw,error)
+                       num_fit_points,n_level_gw)
 
         IF(chi2<chi2_old) THEN
           ScalParam=MAX(ScalParam/Ldown,1E-12_dp)
@@ -3454,15 +3326,14 @@ MODULE rpa_ri_gpw
         n_level_gw_ref=n_level_gw+homo-gw_corr_lev_occ
         IF(iiter==max_iter_fit) THEN
           WRITE(MO_number, "(I3)")  n_level_gw_ref
-          CALL cp_assert(.FALSE.,cp_warning_level,cp_assertion_failed,routineP,&
-                         "The fit for corrected level n ="// MO_number// " did not converge. "//&
-                         "For levels close to HOMO or LUMO, this is normally no issue. "//&
-                         "To avoid this warning, you can (1) increase the "//&
-                         "number of fit iterations MAX_ITER_FIT, or you can (2) increase the number "//&
-                         "of RPA integration points (then, Sigma_c(i*omega) is more accurate) "//&
-                         "or  you can (3) decrease "//&
-                         "the fit range by setting the keyword OMEGA_MAX_FIT (in Hartree). ",&
-                         only_ionode=.TRUE.)
+          CALL cp_warn(__LOCATION__,&
+               "The fit for corrected level n ="// MO_number// " did not converge. "//&
+               "For levels close to HOMO or LUMO, this is normally no issue. "//&
+               "To avoid this warning, you can (1) increase the "//&
+               "number of fit iterations MAX_ITER_FIT, or you can (2) increase the number "//&
+               "of RPA integration points (then, Sigma_c(i*omega) is more accurate) "//&
+               "or  you can (3) decrease "//&
+               "the fit range by setting the keyword OMEGA_MAX_FIT (in Hartree). ")
 
         END IF
 
@@ -3559,43 +3430,40 @@ MODULE rpa_ri_gpw
       ! by sqrt(chi2/n), where n is the number of fit points
 
       CALL calc_chi2(chi2,Lambda_without_offset,vec_Sigma_c_gw,vec_omega_fit_gw_sign,num_poles,&
-                     num_fit_points,n_level_gw,error)
+                     num_fit_points,n_level_gw)
 
       ! Estimate the statistical error of every fit point
       stat_error = SQRT(chi2/num_fit_points)
 
 
       ! allocate N array containing the second derivatives of chi^2
-      ALLOCATE(vec_N_gw(num_var*2),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(vec_N_gw(num_var*2))
       vec_N_gw = 0.0_dp
 
-      ALLOCATE(mat_N_gw(num_var*2,num_var*2),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(mat_N_gw(num_var*2,num_var*2))
       mat_N_gw = 0.0_dp
 
       DO iii=1,num_var*2
           CALL calc_mat_N(vec_N_gw(iii),Lambda_without_offset,vec_Sigma_c_gw,vec_omega_fit_gw_sign,&
-                              iii,iii,num_poles,num_fit_points,n_level_gw,0.001_dp,error)
+                              iii,iii,num_poles,num_fit_points,n_level_gw,0.001_dp)
       END DO
 
       DO iii=1,num_var*2
         DO jjj=1,num_var*2
           CALL calc_mat_N(mat_N_gw(iii,jjj),Lambda_without_offset,vec_Sigma_c_gw,vec_omega_fit_gw_sign,&
-                          iii,jjj,num_poles,num_fit_points,n_level_gw,0.001_dp,error)
+                          iii,jjj,num_poles,num_fit_points,n_level_gw,0.001_dp)
         END DO
       END DO
 
       CALL DGETRF(2*num_var,2*num_var,mat_N_gw,2*num_var,ipiv,info)
-      CPPrecondition(info==0,cp_failure_level,routineP,error,failure)
+      CPASSERT(info==0)
 
       ! vec_b_gw is only working array
       CALL DGETRI(2*num_var,mat_N_gw,2*num_var,ipiv,vec_b_gw,2*num_var,info)
-      CPPrecondition(info==0,cp_failure_level,routineP,error,failure)
+      CPASSERT(info==0)
 
 
-      ALLOCATE(stat_errors(2*num_var),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(stat_errors(2*num_var))
       stat_errors=0.0_dp
 
       DO iii=1,2*num_var
@@ -3654,14 +3522,13 @@ MODULE rpa_ri_gpw
 !> \param nmo ...
 !> \param unit_nr ...
 !> \param print_gw_details ...
-!> \param error ...
 !> \param do_alpha ...
 !> \param do_beta ...
 ! *****************************************************************************
     SUBROUTINE print_and_update_for_ev_sc(vec_gw_energ,vec_gw_energ_error_fit,&
                     z_value,m_value,vec_Sigma_x_minus_vxc_gw,Eigenval,&
                     Eigenval_last,Eigenval_scf,gw_corr_lev_occ,gw_corr_lev_virt,gw_corr_lev_tot,&
-                    count_ev_sc_GW,crossing_search,homo,nmo,unit_nr,print_gw_details,error,do_alpha,do_beta)
+                    count_ev_sc_GW,crossing_search,homo,nmo,unit_nr,print_gw_details,do_alpha,do_beta)
 
     REAL(KIND=dp), ALLOCATABLE, DIMENSION(:) :: vec_gw_energ, &
                                                 vec_gw_energ_error_fit, &
@@ -3672,7 +3539,6 @@ MODULE rpa_ri_gpw
     INTEGER :: gw_corr_lev_occ, gw_corr_lev_virt, gw_corr_lev_tot, &
       count_ev_sc_GW, crossing_search, homo, nmo, unit_nr
     LOGICAL                                  :: print_gw_details
-    TYPE(cp_error_type), INTENT(inout)       :: error
     LOGICAL, OPTIONAL                        :: do_alpha, do_beta
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'print_and_update_for_ev_sc', &
@@ -3871,10 +3737,9 @@ MODULE rpa_ri_gpw
       END IF
 
       IF((gw_corr_lev_occ==0 .OR. gw_corr_lev_virt==0) .AND. count_ev_sc_GW>1) THEN
-        CALL cp_assert(.FALSE.,cp_warning_level,cp_assertion_failed,routineP,&
-                       "Please increase for eigenvalue-self-consistent GW, the number of "//&
-                       "corrected occupied and/or virtual orbitals above 0.",&
-                       only_ionode=.TRUE.)
+        CALL cp_warn(__LOCATION__,&
+             "Please increase for eigenvalue-self-consistent GW, the number of "//&
+             "corrected occupied and/or virtual orbitals above 0.")
       END IF
 
 

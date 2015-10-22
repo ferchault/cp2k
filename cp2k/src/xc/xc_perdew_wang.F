@@ -15,9 +15,6 @@
 MODULE xc_perdew_wang
   
   USE kinds,                           ONLY: dp
-  USE termination,                     ONLY: stop_program
-  USE timings,                         ONLY: timeset,&
-                                             timestop
   USE xc_derivative_set_types,         ONLY: xc_derivative_set_type,&
                                              xc_dset_get_derivative
   USE xc_derivative_types,             ONLY: xc_derivative_get,&
@@ -33,6 +30,7 @@ MODULE xc_perdew_wang
   USE xc_rho_set_types,                ONLY: xc_rho_set_get,&
                                              xc_rho_set_type
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -60,10 +58,9 @@ CONTAINS
 !> \param needs ...
 !> \param max_deriv ...
 !> \param scale ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE perdew_wang_info ( method, lsd, reference, shortform, needs, &
-       max_deriv, scale, error)
+       max_deriv, scale)
     INTEGER, INTENT(in)                      :: method
     LOGICAL, INTENT(in)                      :: lsd
     CHARACTER(LEN=*), INTENT(OUT), OPTIONAL  :: reference, shortform
@@ -71,7 +68,6 @@ CONTAINS
       INTENT(inout), OPTIONAL                :: needs
     INTEGER, INTENT(out), OPTIONAL           :: max_deriv
     REAL(kind=dp), INTENT(in)                :: scale
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'perdew_wang_info', &
       routineP = moduleN//':'//routineN
@@ -80,7 +76,7 @@ CONTAINS
 
     SELECT CASE (method)
     CASE DEFAULT
-       CPAssertNoFail(.FALSE.,cp_failure_level,routineP,error)
+       CPABORT("")
     CASE (pw_orig)
        p_string='PWO'
     CASE (pw_dmc)
@@ -159,7 +155,7 @@ CONTAINS
     SELECT CASE (method)
 
     CASE DEFAULT
-       CALL stop_program(routineN,moduleN,__LINE__,"Unknown method")
+       CPABORT("Unknown method")
 
     CASE (pw_orig)
        A(0)  = 0.031091_dp ; A(1)  = 0.015545_dp
@@ -215,23 +211,20 @@ CONTAINS
 !>      that order will be calculated, otherwise all derivatives up to
 !>      that order will be calculated.
 !> \param scale ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE perdew_wang_lda_eval( method, rho_set, deriv_set, order, scale, error )
+  SUBROUTINE perdew_wang_lda_eval( method, rho_set, deriv_set, order, scale)
 
     INTEGER, INTENT(in)                      :: method
     TYPE(xc_rho_set_type), POINTER           :: rho_set
     TYPE(xc_derivative_set_type), POINTER    :: deriv_set
     INTEGER, INTENT(in)                      :: order
     REAL(kind=dp), INTENT(in)                :: scale
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'perdew_wang_lda_eval', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: npoints, stat, timer_handle
+    INTEGER                                  :: npoints, timer_handle
     INTEGER, DIMENSION(:, :), POINTER        :: bo
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: rho_cutoff
     REAL(KIND=dp), DIMENSION(:, :, :), &
       POINTER                                :: dummy, e_0, e_rho, e_rho_rho, &
@@ -239,69 +232,50 @@ CONTAINS
     TYPE(xc_derivative_type), POINTER        :: deriv
 
     CALL timeset(routineN,timer_handle)
-    failure=.FALSE.
     NULLIFY(bo,rho, e_0,e_rho,e_rho_rho,e_rho_rho_rho, dummy)
-    CPPrecondition(ASSOCIATED(rho_set),cp_failure_level,routineP,error,failure)
-    CPPrecondition(rho_set%ref_count>0,cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(deriv_set),cp_failure_level,routineP,error,failure)
-    CPPrecondition(deriv_set%ref_count>0,cp_failure_level,routineP,error,failure)
-    IF (.NOT.failure) THEN
-       CALL xc_rho_set_get(rho_set,rho=rho,&
-            local_bounds=bo,rho_cutoff=rho_cutoff,error=error)
-       npoints=(bo(2,1)-bo(1,1)+1)*(bo(2,2)-bo(1,2)+1)*(bo(2,3)-bo(1,3)+1)
+    CPASSERT(ASSOCIATED(rho_set))
+    CPASSERT(rho_set%ref_count>0)
+    CPASSERT(ASSOCIATED(deriv_set))
+    CPASSERT(deriv_set%ref_count>0)
+    CALL xc_rho_set_get(rho_set,rho=rho,&
+         local_bounds=bo,rho_cutoff=rho_cutoff)
+    npoints=(bo(2,1)-bo(1,1)+1)*(bo(2,2)-bo(1,2)+1)*(bo(2,3)-bo(1,3)+1)
 
-       CALL perdew_wang_init(method, rho_cutoff)
+    CALL perdew_wang_init(method, rho_cutoff)
 
-       ! meaningful default for the arrays we don't need: let us make compiler
-       ! and debugger happy...
-       IF (cp_debug) THEN
-          ALLOCATE(dummy(bo(1,1):bo(2,1),bo(1,2):bo(2,2),bo(1,3):bo(2,3)),stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       ELSE
-          dummy=> rho
-       END IF
+    dummy=> rho
 
-       e_0 => dummy
-       e_rho => dummy
-       e_rho_rho => dummy
-       e_rho_rho_rho => dummy
+    e_0 => dummy
+    e_rho => dummy
+    e_rho_rho => dummy
+    e_rho_rho_rho => dummy
 
-       IF (order>=0) THEN
-          deriv => xc_dset_get_derivative(deriv_set,"",&
-               allocate_deriv=.TRUE., error=error)
-          CALL xc_derivative_get(deriv,deriv_data=e_0,error=error)
-       END IF
-       IF (order>=1.OR.order==-1) THEN
-          deriv => xc_dset_get_derivative(deriv_set,"(rho)",&
-               allocate_deriv=.TRUE.,error=error)
-          CALL xc_derivative_get(deriv,deriv_data=e_rho,error=error)
-       END IF
-       IF (order>=2.OR.order==-2) THEN
-          deriv => xc_dset_get_derivative(deriv_set,"(rho)(rho)",&
-               allocate_deriv=.TRUE.,error=error)
-          CALL xc_derivative_get(deriv,deriv_data=e_rho_rho,error=error)
-       END IF
-       IF (order>=3.OR.order==-3) THEN
-          deriv => xc_dset_get_derivative(deriv_set,"(rho)(rho)(rho)",&
-               allocate_deriv=.TRUE.,error=error)
-          CALL xc_derivative_get(deriv,deriv_data=e_rho_rho_rho,error=error)
-       END IF
-       IF (order>3.OR.order<-3) THEN
-          CALL cp_unimplemented_error(fromWhere=routineP, &
-               message="derivatives bigger than 3 not implemented", &
-               error=error, error_level=cp_failure_level)
-       END IF
-
-       CALL perdew_wang_lda_calc(rho,e_0,e_rho, e_rho_rho, e_rho_rho_rho, &
-            npoints, order,scale)
-
-       IF (cp_debug) THEN
-          DEALLOCATE(dummy,stat=stat)
-          CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
-       ELSE
-          NULLIFY(dummy)
-       END IF
+    IF (order>=0) THEN
+       deriv => xc_dset_get_derivative(deriv_set,"",&
+            allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=e_0)
     END IF
+    IF (order>=1.OR.order==-1) THEN
+       deriv => xc_dset_get_derivative(deriv_set,"(rho)",&
+            allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=e_rho)
+    END IF
+    IF (order>=2.OR.order==-2) THEN
+       deriv => xc_dset_get_derivative(deriv_set,"(rho)(rho)",&
+            allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=e_rho_rho)
+    END IF
+    IF (order>=3.OR.order==-3) THEN
+       deriv => xc_dset_get_derivative(deriv_set,"(rho)(rho)(rho)",&
+            allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=e_rho_rho_rho)
+    END IF
+    IF (order>3.OR.order<-3) THEN
+       CPABORT("derivatives bigger than 3 not implemented")
+    END IF
+
+    CALL perdew_wang_lda_calc(rho,e_0,e_rho, e_rho_rho, e_rho_rho_rho, &
+         npoints, order,scale)
 
     CALL timestop(timer_handle)
 
@@ -376,22 +350,19 @@ SUBROUTINE perdew_wang_lda_calc(rho,e_0,e_rho, e_rho_rho, e_rho_rho_rho, npoints
 !>      that order will be calculated, otherwise all derivatives up to
 !>      that order will be calculated.
 !> \param scale ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE perdew_wang_lsd_eval( method, rho_set, deriv_set, order, scale, error )
+  SUBROUTINE perdew_wang_lsd_eval( method, rho_set, deriv_set, order, scale)
     INTEGER, INTENT(in)                      :: method
     TYPE(xc_rho_set_type), POINTER           :: rho_set
     TYPE(xc_derivative_set_type), POINTER    :: deriv_set
     INTEGER, INTENT(IN), OPTIONAL            :: order
     REAL(kind=dp), INTENT(in)                :: scale
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'perdew_wang_lsd_eval', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: npoints, stat, timer_handle
+    INTEGER                                  :: npoints, timer_handle
     INTEGER, DIMENSION(:, :), POINTER        :: bo
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: rho_cutoff
     REAL(KIND=dp), DIMENSION(:, :, :), &
       POINTER                                :: a, b, dummy, e_0, ea, eaa, &
@@ -400,87 +371,71 @@ SUBROUTINE perdew_wang_lda_calc(rho,e_0,e_rho, e_rho_rho, e_rho_rho_rho, npoints
     TYPE(xc_derivative_type), POINTER        :: deriv
 
     CALL timeset(routineN,timer_handle)
-    failure=.FALSE.
     NULLIFY(bo,a,b,e_0,ea,eb,eaa,eab,ebb,eaaa,eaab,eabb,ebbb)
-    CPPrecondition(ASSOCIATED(rho_set),cp_failure_level,routineP,error,failure)
-    CPPrecondition(rho_set%ref_count>0,cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(deriv_set),cp_failure_level,routineP,error,failure)
-    CPPrecondition(deriv_set%ref_count>0,cp_failure_level,routineP,error,failure)
-    IF (.NOT.failure) THEN
-       CALL xc_rho_set_get(rho_set,rhoa=a,rhob=b,&
-            local_bounds=bo,rho_cutoff=rho_cutoff,error=error)
-       npoints=(bo(2,1)-bo(1,1)+1)*(bo(2,2)-bo(1,2)+1)*(bo(2,3)-bo(1,3)+1)
+    CPASSERT(ASSOCIATED(rho_set))
+    CPASSERT(rho_set%ref_count>0)
+    CPASSERT(ASSOCIATED(deriv_set))
+    CPASSERT(deriv_set%ref_count>0)
+    CALL xc_rho_set_get(rho_set,rhoa=a,rhob=b,&
+         local_bounds=bo,rho_cutoff=rho_cutoff)
+    npoints=(bo(2,1)-bo(1,1)+1)*(bo(2,2)-bo(1,2)+1)*(bo(2,3)-bo(1,3)+1)
 
-       CALL perdew_wang_init(method, rho_cutoff)
+    CALL perdew_wang_init(method, rho_cutoff)
 
-       ! meaningful default for the arrays we don't need: let us make compiler
-       ! and debugger happy...
-       IF (cp_debug) THEN
-          ALLOCATE(dummy(bo(1,1):bo(2,1),bo(1,2):bo(2,2),bo(1,3):bo(2,3)),stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       ELSE
-          dummy=> a
-       END IF
+    ! meaningful default for the arrays we don't need: let us make compiler
+    ! and debugger happy...
+    dummy=> a
 
-       e_0 => dummy
-       ea => dummy; eb => dummy
-       eaa => dummy; eab => dummy; ebb => dummy
-       eaaa => dummy; eaab=> dummy; eabb => dummy; ebbb => dummy
+    e_0 => dummy
+    ea => dummy; eb => dummy
+    eaa => dummy; eab => dummy; ebb => dummy
+    eaaa => dummy; eaab=> dummy; eabb => dummy; ebbb => dummy
 
-       IF (order>=0) THEN
-          deriv => xc_dset_get_derivative(deriv_set,"",&
-               allocate_deriv=.TRUE., error=error)
-          CALL xc_derivative_get(deriv,deriv_data=e_0,error=error)
-       END IF
-       IF (order>=1.OR.order==-1) THEN
-          deriv => xc_dset_get_derivative(deriv_set,"(rhoa)",&
-               allocate_deriv=.TRUE.,error=error)
-          CALL xc_derivative_get(deriv,deriv_data=ea,error=error)
-          deriv => xc_dset_get_derivative(deriv_set,"(rhob)",&
-               allocate_deriv=.TRUE.,error=error)
-          CALL xc_derivative_get(deriv,deriv_data=eb,error=error)
-       END IF
-       IF (order>=2.OR.order==-2) THEN
-          deriv => xc_dset_get_derivative(deriv_set,"(rhoa)(rhoa)",&
-               allocate_deriv=.TRUE.,error=error)
-          CALL xc_derivative_get(deriv,deriv_data=eaa,error=error)
-          deriv => xc_dset_get_derivative(deriv_set,"(rhoa)(rhob)",&
-               allocate_deriv=.TRUE.,error=error)
-          CALL xc_derivative_get(deriv,deriv_data=eab,error=error)
-          deriv => xc_dset_get_derivative(deriv_set,"(rhob)(rhob)",&
-               allocate_deriv=.TRUE.,error=error)
-          CALL xc_derivative_get(deriv,deriv_data=ebb,error=error)
-       END IF
-       IF (order>=3.OR.order==-3) THEN
-          deriv => xc_dset_get_derivative(deriv_set,"(rhoa)(rhoa)(rhoa)",&
-               allocate_deriv=.TRUE.,error=error)
-          CALL xc_derivative_get(deriv,deriv_data=eaaa,error=error)
-          deriv => xc_dset_get_derivative(deriv_set,"(rhoa)(rhoa)(rhob)",&
-               allocate_deriv=.TRUE.,error=error)
-          CALL xc_derivative_get(deriv,deriv_data=eaab,error=error)
-          deriv => xc_dset_get_derivative(deriv_set,"(rhoa)(rhob)(rhob)",&
-               allocate_deriv=.TRUE.,error=error)
-          CALL xc_derivative_get(deriv,deriv_data=eabb,error=error)
-          deriv => xc_dset_get_derivative(deriv_set,"(rhob)(rhob)(rhob)",&
-               allocate_deriv=.TRUE.,error=error)
-          CALL xc_derivative_get(deriv,deriv_data=ebbb,error=error)
-       END IF
-       IF (order>3.OR.order<-3) THEN
-          CALL cp_unimplemented_error(fromWhere=routineP, &
-               message="derivatives bigger than 3 not implemented", &
-               error=error, error_level=cp_failure_level)
-       END IF
-
-       CALL perdew_wang_lsd_calc(a,b,e_0,ea,eb,eaa,eab,ebb,eaaa,eaab,eabb,&
-         ebbb, npoints, order,scale)
-
-       IF (cp_debug) THEN
-          DEALLOCATE(dummy,stat=stat)
-          CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
-       ELSE
-          NULLIFY(dummy)
-       END IF
+    IF (order>=0) THEN
+       deriv => xc_dset_get_derivative(deriv_set,"",&
+            allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=e_0)
     END IF
+    IF (order>=1.OR.order==-1) THEN
+       deriv => xc_dset_get_derivative(deriv_set,"(rhoa)",&
+            allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=ea)
+       deriv => xc_dset_get_derivative(deriv_set,"(rhob)",&
+            allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=eb)
+    END IF
+    IF (order>=2.OR.order==-2) THEN
+       deriv => xc_dset_get_derivative(deriv_set,"(rhoa)(rhoa)",&
+            allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=eaa)
+       deriv => xc_dset_get_derivative(deriv_set,"(rhoa)(rhob)",&
+            allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=eab)
+       deriv => xc_dset_get_derivative(deriv_set,"(rhob)(rhob)",&
+            allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=ebb)
+    END IF
+    IF (order>=3.OR.order==-3) THEN
+       deriv => xc_dset_get_derivative(deriv_set,"(rhoa)(rhoa)(rhoa)",&
+            allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=eaaa)
+       deriv => xc_dset_get_derivative(deriv_set,"(rhoa)(rhoa)(rhob)",&
+            allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=eaab)
+       deriv => xc_dset_get_derivative(deriv_set,"(rhoa)(rhob)(rhob)",&
+            allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=eabb)
+       deriv => xc_dset_get_derivative(deriv_set,"(rhob)(rhob)(rhob)",&
+            allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=ebbb)
+    END IF
+    IF (order>3.OR.order<-3) THEN
+       CPABORT("derivatives bigger than 3 not implemented")
+    END IF
+
+    CALL perdew_wang_lsd_calc(a,b,e_0,ea,eb,eaa,eab,ebb,eaaa,eaab,eabb,&
+      ebbb, npoints, order,scale)
+
     CALL timestop(timer_handle)
 
   END SUBROUTINE perdew_wang_lsd_eval

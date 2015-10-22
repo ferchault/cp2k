@@ -20,12 +20,11 @@ MODULE cp_parser_inpp_methods
   USE cp_parser_inpp_types,            ONLY: inpp_type
   USE kinds,                           ONLY: default_path_length,&
                                              default_string_length
-  USE machine,                         ONLY: default_output_unit
   USE memory_utilities,                ONLY: reallocate
   USE string_utilities,                ONLY: is_whitespace,&
                                              uppercase
-  USE termination,                     ONLY: stop_program
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -46,7 +45,6 @@ CONTAINS
 !> \param input_file_name ...
 !> \param input_line_number ...
 !> \param input_unit ...
-!> \param error ...
 !> \par History
 !>      - standalone proof-of-concept implementation (20.02.2008,AK)
 !>      - integration into cp2k (22.02.2008,tlaino)
@@ -55,11 +53,10 @@ CONTAINS
 !> \author AK
 ! *****************************************************************************
   SUBROUTINE inpp_process_directive(inpp, input_line, input_file_name, input_line_number,&
-       input_unit, error)
+       input_unit)
     TYPE(inpp_type), POINTER                 :: inpp
     CHARACTER(LEN=*), INTENT(INOUT)          :: input_line, input_file_name
     INTEGER, INTENT(INOUT)                   :: input_line_number, input_unit
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'inpp_process_directive', &
       routineP = moduleN//':'//routineN
@@ -67,12 +64,13 @@ CONTAINS
     CHARACTER(LEN=default_path_length)       :: cond1, cond2, filename, &
                                                 mytag, value, varname
     CHARACTER(LEN=max_message_length)        :: message
-    INTEGER                                  :: i, indf, indi, istat, pos1, &
-                                                pos2, unit
-    LOGICAL                                  :: check, failure
+    INTEGER                                  :: i, indf, indi, istat, &
+                                                output_unit, pos1, pos2, unit
+    LOGICAL                                  :: check
 
-    failure = .TRUE.
-    CPPostcondition(ASSOCIATED(inpp),cp_failure_level,routineP,error,failure)
+    output_unit = cp_logger_get_default_io_unit()
+
+    CPASSERT(ASSOCIATED(inpp))
 
     ! find location of directive in line and check whether it is commented out
     indi = INDEX(input_line,"@")
@@ -100,7 +98,7 @@ CONTAINS
           WRITE(UNIT=message,FMT="(3A,I6)") &
                "INPP_@INCLUDE: Incorrect @INCLUDE directive in file: ",&
                TRIM(input_file_name), "  Line:",input_line_number
-          CALL stop_program(routineN,moduleN,__LINE__,TRIM(message))
+          CPABORT(TRIM(message))
        ENDIF
        indi=1
        DO WHILE (is_whitespace(filename(indi:indi)))
@@ -125,7 +123,7 @@ CONTAINS
                 WRITE(UNIT=message,FMT="(3A,I6)") &
                      "INPP_@INCLUDE: Incorrect quoting of include file in file: ",&
                      TRIM(input_file_name), "  Line:",input_line_number
-                CALL stop_program(routineN,moduleN,__LINE__,TRIM(message))
+                CPABORT(TRIM(message))
              ENDIF
              ! nothing to do. unquoted filename.
           ENDIF
@@ -134,21 +132,21 @@ CONTAINS
        ! Let's check that files already opened won't be again opened
        DO i = 1, inpp%io_stack_level
           check = TRIM(filename)/=TRIM(inpp%io_stack_filename(i))
-          CPPostcondition(check,cp_failure_level,routineP,error,failure)
+          CPASSERT(check)
        END DO
 
-       ! this stops on error, so we can always assume success
+       ! this stops on so we can always assume success
        CALL open_file(file_name=TRIM(filename),&
                       file_status="OLD",&
                       file_form="FORMATTED",&
                       file_action="READ",&
                       unit_number=unit)
 
-       IF (debug_this_module) THEN
+       IF (debug_this_module .AND. output_unit > 0) THEN
           WRITE(UNIT=message,FMT="(3A,I6,2A)") "INPP_@INCLUDE: in file: ",&
                TRIM(input_file_name),"  Line:",input_line_number,&
                " Opened include file: ",TRIM(filename)
-          WRITE(default_output_unit,*) TRIM(message)
+          WRITE(output_unit,*) TRIM(message)
        END IF
 
        ! make room, save status and position the parser at the beginning of new file.
@@ -172,7 +170,7 @@ CONTAINS
           WRITE(UNIT=message,FMT="(3A,I6)") &
                "INPP_@SET: Incorrect @SET directive in file: ",&
                TRIM(input_file_name), "  Line:",input_line_number
-          CALL stop_program(routineN,moduleN,__LINE__,TRIM(message))
+          CPABORT(TRIM(message))
        ENDIF
 
        indi=1
@@ -195,7 +193,7 @@ CONTAINS
           WRITE(UNIT=message,FMT="(3A,I6)") &
                "INPP_@SET: Incorrect @SET directive in file: ",&
                TRIM(input_file_name), "  Line:",input_line_number
-          CALL stop_program(routineN,moduleN,__LINE__,TRIM(message))
+          CPABORT(TRIM(message))
        ENDIF
 
        ! sort into table of variables.
@@ -207,20 +205,20 @@ CONTAINS
           CALL reallocate(p_long=inpp%variable_value,lb_new=1,ub_new=inpp%num_variables)
           inpp%variable_name(inpp%num_variables)=varname
           inpp%variable_value(inpp%num_variables)=value
-          IF (debug_this_module) THEN
+          IF (debug_this_module .AND. output_unit > 0) THEN
              WRITE(UNIT=message,FMT="(3A,I6,4A)") "INPP_@SET: in file: ",&
                   TRIM(input_file_name),"  Line:",input_line_number,&
                   " Set new variable ", TRIM(varname), " to value: ",TRIM(value)
-             WRITE(default_output_unit,*) TRIM(message)
+             WRITE(output_unit,*) TRIM(message)
           END IF
        ELSE
           ! reassign variable
-          IF (debug_this_module) THEN
+          IF (debug_this_module .AND. output_unit > 0) THEN
              WRITE(UNIT=message,FMT="(3A,I6,6A)") "INPP_@SET: in file: ",&
                   TRIM(input_file_name),"  Line:",input_line_number,&
                   " Change variable ", TRIM(varname), " from value: ",&
                   TRIM(inpp%variable_value(indi)), " to value: ",TRIM(value)
-             WRITE(default_output_unit,*) TRIM(message)
+             WRITE(output_unit,*) TRIM(message)
           END IF
           inpp%variable_value(indi)=value
        ENDIF
@@ -249,7 +247,7 @@ CONTAINS
              WRITE(UNIT=message,FMT="(3A,I6)") &
                   "INPP_@IF: Incorrect @IF directive in file: ",&
                   TRIM(input_file_name), "  Line:",input_line_number
-             CALL stop_program(routineN,moduleN,__LINE__,TRIM(message))
+             CPABORT(TRIM(message))
           ENDIF
        ELSEIF(pos2>0) THEN
           cond1=input_line(indi:pos2-1)
@@ -259,7 +257,7 @@ CONTAINS
              WRITE(UNIT=message,FMT="(3A,I6)") &
                   "INPP_@IF: Incorrect @IF directive in file: ",&
                   TRIM(input_file_name), "  Line:",input_line_number
-             CALL stop_program(routineN,moduleN,__LINE__,TRIM(message))
+             CPABORT(TRIM(message))
           ENDIF
        ELSE
           IF(LEN_TRIM(input_line(indi:))>0) THEN
@@ -301,35 +299,35 @@ CONTAINS
           WRITE(UNIT=message,FMT="(3A,I6)") &
                "INPP_@IF: Incorrect @IF directive in file: ",&
                TRIM(input_file_name), "  Line:",input_line_number
-          CALL stop_program(routineN,moduleN,__LINE__,TRIM(message))
+          CPABORT(TRIM(message))
        ENDIF
 
        IF ((TRIM(cond1)==TRIM(cond2)) .EQV. check) THEN
-          IF (debug_this_module) THEN
+          IF (debug_this_module .AND. output_unit > 0) THEN
              WRITE(UNIT=message,FMT="(3A,I6,A)") "INPP_@IF: in file: ",&
                   TRIM(input_file_name),"  Line:",input_line_number,&
                   " Conditional ("//TRIM(cond1)//","//TRIM(cond2)//&
                   ") resolves to true. Continuing parsing."
-             WRITE(default_output_unit,*) TRIM(message)
+             WRITE(output_unit,*) TRIM(message)
           END IF
           ! resolves to true. keep on reading normally...
           RETURN
        ELSE
-          IF (debug_this_module) THEN
+          IF (debug_this_module .AND. output_unit > 0) THEN
              WRITE(UNIT=message,FMT="(3A,I6,A)") "INPP_@IF: in file: ",&
                   TRIM(input_file_name),"  Line:",input_line_number,&
                   " Conditional ("//TRIM(cond1)//","//TRIM(cond2)//&
                   ") resolves to false. Skipping Lines."
-             WRITE(default_output_unit,*) TRIM(message)
+             WRITE(output_unit,*) TRIM(message)
           END IF
           istat=0
           DO WHILE(istat==0)
              input_line_number = input_line_number + 1
              READ (UNIT=input_unit,FMT="(A)",IOSTAT=istat) input_line
-             IF (debug_this_module) THEN
+             IF (debug_this_module .AND. output_unit > 0) THEN
                 WRITE(UNIT=message,FMT="(1A,I6,2A)") "INPP_@IF: skipping line ",&
                   input_line_number, ": ",TRIM(input_line)
-                WRITE(default_output_unit,*) TRIM(message)
+                WRITE(output_unit,*) TRIM(message)
              END IF
 
              indi = INDEX(input_line,"@")
@@ -346,12 +344,14 @@ CONTAINS
              DO WHILE (input_line(indf:indf)/=" ")
                 indf = indf + 1
              END DO
-             CPPostcondition((indf-indi)<=default_string_length,cp_failure_level,routineP,error,failure)
+             CPASSERT((indf-indi)<=default_string_length)
              mytag =input_line(indi:indf-1)
              CALL uppercase(mytag)
              IF(INDEX(mytag,"@ENDIF")>0) THEN
                 ! ok found it. go back to normal
-                IF (debug_this_module) WRITE(default_output_unit,*) "INPP_@IF: found @ENDIF. End of skipping."
+                IF (debug_this_module .AND. output_unit > 0) THEN
+                   WRITE(output_unit,*) "INPP_@IF: found @ENDIF. End of skipping."
+                END IF
                 RETURN
              ENDIF
           END DO
@@ -359,21 +359,25 @@ CONTAINS
              WRITE(UNIT=message,FMT="(3A,I6)") &
                   "INPP_@IF: Error while looking for @ENDIF directive in file: ",&
                   TRIM(input_file_name), "  Line:",input_line_number
-             CALL stop_program(routineN,moduleN,__LINE__,TRIM(message))
+             CPABORT(TRIM(message))
           ENDIF
        ENDIF
 
     CASE ("@ENDIF")
-       IF (debug_this_module) WRITE(default_output_unit,*) "INPP_@IF: found @ENDIF in normal parsing. Ignoring it."
+       IF (debug_this_module .AND. output_unit > 0) THEN
+          WRITE(output_unit,*) "INPP_@IF: found @ENDIF in normal parsing. Ignoring it."
+       END IF
        ! nothing to do. just return to skip the line.
        RETURN
 
     CASE ("@PRINT")
        ! for debugging of variables etc.
-       WRITE(UNIT=message,FMT="(3A,I6,2A)") "INPP_@PRINT: in file: ",&
-            TRIM(input_file_name),"  Line:",input_line_number,&
-            " Text: ",TRIM(input_line(indf:))
-       WRITE(default_output_unit,*) TRIM(message)
+       IF (output_unit > 0) THEN
+          WRITE(UNIT=message,FMT="(3A,I6,2A)") "INPP_@PRINT: in file: ",&
+               TRIM(input_file_name),"  Line:",input_line_number,&
+               " Text: ",TRIM(input_line(indf:))
+          WRITE(output_unit,*) TRIM(message)
+       END IF
        RETURN
        ! Do Nothing..
     END SELECT
@@ -387,25 +391,20 @@ CONTAINS
 !> \param input_file_name ...
 !> \param input_line_number ...
 !> \param input_unit ...
-!> \param error ...
 !> \par History
 !>      - standalone proof-of-concept implemenation (20.02.2008,AK)
 !>      - integrated into cp2k (21.02.2008)
 !> \author AK
 ! *****************************************************************************
-  SUBROUTINE inpp_end_include(inpp, input_file_name, input_line_number, input_unit, error)
+  SUBROUTINE inpp_end_include(inpp, input_file_name, input_line_number, input_unit)
     TYPE(inpp_type), POINTER                 :: inpp
     CHARACTER(LEN=*), INTENT(INOUT)          :: input_file_name
     INTEGER, INTENT(INOUT)                   :: input_line_number, input_unit
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'inpp_end_include', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    CPPostcondition(ASSOCIATED(inpp),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(inpp))
     IF(inpp%io_stack_level > 0) THEN
        CALL close_file(input_unit)
        input_unit=inpp%io_stack_channel(inpp%io_stack_level)
@@ -425,18 +424,15 @@ CONTAINS
 !> \param input_line ...
 !> \param input_file_name ...
 !> \param input_line_number ...
-!> \param error ...
 !> \par History
 !>      - standalone proof-of-concept implemenation (22.02.2008,AK)
 !>      - integrated into cp2k (23.02.2008)
 !> \author AK
 ! *****************************************************************************
-  SUBROUTINE inpp_expand_variables(inpp, input_line, input_file_name, input_line_number,&
-       error)
+  SUBROUTINE inpp_expand_variables(inpp, input_line, input_file_name, input_line_number)
     TYPE(inpp_type), POINTER                 :: inpp
     CHARACTER(LEN=*), INTENT(INOUT)          :: input_line, input_file_name
     INTEGER, INTENT(IN)                      :: input_line_number
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'inpp_expand_variables', &
       routineP = moduleN//':'//routineN
@@ -444,33 +440,31 @@ CONTAINS
     CHARACTER(LEN=default_path_length)       :: newline, varname
     CHARACTER(LEN=max_message_length)        :: message
     INTEGER                                  :: idx, pos1, pos2
-    LOGICAL                                  :: failure
 
-    failure = .TRUE.
-    CPPostcondition(ASSOCIATED(inpp),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(inpp))
 
     ! process line until all variables named with the convention ${VAR} are expanded
     DO WHILE (INDEX(input_line,'${') > 0)
        pos1=INDEX(input_line,'${')
        pos1=pos1+2
        pos2=INDEX(input_line(pos1:),'}')
-       CPPostcondition(pos2>0,cp_failure_level,routineP,error,failure)
+       CPASSERT(pos2>0)
        IF(pos2==0) THEN
           WRITE(UNIT=message,FMT="(3A,I6)") &
                "INPP_@SET: Missing '}' in file: ",&
                TRIM(input_file_name), "  Line:",input_line_number
-          CALL stop_program(routineN,moduleN,__LINE__,TRIM(message))
+          CPABORT(TRIM(message))
        ENDIF
 
        pos2=pos1+pos2-2
        varname=input_line(pos1:pos2)
        idx=inpp_find_variable(inpp,varname)
-       CPPostcondition(idx>0,cp_failure_level,routineP,error,failure)
+       CPASSERT(idx>0)
        IF(idx==0) THEN
           WRITE(UNIT=message,FMT="(5A,I6)") &
                "INPP_@SET: Variable ${",TRIM(varname),"} not defined in file: ",&
                TRIM(input_file_name), "  Line:",input_line_number
-          CALL stop_program(routineN,moduleN,__LINE__,TRIM(message))
+          CPABORT(TRIM(message))
        ENDIF
 
        IF(pos1>3) THEN
@@ -488,18 +482,18 @@ CONTAINS
        pos1=INDEX(input_line,'$')
        pos1=pos1+1
        pos2=INDEX(input_line(pos1:),' ')
-       CPPostcondition(pos2>=0,cp_failure_level,routineP,error,failure)
+       CPASSERT(pos2>=0)
        IF(pos2==0) pos2 = LEN_TRIM(input_line(pos1:))+1
 
        pos2=pos1+pos2-1
        varname=input_line(pos1:pos2)
        idx=inpp_find_variable(inpp,varname)
-       CPPostcondition(idx>=0,cp_failure_level,routineP,error,failure)
+       CPASSERT(idx>=0)
        IF(idx==0) THEN
           WRITE(UNIT=message,FMT="(5A,I6)") &
                "INPP_@SET: Variable $",TRIM(varname)," not defined in file: ",&
                TRIM(input_file_name), "  Line:",input_line_number
-          CALL stop_program(routineN,moduleN,__LINE__,TRIM(message))
+          CPABORT(TRIM(message))
        ENDIF
 
        IF(pos1>2) THEN

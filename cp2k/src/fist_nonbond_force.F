@@ -13,7 +13,6 @@
 !> \author CJM
 ! *****************************************************************************
 MODULE fist_nonbond_force
-
   USE atomic_kind_types,               ONLY: atomic_kind_type,&
                                              get_atomic_kind,&
                                              get_atomic_kind_set
@@ -31,6 +30,7 @@ MODULE fist_nonbond_force
   USE kinds,                           ONLY: dp,&
                                              dp_size,&
                                              int_size
+  USE machine,                         ONLY: m_memory
   USE mathconstants,                   ONLY: oorootpi,&
                                              sqrthalf
   USE mathlib,                         ONLY: matvec_3x3
@@ -50,9 +50,8 @@ MODULE fist_nonbond_force
   USE splines_types,                   ONLY: spline_data_p_type,&
                                              spline_factor_type
   USE termination,                     ONLY: stop_memory
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -81,11 +80,10 @@ CONTAINS
 !> \param atprop_env ...
 !> \param atomic_kind_set ...
 !> \param use_virial ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE force_nonbond(fist_nonbond_env, ewald_env, particle_set, cell, &
        pot_nonbond, f_nonbond, pv_nonbond, fshell_nonbond, fcore_nonbond, &
-       atprop_env, atomic_kind_set, use_virial, error)
+       atprop_env, atomic_kind_set, use_virial)
 
     TYPE(fist_nonbond_env_type), POINTER     :: fist_nonbond_env
     TYPE(ewald_environment_type), POINTER    :: ewald_env
@@ -100,7 +98,6 @@ CONTAINS
     TYPE(atprop_type), POINTER               :: atprop_env
     TYPE(atomic_kind_type), POINTER          :: atomic_kind_set(:)
     LOGICAL, INTENT(IN)                      :: use_virial
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'force_nonbond', &
       routineP = moduleN//':'//routineN
@@ -110,8 +107,7 @@ CONTAINS
       shell_b, shell_type
     INTEGER, DIMENSION(:, :), POINTER        :: list
     LOGICAL                                  :: all_terms, do_multipoles, &
-                                                failure, full_nl, &
-                                                shell_present
+                                                full_nl, shell_present
     LOGICAL, ALLOCATABLE, DIMENSION(:)       :: is_shell_kind
     REAL(KIND=dp) :: alpha, beta, beta_a, beta_b, energy, etot, fac_ei, &
       fac_kind, fac_vdw, fscalar, mm_radius_a, mm_radius_b, qcore_a, qcore_b, &
@@ -144,14 +140,14 @@ CONTAINS
 
     CALL timeset(routineN,handle)
     NULLIFY (logger)
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
     NULLIFY(pot, rshell_last_update_pbc, spl_f, ij_kind_full_fac)
     CALL fist_nonbond_env_get(fist_nonbond_env, nonbonded=nonbonded, &
          potparm14=potparm14, potparm=potparm, r_last_update=r_last_update, &
          r_last_update_pbc=r_last_update_pbc,natom_types=nkind, &
          rshell_last_update_pbc=rshell_last_update_pbc, &
          rcore_last_update_pbc=rcore_last_update_pbc, &
-         ij_kind_full_fac=ij_kind_full_fac, error=error)
+         ij_kind_full_fac=ij_kind_full_fac)
     CALL ewald_env_get(ewald_env, alpha=alpha, ewald_type=ewald_type, &
          do_multipoles=do_multipoles, &
          interaction_cutoffs=ei_interaction_cutoffs)
@@ -165,7 +161,7 @@ CONTAINS
     END IF
     shell_present = .FALSE.
     IF (PRESENT(fshell_nonbond)) THEN
-       CPPostcondition(PRESENT(fcore_nonbond),cp_failure_level,routineP,error,failure)
+       CPASSERT(PRESENT(fcore_nonbond))
        fshell_nonbond = 0.0_dp
        fcore_nonbond = 0.0_dp
        shell_present = .TRUE.
@@ -181,7 +177,7 @@ CONTAINS
     IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"qshell",dp_size*nkind)
     ALLOCATE (is_shell_kind(nkind),STAT=istat)
     IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"is_shell_kind",int_size*nkind)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    CPASSERT(istat==0)
     DO ikind=1,nkind
        atomic_kind => atomic_kind_set(ikind)
        CALL get_atomic_kind(atomic_kind,&
@@ -192,8 +188,7 @@ CONTAINS
        IF (ASSOCIATED(shell_kind)) THEN
           CALL get_shell(shell=shell_kind,&
                          charge_core=qcore(ikind),&
-                         charge_shell=qshell(ikind),&
-                         error=error)
+                         charge_shell=qshell(ikind))
        ELSE
           qcore(ikind) = 0.0_dp
           qshell(ikind) = 0.0_dp
@@ -217,7 +212,7 @@ CONTAINS
           !$omp          private(shell_kind,beta,beta_a,beta_b,spl_f,spline_data) &
           !$omp          private(shell_type,all_terms,rab_cc,rab_cs,rab_sc,rab_ss) &
           !$omp          private(rab_list,rab2_list,rab_com,rab2_com,pv,pv_thread) &
-          !$omp          private(rab,rab2,rab2_max,fscalar,energy,error,failure) &
+          !$omp          private(rab,rab2,rab2_max,fscalar,energy) &
           !$omp          private(shell_a,shell_b,etot,fatom_a,fatom_b) &
           !$omp          private(fcore_a,fcore_b,fshell_a,fshell_b,i,j) &
           !$omp          shared(shell_present) &
@@ -318,8 +313,8 @@ CONTAINS
              spline_data => pot%pair_spline_data
              shell_type = pot%shell_type
              IF (shell_type /= nosh_nosh) THEN
-                CPPrecondition(.NOT.do_multipoles,cp_failure_level,routineP,error,failure)
-                CPPostcondition(shell_present,cp_failure_level,routineP,error,failure)
+                CPASSERT(.NOT.do_multipoles)
+                CPASSERT(shell_present)
              END IF
              rab2_max = pot%rcutsq
 
@@ -584,16 +579,14 @@ CONTAINS
        END DO Kind_Group_Loop
     END DO Lists
 
-    DEALLOCATE (mm_radius,STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"mm_radius")
-    DEALLOCATE (qeff,STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"qeff")
-    DEALLOCATE (qcore,STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"qcore")
-    DEALLOCATE (qshell,STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"qshell")
-    DEALLOCATE (is_shell_kind,STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"is_shell_kind")
+    !sample peak memory
+    CALL m_memory()
+
+    DEALLOCATE (mm_radius)
+    DEALLOCATE (qeff)
+    DEALLOCATE (qcore)
+    DEALLOCATE (qshell)
+    DEALLOCATE (is_shell_kind)
 
     CALL timestop(handle)
 
@@ -661,14 +654,13 @@ CONTAINS
 !> \param atprop_env ...
 !> \param cell ...
 !> \param use_virial ...
-!> \param error ...
 !> \par History
 !>      Splitted routines to clean and to fix a bug with the tensor whose
 !>      original definition was not correct for PBC.. [Teodoro Laino -06/2007]
 ! *****************************************************************************
   SUBROUTINE bonded_correct_gaussian(fist_nonbond_env, atomic_kind_set, &
              local_particles, particle_set, ewald_env, v_bonded_corr, pv_bc, &
-             shell_particle_set, core_particle_set, atprop_env, cell, use_virial, error)
+             shell_particle_set, core_particle_set, atprop_env, cell, use_virial)
 
     TYPE(fist_nonbond_env_type), POINTER     :: fist_nonbond_env
     TYPE(atomic_kind_type), POINTER          :: atomic_kind_set( : )
@@ -683,7 +675,6 @@ CONTAINS
     TYPE(atprop_type), POINTER               :: atprop_env
     TYPE(cell_type), POINTER                 :: cell
     LOGICAL, INTENT(IN)                      :: use_virial
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'bonded_correct_gaussian', &
       routineP = moduleN//':'//routineN
@@ -717,9 +708,9 @@ CONTAINS
 
     CALL fist_nonbond_env_get(fist_nonbond_env, nonbonded=nonbonded, &
          potparm14=potparm14, potparm=potparm, &
-         ij_kind_full_fac=ij_kind_full_fac, error=error)
+         ij_kind_full_fac=ij_kind_full_fac)
     CALL ewald_env_get(ewald_env, alpha=alpha, do_multipoles=do_multipoles, &
-         group=group, error=error)
+         group=group)
     ! Defining the constants
     const = 2.0_dp*alpha*oorootpi
 
@@ -776,7 +767,7 @@ CONTAINS
              a_is_shell = ASSOCIATED(shell_kind)
              IF (a_is_shell) THEN
                 CALL get_shell(shell=shell_kind, charge_core=qcore_a, &
-                               charge_shell=qshell_a, error=error)
+                               charge_shell=qshell_a)
                 shell_a = particle_set(atom_a)%shell_index
                 rca = core_particle_set(shell_a)%r
                 rsa = shell_particle_set(shell_a)%r
@@ -795,7 +786,7 @@ CONTAINS
              b_is_shell = ASSOCIATED(shell_kind)
              IF (b_is_shell) THEN
                 CALL get_shell(shell=shell_kind, charge_core=qcore_b, &
-                               charge_shell=qshell_b, error=error)
+                               charge_shell=qshell_b)
                 shell_b = particle_set(atom_b)%shell_index
                 rcb = core_particle_set(shell_b)%r
                 rsb = shell_particle_set(shell_b)%r
@@ -885,7 +876,7 @@ CONTAINS
        CALL get_atomic_kind(atomic_kind, shell=shell_kind)
        IF (ASSOCIATED(shell_kind)) THEN
           CALL get_shell(shell=shell_kind, charge_core=qcore_a, &
-                         charge_shell=qshell_a, error=error)
+                         charge_shell=qshell_a)
 
           natoms_per_kind = local_particles%n_el(kind_a)
           DO iatom = 1, natoms_per_kind

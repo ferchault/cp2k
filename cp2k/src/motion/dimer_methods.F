@@ -29,9 +29,8 @@ MODULE dimer_methods
   USE motion_utils,                    ONLY: rot_ana,&
                                              thrs_motion
   USE particle_list_types,             ONLY: particle_list_type
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -50,39 +49,36 @@ CONTAINS
 !> \param f ...
 !> \param gradient ...
 !> \param calc_force ...
-!> \param error ...
 !> \date  01.2008
 !> \par History
 !>      none
 !> \author Luca Bellucci and Teodoro Laino - created [tlaino]
 ! *****************************************************************************
-  RECURSIVE SUBROUTINE  cp_eval_at_ts (gopt_env, x, f, gradient, calc_force, error)
+  RECURSIVE SUBROUTINE  cp_eval_at_ts (gopt_env, x, f, gradient, calc_force)
     TYPE(gopt_f_type), POINTER               :: gopt_env
     REAL(KIND=dp), DIMENSION(:), POINTER     :: x
     REAL(KIND=dp), INTENT(OUT)               :: f
     REAL(KIND=dp), DIMENSION(:), POINTER     :: gradient
     LOGICAL, INTENT(IN)                      :: calc_force
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cp_eval_at_ts', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, iw
-    LOGICAL                                  :: eval_analytical, failure
+    LOGICAL                                  :: eval_analytical
     REAL(KIND=dp)                            :: angle1, angle2, f1, norm
     TYPE(cp_logger_type), POINTER            :: logger
     TYPE(dimer_env_type), POINTER            :: dimer_env
     TYPE(section_vals_type), POINTER         :: print_section
 
-    failure=.FALSE.
     NULLIFY(dimer_env,logger, print_section)
     CALL timeset(routineN,handle)
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
 
-    CPPostcondition(ASSOCIATED(gopt_env),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(gopt_env))
     dimer_env => gopt_env%dimer_env
-    CPPostcondition(ASSOCIATED(dimer_env),cp_failure_level,routineP,error,failure)
-    iw = cp_print_key_unit_nr(logger,gopt_env%geo_section,"PRINT%PROGRAM_RUN_INFO",extension=".log",error=error)
+    CPASSERT(ASSOCIATED(dimer_env))
+    iw = cp_print_key_unit_nr(logger,gopt_env%geo_section,"PRINT%PROGRAM_RUN_INFO",extension=".log")
     ! Possibly rotate Dimer or just compute Gradients of point 0 for Translation
     IF (gopt_env%dimer_rotation) THEN
        IF (debug_this_module.AND.(iw>0)) THEN
@@ -97,7 +93,7 @@ CONTAINS
           END IF
           IF (eval_analytical) THEN
              ! Compute energy, gradients and rotation vector for R1
-             CALL cp_eval_at_ts_low(gopt_env, x, 1, dimer_env, calc_force, f1, dimer_env%rot%g1, error)
+             CALL cp_eval_at_ts_low(gopt_env, x, 1, dimer_env, calc_force, f1, dimer_env%rot%g1)
           ELSE
              angle1 = dimer_env%rot%angle1
              angle2 = dimer_env%rot%angle2
@@ -114,7 +110,7 @@ CONTAINS
              WRITE(iw,'(A)')"-2*(G1-G0) vector:"
              WRITE(iw,'(3F15.9)')gradient
           END IF
-          CALL get_theta(gradient, dimer_env, norm, error)
+          CALL get_theta(gradient, dimer_env, norm)
           f = norm
           dimer_env%cg_rot%norm_theta_old = dimer_env%cg_rot%norm_theta
           dimer_env%cg_rot%norm_theta     = norm
@@ -132,7 +128,7 @@ CONTAINS
           gradient = -gradient
        CASE(do_second_rotation_step)
           ! Compute energy, gradients and rotation vector for R1
-          CALL cp_eval_at_ts_low(gopt_env, x, 1, dimer_env, calc_force, f1, dimer_env%rot%g1p, error)
+          CALL cp_eval_at_ts_low(gopt_env, x, 1, dimer_env, calc_force, f1, dimer_env%rot%g1p)
           dimer_env%rot%curvature  = DOT_PRODUCT(dimer_env%rot%g1p-dimer_env%rot%g0,dimer_env%nvec)/dimer_env%dr
           dimer_env%rot%rotation_step = do_third_rotation_step
 
@@ -140,7 +136,7 @@ CONTAINS
           ! This is never used for getting a new theta but is consistent in order to
           ! give back the right value of f
           gradient = -2.0_dp*(dimer_env%rot%g1p-dimer_env%rot%g0)
-          CALL get_theta(gradient, dimer_env, norm, error)
+          CALL get_theta(gradient, dimer_env, norm)
           f = norm
 
           IF (debug_this_module.AND.(iw>0)) THEN
@@ -150,7 +146,7 @@ CONTAINS
        END SELECT
     ELSE
        ! Compute energy, gradients and rotation vector for R0
-       CALL cp_eval_at_ts_low(gopt_env, x, 0, dimer_env, calc_force, f,  dimer_env%rot%g0, error)
+       CALL cp_eval_at_ts_low(gopt_env, x, 0, dimer_env, calc_force, f,  dimer_env%rot%g0)
 
        ! The dimer is rotated only when we are out of the translation line search
        IF (.NOT.gopt_env%do_line_search) THEN
@@ -160,18 +156,18 @@ CONTAINS
              WRITE(iw,'(3F15.9)')dimer_env%rot%g0
           END IF
           CALL cp_rot_opt(gopt_env%gopt_dimer_env, x, gopt_env%gopt_dimer_param ,&
-               gopt_env%gopt_dimer_env%geo_section, error)
+               gopt_env%gopt_dimer_env%geo_section)
           dimer_env%rot%rotation_step = do_first_rotation_step
        END IF
 
-       print_section => section_vals_get_subs_vals(gopt_env%gopt_dimer_env%geo_section,"PRINT",error=error)
+       print_section => section_vals_get_subs_vals(gopt_env%gopt_dimer_env%geo_section,"PRINT")
        ! Correcting gradients for Translation
        IF (dimer_env%rot%curvature>0) THEN
           gradient =  - DOT_PRODUCT(dimer_env%rot%g0,dimer_env%nvec)*dimer_env%nvec
-          CALL remove_rot_transl_component(gopt_env, gradient, print_section, error)
+          CALL remove_rot_transl_component(gopt_env, gradient, print_section)
        ELSE
           gradient =  dimer_env%rot%g0 - 2.0_dp*DOT_PRODUCT(dimer_env%rot%g0,dimer_env%nvec)*dimer_env%nvec
-          CALL remove_rot_transl_component(gopt_env, gradient, print_section, error)
+          CALL remove_rot_transl_component(gopt_env, gradient, print_section)
        END IF
        IF (debug_this_module.AND.(iw>0)) THEN
           WRITE(iw,*)"final gradient:",gradient
@@ -183,7 +179,7 @@ CONTAINS
           f = -DOT_PRODUCT(gradient,dimer_env%tsl%tls_vec)
        END IF
     END IF
-    CALL cp_print_key_finished_output(iw,logger,gopt_env%geo_section,"PRINT%PROGRAM_RUN_INFO", error=error)
+    CALL cp_print_key_finished_output(iw,logger,gopt_env%geo_section,"PRINT%PROGRAM_RUN_INFO")
     CALL timestop(handle)
   END SUBROUTINE cp_eval_at_ts
 
@@ -192,60 +188,52 @@ CONTAINS
 !> \param gopt_env ...
 !> \param gradient ...
 !> \param print_section ...
-!> \param error ...
 !> \par History
 !>      none
 !> \author Luca Bellucci and Teodoro Laino - created [tlaino] - 01.2008
 ! *****************************************************************************
-  SUBROUTINE  remove_rot_transl_component (gopt_env,gradient,print_section,error)
+  SUBROUTINE  remove_rot_transl_component (gopt_env,gradient,print_section)
     TYPE(gopt_f_type), POINTER               :: gopt_env
     REAL(KIND=dp), DIMENSION(:)              :: gradient
     TYPE(section_vals_type), POINTER         :: print_section
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'remove_rot_transl_component', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: dof, handle, i, j, natoms, &
-                                                stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: dof, handle, i, j, natoms
     REAL(KIND=dp)                            :: norm, norm_gradient_old
     REAL(KIND=dp), DIMENSION(:, :), POINTER  :: D, mat
     TYPE(cp_subsys_type), POINTER            :: subsys
     TYPE(particle_list_type), POINTER        :: particles
 
     CALL timeset(routineN,handle)
-    failure = .FALSE.
     NULLIFY(mat)
-    CALL force_env_get(gopt_env%force_env, subsys=subsys, error=error)
-    CALL cp_subsys_get(subsys, particles=particles, error=error)
+    CALL force_env_get(gopt_env%force_env, subsys=subsys)
+    CALL cp_subsys_get(subsys, particles=particles)
 
     natoms = particles%n_els
     norm_gradient_old = SQRT(DOT_PRODUCT(gradient,gradient))
     IF (norm_gradient_old>0.0_dp) THEN
        IF (natoms>1) THEN
           CALL rot_ana(particles%els, mat, dof, print_section, keep_rotations=.FALSE.,&
-               mass_weighted=.FALSE., natoms=natoms, error=error)
+               mass_weighted=.FALSE., natoms=natoms)
 
           ! Orthogonalize gradient with respect to the full set of Roto-Trasl vectors
-          ALLOCATE(D(3*natoms,dof),stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          ALLOCATE(D(3*natoms,dof))
           ! Check First orthogonality in the first element of the basis set
           DO i = 1, dof
              D(:,i) = mat(:,i)
              DO j = i+1, dof
                 norm = DOT_PRODUCT(mat(:,i),mat(:,j))
-                CPPostcondition(ABS(norm)<thrs_motion,cp_failure_level,routineP,error,failure)
+                CPASSERT(ABS(norm)<thrs_motion)
              END DO
           END DO
           DO i = 1, dof
              norm = DOT_PRODUCT(gradient,D(:,i))
              gradient = gradient - norm * D(:,i)
           END DO
-          DEALLOCATE(D, stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-          DEALLOCATE(mat, stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          DEALLOCATE(D)
+          DEALLOCATE(mat)
        END IF
     END IF
     CALL timestop(handle)
@@ -260,13 +248,12 @@ CONTAINS
 !> \param calc_force ...
 !> \param f ...
 !> \param gradient ...
-!> \param error ...
 !> \par History
 !>      none
 !> \author Luca Bellucci and Teodoro Laino - created [tlaino] - 01.2008
 ! *****************************************************************************
   SUBROUTINE  cp_eval_at_ts_low (gopt_env, x,  dimer_index, dimer_env, calc_force,&
-       f, gradient, error)
+       f, gradient)
     TYPE(gopt_f_type), POINTER               :: gopt_env
     REAL(KIND=dp), DIMENSION(:), POINTER     :: x
     INTEGER, INTENT(IN)                      :: dimer_index
@@ -274,20 +261,18 @@ CONTAINS
     LOGICAL, INTENT(IN)                      :: calc_force
     REAL(KIND=dp), INTENT(OUT), OPTIONAL     :: f
     REAL(KIND=dp), DIMENSION(:), OPTIONAL    :: gradient
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cp_eval_at_ts_low', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, idg, idir, ip
-    LOGICAL                                  :: failure
     TYPE(cp_subsys_type), POINTER            :: subsys
     TYPE(particle_list_type), POINTER        :: particles
 
     CALL timeset(routineN,handle)
     idg=0
-    CALL force_env_get(gopt_env%force_env, subsys=subsys, error=error)
-    CALL cp_subsys_get(subsys, particles=particles, error=error)
+    CALL force_env_get(gopt_env%force_env, subsys=subsys)
+    CALL cp_subsys_get(subsys, particles=particles)
     DO ip=1,particles%n_els
        DO idir=1,3
           idg=idg+1
@@ -296,21 +281,21 @@ CONTAINS
     END DO
 
     ! Compute energy and forces
-    CALL force_env_calc_energy_force(gopt_env%force_env,calc_force=calc_force,error=error)
+    CALL force_env_calc_energy_force(gopt_env%force_env,calc_force=calc_force)
 
     ! Possibly take the potential energy
     IF (PRESENT(f)) THEN
-       CALL force_env_get(gopt_env%force_env,potential_energy=f,error=error)
+       CALL force_env_get(gopt_env%force_env,potential_energy=f)
     END IF
 
     ! Possibly take the gradients
     IF (PRESENT(gradient)) THEN
        idg=0
-       CALL cp_subsys_get(subsys, particles=particles, error=error)
+       CALL cp_subsys_get(subsys, particles=particles)
        DO ip=1,particles%n_els
           DO idir=1,3
              idg=idg+1
-             CPInvariant(SIZE(gradient)>=idg,cp_failure_level,routineP,error,failure)
+             CPASSERT(SIZE(gradient)>=idg)
              gradient(idg)=-particles%els(ip)%f(idir)
           END DO
        END DO

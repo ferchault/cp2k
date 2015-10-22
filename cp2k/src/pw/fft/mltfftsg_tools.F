@@ -9,7 +9,10 @@ MODULE mltfftsg_tools
                                              C_LOC
   USE fft_kinds,                       ONLY: dp
 
-!$ USE OMP_LIB
+!$ USE OMP_LIB, ONLY: omp_get_max_threads, omp_get_thread_num, omp_get_num_threads
+
+#include "../../common/cp_common_uses.f90"
+#include "../../base/base_uses.f90"
 
   PRIVATE
   INTEGER, PARAMETER :: ctrig_length=1024
@@ -47,9 +50,8 @@ SUBROUTINE mltfftsg ( transa, transb, a, ldax, lday, b, ldbx, ldby, n, m, isign,
 
     COMPLEX(dp), ALLOCATABLE, &
       DIMENSION(:, :, :)                     :: z
-    INTEGER :: after( 20 ), before( 20 ), chunk, i, ic, id, iend, ierr, &
-      inzee, isig, istart, iterations, itr, length, lot, nfft, now( 20 ), &
-      num_threads
+    INTEGER :: after( 20 ), before( 20 ), chunk, i, ic, id, iend, inzee, &
+      isig, istart, iterations, itr, length, lot, nfft, now( 20 ), num_threads
     LOGICAL                                  :: tscal
     REAL(dp)                                 :: trig( 2, 1024 )
 
@@ -68,17 +70,13 @@ SUBROUTINE mltfftsg ( transa, transb, a, ldax, lday, b, ldbx, ldby, n, m, isign,
   id = 0; num_threads = 1
 
 !$omp parallel &
-!$omp private ( id, istart, iend, nfft, i, inzee, itr,ierr ) default(none) &
+!$omp private ( id, istart, iend, nfft, i, inzee, itr) default(none) &
 !$omp shared (num_threads,z,iterations,chunk,LOT,length,m,transa,isig, &
 !$omp         before,after,now,trig,a,n,ldax,tscal,scale,ic,transb,ldbx,b)
 
 !$omp single
 !$  num_threads = omp_get_num_threads()
-  ALLOCATE ( Z ( LENGTH, 2, 0:num_threads - 1 ), stat=ierr )
-  IF (ierr /= 0) THEN
-     WRITE (*,*) "Error in allocating memory for z in mltfftsg.F"
-     STOP
-  ENDIF
+  ALLOCATE ( Z ( LENGTH, 2, 0:num_threads - 1 ))
   iterations = (M + LOT - 1) / LOT
   chunk = LOT * ((iterations + num_threads - 1) / num_threads)
 !$omp end single
@@ -133,11 +131,7 @@ SUBROUTINE mltfftsg ( transa, transb, a, ldax, lday, b, ldbx, ldby, n, m, isign,
 
 !$omp end parallel
 
-  DEALLOCATE ( Z, stat=ierr )
-  IF (ierr /= 0) THEN
-     WRITE (*,*) "Error in DEallocating memory for z in mltfftsg.F"
-     STOP
-  ENDIF
+  DEALLOCATE ( Z)
 
   IF(TRANSB == 'N'.OR.TRANSB == 'n') THEN
      B(1:LDBX,M+1:LDBY) = CMPLX(0._dp,0._dp,dp)
@@ -1323,7 +1317,7 @@ SUBROUTINE fftrot ( mm, nfft, m, nn, n, zin, zout,  trig, now, after, before, is
       END DO
     END DO
   ELSE
-    STOP 'Error fftrot'
+    CPABORT('Error fftrot')
   END IF
 
 !-----------------------------------------------------------------------------!
@@ -2398,7 +2392,7 @@ SUBROUTINE fftpre ( mm, nfft, m, nn, n, zin, zout, trig, now, after, before, isi
       END DO
     END DO
   ELSE
-    STOP 'Error fftpre'
+    CPABORT('Error fftpre')
   END IF
 
 !-----------------------------------------------------------------------------!
@@ -3474,7 +3468,7 @@ SUBROUTINE fftstp ( mm, nfft, m, nn, n, zin, zout,  trig, now, after, before, is
       END DO
     END DO
   ELSE
-    STOP 'Error fftstp'
+    CPABORT('Error fftstp')
   END IF
 
 !-----------------------------------------------------------------------------!
@@ -3566,7 +3560,7 @@ SUBROUTINE ctrig ( n, trig, after, before, now, isign, ic )
       WRITE ( *, '(A,i5,A)' ) " Value of ",n, &
             " not allowed for fft, allowed values are:"
       WRITE ( *, '(15i5)' ) ( idata ( 1, j ), j = 1, nt )
-      STOP 'ctrig'
+      CPABORT('ctrig')
     END IF
   END DO mloop
 

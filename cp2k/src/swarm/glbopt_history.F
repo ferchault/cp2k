@@ -12,10 +12,8 @@ MODULE glbopt_history
   USE input_section_types,             ONLY: section_vals_type,&
                                              section_vals_val_get
   USE kinds,                           ONLY: dp
-  USE message_passing,                 ONLY: mp_abort
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
  IMPLICIT NONE
  PRIVATE
@@ -61,21 +59,19 @@ MODULE glbopt_history
 !> \param history ...
 !> \param history_section ...
 !> \param iw ...
-!> \param error ...
 !> \author Ole Schuett
 ! *****************************************************************************
- SUBROUTINE history_init(history, history_section, iw, error)
+ SUBROUTINE history_init(history, history_section, iw)
     TYPE(history_type), INTENT(INOUT)        :: history
     TYPE(section_vals_type), POINTER         :: history_section
     INTEGER                                  :: iw
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     ALLOCATE(history%entries(history_grow_unit))
     history%iw = iw
     CALL section_vals_val_get(history_section, "ENERGY_PRECISION",&
-                                  r_val=history%E_precision, error=error)
+                                  r_val=history%E_precision)
     CALL section_vals_val_get(history_section, "FINGERPRINT_PRECISION",&
-                                  r_val=history%FP_precision,error=error)
+                                  r_val=history%FP_precision)
 
     IF(iw>0) THEN
       WRITE (iw,'(A,T66,E15.3)')&
@@ -133,7 +129,7 @@ MODULE glbopt_history
       DIMENSION(:, :)                        :: matrix, work
     REAL(KIND=dp), DIMENSION(3)              :: d
 
-    IF(ASSOCIATED(res)) CALL mp_abort("goedecker_fingerprint: res already allocated")
+    IF(ASSOCIATED(res)) CPABORT("goedecker_fingerprint: res already allocated")
     N = SIZE(pos) / 3 ! number of atoms
 
     ALLOCATE(matrix(N,N), work(N,N))
@@ -151,7 +147,7 @@ MODULE glbopt_history
     !TODO: do we need to store lower triangle of matrix?
     ALLOCATE(res(N))
     CALL DSYEV('N','U',N,matrix,N, res, work, N**2, info)
-    IF(info /= 0) CALL mp_abort("goedecker_fingerprint: DSYEV failed")
+    IF(info /= 0) CPABORT("goedecker_fingerprint: DSYEV failed")
  END SUBROUTINE goedecker_fingerprint
 
 
@@ -206,7 +202,7 @@ MODULE glbopt_history
       INTENT(IN)                             :: fingerprint
     INTEGER, INTENT(IN), OPTIONAL            :: id
 
-    INTEGER                                  :: handle, k, n
+    INTEGER                                  :: handle, i, k, n
     TYPE(history_entry_type), DIMENSION(:), &
       POINTER                                :: tmp
 
@@ -224,7 +220,13 @@ MODULE glbopt_history
 
     k = interpolation_search(history, fingerprint%Epot)
 
-    history%entries(k+1:) = history%entries(k:n-1)
+    !history%entries(k+1:) = history%entries(k:n-1)
+    !Workaround for an XLF bug - pointer array copy does
+    !not work correctly
+    DO i=n,k+1,-1
+      history%entries(i) = history%entries(i-1)
+    END DO
+
     ALLOCATE(history%entries(k)%p)
     history%entries(k)%p = fingerprint
     IF(PRESENT(id)) &
@@ -237,7 +239,7 @@ MODULE glbopt_history
           !WRITE(*,*) "history: ", k, "Epot",history%entries(k)%p%Epot
           IF(k>1)THEN
              IF(history%entries(k-1)%p%Epot > history%entries(k)%p%Epot) &
-               CALL mp_abort("history_add: history in wrong order")
+               CPABORT("history_add: history in wrong order")
            END IF
        END DO
     ENDIF
@@ -380,7 +382,7 @@ MODULE glbopt_history
 
     IF(found_i /= found_i_ref) THEN
       WRITE (*,*) found_i, found_i_ref
-      CALL mp_abort("verify_history_lookup failed")
+      CPABORT("verify_history_lookup failed")
     ENDIF
 
  END SUBROUTINE verify_history_lookup

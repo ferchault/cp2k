@@ -32,6 +32,7 @@ MODULE bibliography
                                              cite_reference
   USE string_utilities,                ONLY: s2a
 #include "cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -72,7 +73,8 @@ MODULE bibliography
        Kantorovich2008a, Wellendorff2012, Niklasson2014, Borstnik2014, &
        Rayson2009, Grimme2011, Fattebert2002, Andreussi2012,           &
        Khaliullin2007, Khaliullin2008, Merlot2014, Lin2009, Lin2013,   &
-       QUIP_ref, DelBen2015, Souza2002, Umari2002, Stengel2009, Luber2014
+       QUIP_ref, DelBen2015, Souza2002, Umari2002, Stengel2009,        &
+       Luber2014, Berghold2011, DelBen2015b 
 
 CONTAINS
 
@@ -745,7 +747,7 @@ CONTAINS
          "   Mohamed, F",&
          "   Laio, A",&
          "   Parrinello, M",&
-         "TI An efficient real space multigrid OM/MM electrostatic coupling",&
+         "TI An efficient real space multigrid QM/MM electrostatic coupling",&
          "SO JOURNAL OF CHEMICAL THEORY AND COMPUTATION",&
          "SN 1549-9618",&
          "PD NOV-DEC",&
@@ -2481,7 +2483,7 @@ CONTAINS
          "AU Weber, V",&
          "   Iannuzzi, M",&
          "   Giani, S",&
-         "   Hutter, S",&
+         "   Hutter, J",&
          "   Declerck, R",&
          "   Waroduier, M",&
          "AF Weber, Valery",&
@@ -3005,6 +3007,53 @@ CONTAINS
           "PM 25194377",&
           "ER"),&
           DOI="10.1063/1.4894425")
+
+     CALL add_reference(key=Berghold2011, ISI_record=s2a(&
+          "PT J",&
+          "AU Berghold, G",&
+          "   Parrinello, M",&
+          "   Hutter, J",&
+          "AF Berghold, Gerd",&
+          "   Parrinello, Michele",&
+          "   Hutter, Juerg",&
+          "TI Polarized atomic orbitals for linear scaling methods",&
+          "SO JOURNAL OF CHEMICAL PHYSICS",&
+          "RI Hutter, Juerg/E-9244-2011",&
+          "SN 0021-9606",&
+          "PD FEB 1",&
+          "PY 2002",&
+          "VL 116",&
+          "IS 5",&
+          "BP 1800",&
+          "EP 1810",&
+          "DI 10.1063/1.1431270",&
+          "UT WOS:000173418600007",&
+          "ER"),&
+          DOI="10.1063/1.1431270")
+     CALL add_reference(key=DelBen2015b, ISI_record=s2a(&
+          "PT J",&
+          "AU Del Ben, M",&
+          "   Hutter, J",&
+          "   VandeVondele, J",&
+          "AF Del Ben, Mauro",&
+          "   Hutter, Juerg",&
+          "   VandeVondele, Joost",&
+          "TI Forces and stress in second order Moller-Plesset perturbation theory for",&
+          "   condensed phase systems within the resolution-of-identity Gaussian and",&
+          "   plane waves approach",&
+          "SO JOURNAL OF CHEMICAL PHYSICS",&
+          "SN 0021-9606",&
+          "EI 1089-7690",&
+          "PD SEP 14",&
+          "PY 2015",&
+          "VL 143",&
+          "IS 10",&
+          "AR 102803",&
+          "DI 10.1063/1.4919238",&
+          "UT WOS:000361572900008",&
+          "PM 26373996",&
+          "ER"),&
+          DOI="10.1063/1.4919238")
 
   END SUBROUTINE add_all_references
 

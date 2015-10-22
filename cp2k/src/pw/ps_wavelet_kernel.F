@@ -21,6 +21,7 @@ MODULE ps_wavelet_kernel
   USE ps_wavelet_util,                 ONLY: F_FFT_dimensions,&
                                              S_FFT_dimensions
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -67,7 +68,6 @@ CONTAINS
 !>                 kernel is injective. This will divide by two each direction,
 !>                 since the kernel for the zero-padded convolution is real and symmetric.
 !> \param mpi_group ...
-!> \param error ...
 !> \date February 2007
 !> \author Luigi Genovese
 !> \note Due to the fact that the kernel dimensions are unknown before the calling, the kernel 
@@ -76,7 +76,7 @@ CONTAINS
 !>     the nd1,nd2,nd3 arguments to the PS_dim4allocation routine, then eliminating the pointer 
 !>     declaration. 
 ! *****************************************************************************
-  SUBROUTINE createKernel(geocode,n01,n02,n03,hx,hy,hz,itype_scf,iproc,nproc,kernel,mpi_group,error)
+  SUBROUTINE createKernel(geocode,n01,n02,n03,hx,hy,hz,itype_scf,iproc,nproc,kernel,mpi_group)
 
     CHARACTER(len=1), INTENT(in)             :: geocode
     INTEGER, INTENT(in)                      :: n01, n02, n03
@@ -84,15 +84,13 @@ CONTAINS
     INTEGER, INTENT(in)                      :: itype_scf, iproc, nproc
     REAL(KIND=dp), POINTER                   :: kernel(:)
     INTEGER, INTENT(in)                      :: mpi_group
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'createKernel', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i_all, m1, m2, m3, md1, md2, &
-                                                md3, n1, n2, n3, nd1, nd2, &
-                                                nd3, nlimd, nlimk
-    LOGICAL                                  :: failure
+    INTEGER                                  :: m1, m2, m3, md1, md2, md3, &
+                                                n1, n2, n3, nd1, nd2, nd3, &
+                                                nlimd, nlimk
     REAL(KIND=dp)                            :: hgrid
 
   hgrid=MAX(hx,hy,hz)
@@ -102,8 +100,7 @@ CONTAINS
      CALL F_FFT_dimensions(n01,n02,n03,m1,m2,m3,n1,n2,n3,&
                            md1,md2,md3,nd1,nd2,nd3,nproc)
 
-     ALLOCATE(kernel(1),stat=i_all)
-     CPPostcondition(i_all==0,cp_failure_level,routineP,error,failure)
+     ALLOCATE(kernel(1))
      nlimd=n2
      nlimk=0
 
@@ -112,13 +109,12 @@ CONTAINS
       CALL S_FFT_dimensions(n01,n02,n03,m1,m2,m3,n1,n2,n3,&
                             md1,md2,md3,nd1,nd2,nd3,nproc)
 
-     ALLOCATE(kernel(nd1*nd2*nd3/nproc),stat=i_all)
-     CPPostcondition(i_all==0,cp_failure_level,routineP,error,failure)
+     ALLOCATE(kernel(nd1*nd2*nd3/nproc))
 
      !the kernel must be built and scattered to all the processes
 
      CALL Surfaces_Kernel(n1,n2,n3,m3,nd1,nd2,nd3,hx,hz,hy,&
-                          itype_scf,kernel,iproc,nproc,mpi_group,error)
+                          itype_scf,kernel,iproc,nproc,mpi_group)
      !last plane calculated for the density and the kernel
 
      nlimd=n2
@@ -129,12 +125,11 @@ CONTAINS
 
      CALL F_FFT_dimensions(n01,n02,n03,m1,m2,m3,n1,n2,n3,&
                            md1,md2,md3,nd1,nd2,nd3,nproc)
-     ALLOCATE(kernel(nd1*nd2*nd3/nproc),stat=i_all)
+     ALLOCATE(kernel(nd1*nd2*nd3/nproc))
 
-     CPPostcondition(i_all==0,cp_failure_level,routineP,error,failure)
      !the kernel must be built and scattered to all the processes
      CALL Free_Kernel(n01,n02,n03,n1,n2,n3,nd1,nd2,nd3,hgrid,&
-                      itype_scf,iproc,nproc,kernel,mpi_group,error)
+                      itype_scf,iproc,nproc,kernel,mpi_group)
 
      !last plane calculated for the density and the kernel
      nlimd=n2/2
@@ -142,9 +137,7 @@ CONTAINS
 
   ELSE
 
-     CALL cp_assert(.FALSE.,cp_assertion_failed,&
-          cp_failure_level,routineP,&
-          "No wavelet based poisson solver for given geometry",error,failure)
+     CPABORT("No wavelet based poisson solver for given geometry")
 
   END IF
 !!!  IF (iproc==0) THEN
@@ -224,12 +217,11 @@ END SUBROUTINE createKernel
 !> \param iproc Number of process
 !> \param nproc number of processes
 !> \param mpi_group ...
-!> \param error ...
 !> \date October 2006
 !> \author L. Genovese
 ! *****************************************************************************
 SUBROUTINE Surfaces_Kernel(n1,n2,n3,m3,nker1,nker2,nker3,h1,h2,h3,&
-                           itype_scf,karray,iproc,nproc,mpi_group,error)
+                           itype_scf,karray,iproc,nproc,mpi_group)
 
     INTEGER, INTENT(in)                      :: n1, n2, n3, m3, nker1, nker2, &
                                                 nker3
@@ -239,18 +231,16 @@ SUBROUTINE Surfaces_Kernel(n1,n2,n3,m3,nker1,nker2,nker3,h1,h2,h3,&
       DIMENSION(nker1, nker2, nker3/nproc), &
       INTENT(out)                            :: karray
     INTEGER, INTENT(in)                      :: mpi_group
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'Surfaces_Kernel', &
       routineP = moduleN//':'//routineN
     INTEGER, PARAMETER                       :: n_points = 2**6, &
                                                 ncache_optimal = 8*1024
 
-    INTEGER :: i, i1, i2, i3, i_all, i_stat, ic, iend, imu, ind1, ind2, &
-      inzee, ipolyord, ireim, istart, j2, j2nd, j2st, jnd1, jp2, jreim, &
-      n_cell, n_range, n_scf, nact2, ncache, nfft, num_of_mus, shift
+    INTEGER :: i, i1, i2, i3, ic, iend, imu, ind1, ind2, inzee, ipolyord, &
+      ireim, istart, j2, j2nd, j2st, jnd1, jp2, jreim, n_cell, n_range, &
+      n_scf, nact2, ncache, nfft, num_of_mus, shift
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: after, before, now
-    LOGICAL                                  :: failure
     REAL(kind=dp)                            :: a, b, c, cp, d, diff, dx, &
                                                 feI, feR, foI, foR, fR, mu1, &
                                                 pi, pion, ponx, pony, sp, &
@@ -338,12 +328,8 @@ SUBROUTINE Surfaces_Kernel(n1,n2,n3,m3,nker1,nker2,nker3,h1,h2,h3,&
   !Number of integration points : 2*itype_scf*n_points
   n_scf=2*itype_scf*n_points
   !Allocations
-  i_all = 0
-  ALLOCATE(x_scf(0:n_scf),stat=i_stat)
-  i_all = i_all + i_stat
-  ALLOCATE(y_scf(0:n_scf),stat=i_stat)
-  i_all = i_all + i_stat
-  CPPostcondition(i_all==0,cp_failure_level,routineP,error,failure)
+  ALLOCATE(x_scf(0:n_scf))
+  ALLOCATE(y_scf(0:n_scf))
 
   !Build the scaling function
   CALL scaling_function(itype_scf,n_scf,n_range,x_scf,y_scf)
@@ -370,26 +356,16 @@ SUBROUTINE Surfaces_Kernel(n1,n2,n3,m3,nker1,nker2,nker3,h1,h2,h3,&
   END DO enlarge_ydim
 
   !array for the MPI procedure
-  ALLOCATE(kernel(nker1,nact2/nproc,nker3),stat=i_stat)
-  i_all = i_all + i_stat
-  ALLOCATE(kernel_mpi(nker1,nact2/nproc,nker3/nproc,nproc),stat=i_stat)
-  i_all = i_all + i_stat
-  ALLOCATE(kernel_scf(n_range),stat=i_stat)
-  i_all = i_all + i_stat
-  ALLOCATE(halfft_cache(2,ncache/4,2),stat=i_stat)
-  i_all = i_all + i_stat
-  ALLOCATE(cossinarr(2,n3/2-1),stat=i_stat)
-  i_all = i_all + i_stat
-  ALLOCATE(btrig(2,ctrig_length),stat=i_stat)
-  i_all = i_all + i_stat
-  ALLOCATE(after(7),stat=i_stat)
-  i_all = i_all + i_stat
-  ALLOCATE(now(7),stat=i_stat)
-  i_all = i_all + i_stat
-  ALLOCATE(before(7),stat=i_stat)
-  i_all = i_all + i_stat
+  ALLOCATE(kernel(nker1,nact2/nproc,nker3))
+  ALLOCATE(kernel_mpi(nker1,nact2/nproc,nker3/nproc,nproc))
+  ALLOCATE(kernel_scf(n_range))
+  ALLOCATE(halfft_cache(2,ncache/4,2))
+  ALLOCATE(cossinarr(2,n3/2-1))
+  ALLOCATE(btrig(2,ctrig_length))
+  ALLOCATE(after(7))
+  ALLOCATE(now(7))
+  ALLOCATE(before(7))
 
-  CPPostcondition(i_all==0,cp_failure_level,routineP,error,failure)
   !constants
   pi=4._dp*ATAN(1._dp)
 
@@ -435,7 +411,7 @@ SUBROUTINE Surfaces_Kernel(n1,n2,n3,m3,nker1,nker2,nker3,h1,h2,h3,&
         shift=1
 
         CALL calculates_green_opt_muzero(n_range,n_scf,ipolyord,x_scf,y_scf,&
-             cpol(1,ipolyord),dx,kernel_scf,error)
+             cpol(1,ipolyord),dx,kernel_scf)
 
         !copy of the first zero value
         halfft_cache(1,1,1)=0._dp
@@ -471,7 +447,7 @@ SUBROUTINE Surfaces_Kernel(n1,n2,n3,m3,nker1,nker2,nker3,h1,h2,h3,&
         mu1=2._dp*pi*SQRT((ponx/h1)**2+(pony/h2)**2)*h3
 
         CALL calculates_green_opt(n_range,n_scf,itype_scf,ipolyord,x_scf,y_scf,&
-             cpol(1,ipolyord),mu1,dx,kernel_scf,error)
+             cpol(1,ipolyord),mu1,dx,kernel_scf)
 
         !readjust the coefficient and define the final kernel
 
@@ -559,26 +535,16 @@ SUBROUTINE Surfaces_Kernel(n1,n2,n3,m3,nker1,nker2,nker3,h1,h2,h3,&
   ENDIF
 
   !De-allocations
-  DEALLOCATE(kernel,stat=i_all)
-  DEALLOCATE(kernel_mpi,stat=i_stat)
-  i_all=i_all+i_stat
-  DEALLOCATE(btrig,stat=i_stat)
-  i_all=i_all+i_stat
-  DEALLOCATE(after,stat=i_stat)
-  i_all=i_all+i_stat
-  DEALLOCATE(now,stat=i_stat)
-  i_all=i_all+i_stat
-  DEALLOCATE(before,stat=i_stat)
-  i_all=i_all+i_stat
-  DEALLOCATE(halfft_cache,stat=i_stat)
-  i_all=i_all+i_stat
-  DEALLOCATE(kernel_scf,stat=i_stat)
-  i_all=i_all+i_stat
-  DEALLOCATE(x_scf,stat=i_stat)
-  i_all=i_all+i_stat
-  DEALLOCATE(y_scf,stat=i_stat)
-
-  CPPostcondition(i_all==0,cp_failure_level,routineP,error,failure)
+  DEALLOCATE(kernel)
+  DEALLOCATE(kernel_mpi)
+  DEALLOCATE(btrig)
+  DEALLOCATE(after)
+  DEALLOCATE(now)
+  DEALLOCATE(before)
+  DEALLOCATE(halfft_cache)
+  DEALLOCATE(kernel_scf)
+  DEALLOCATE(x_scf)
+  DEALLOCATE(y_scf)
 
 END SUBROUTINE Surfaces_Kernel
 
@@ -594,9 +560,8 @@ END SUBROUTINE Surfaces_Kernel
 !> \param mu ...
 !> \param hres ...
 !> \param g_mu ...
-!> \param error ...
 ! *****************************************************************************
-SUBROUTINE calculates_green_opt(n,n_scf,itype_scf,intorder,xval,yval,c,mu,hres,g_mu,error)
+SUBROUTINE calculates_green_opt(n,n_scf,itype_scf,intorder,xval,yval,c,mu,hres,g_mu)
     INTEGER, INTENT(in)                      :: n, n_scf, itype_scf, intorder
     REAL(KIND=dp), DIMENSION(0:n_scf), &
       INTENT(in)                             :: xval, yval
@@ -604,16 +569,13 @@ SUBROUTINE calculates_green_opt(n,n_scf,itype_scf,intorder,xval,yval,c,mu,hres,g
       INTENT(in)                             :: c
     REAL(KIND=dp), INTENT(in)                :: mu, hres
     REAL(KIND=dp), DIMENSION(n), INTENT(out) :: g_mu
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'calculates_green_opt', &
       routineP = moduleN//':'//routineN
     REAL(KIND=dp), PARAMETER                 :: mu_max = 0.2_dp
 
-    INTEGER                                  :: i, i_all, i_stat, iend, &
-                                                ikern, ivalue, izero, n_iter, &
-                                                nrec
-    LOGICAL                                  :: failure
+    INTEGER                                  :: i, iend, ikern, ivalue, &
+                                                izero, n_iter, nrec
     REAL(KIND=dp)                            :: f, filter, fl, fr, gleft, &
                                                 gltmp, gright, grtmp, mu0, &
                                                 ratio, x, x0, x1
@@ -639,8 +601,7 @@ SUBROUTINE calculates_green_opt(n,n_scf,itype_scf,intorder,xval,yval,c,mu,hres,g
   !dimension needed for the correct calculation of the recursion
   nrec=2**n_iter*n
 
-  ALLOCATE(green(-nrec:nrec),stat=i_all)
-  CPPostcondition(i_all==0,cp_failure_level,routineP,error,failure)
+  ALLOCATE(green(-nrec:nrec))
 
   !initialization of the branching value
   ikern=0
@@ -719,8 +680,7 @@ SUBROUTINE calculates_green_opt(n,n_scf,itype_scf,intorder,xval,yval,c,mu,hres,g
      !print *,ikern,izero,n_scf,gltmp,grtmp,gleft,gright,x0,x1,green(ikern)
   END DO
   !now we must calculate the recursion
-  ALLOCATE(green1(-nrec:nrec),stat=i_all)
-  CPPostcondition(i_all==0,cp_failure_level,routineP,error,failure)
+  ALLOCATE(green1(-nrec:nrec))
 
   !Start the iteration to go from mu0 to mu
   CALL scf_recursion(itype_scf,n_iter,nrec,green(-nrec),green1(-nrec))
@@ -732,9 +692,7 @@ SUBROUTINE calculates_green_opt(n,n_scf,itype_scf,intorder,xval,yval,c,mu,hres,g
      g_mu(i)=0._dp
   END DO
 
-  DEALLOCATE(green,stat=i_all)
-  DEALLOCATE(green1,stat=i_stat)
-  CPPostcondition(i_stat+i_all==0,cp_failure_level,routineP,error,failure)
+  DEALLOCATE(green, green1)
 
 END SUBROUTINE calculates_green_opt
 
@@ -748,9 +706,8 @@ END SUBROUTINE calculates_green_opt
 !> \param c ...
 !> \param hres ...
 !> \param green ...
-!> \param error ...
 ! *****************************************************************************
-SUBROUTINE calculates_green_opt_muzero(n,n_scf,intorder,xval,yval,c,hres,green,error)
+SUBROUTINE calculates_green_opt_muzero(n,n_scf,intorder,xval,yval,c,hres,green)
     INTEGER, INTENT(in)                      :: n, n_scf, intorder
     REAL(KIND=dp), DIMENSION(0:n_scf), &
       INTENT(in)                             :: xval, yval
@@ -758,7 +715,6 @@ SUBROUTINE calculates_green_opt_muzero(n,n_scf,intorder,xval,yval,c,hres,green,e
       INTENT(in)                             :: c
     REAL(KIND=dp), INTENT(in)                :: hres
     REAL(KIND=dp), DIMENSION(n), INTENT(out) :: green
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     INTEGER                                  :: i, iend, ikern, ivalue, izero
     REAL(KIND=dp)                            :: c0, c1, filter, gl0, gl1, &
@@ -895,12 +851,11 @@ END SUBROUTINE indices
 !> \param nproc ...
 !> \param karray ...
 !> \param mpi_group ...
-!> \param error ...
 !> \date February 2006
 !> \author T. Deutsch, L. Genovese
 ! *****************************************************************************
 SUBROUTINE Free_Kernel(n01,n02,n03,nfft1,nfft2,nfft3,n1k,n2k,n3k,&
-     hgrid,itype_scf,iproc,nproc,karray,mpi_group,error)
+     hgrid,itype_scf,iproc,nproc,karray,mpi_group)
 
     INTEGER, INTENT(in)                      :: n01, n02, n03, nfft1, nfft2, &
                                                 nfft3, n1k, n2k, n3k
@@ -910,17 +865,15 @@ SUBROUTINE Free_Kernel(n01,n02,n03,nfft1,nfft2,nfft3,n1k,n2k,n3k,&
       DIMENSION(n1k, n2k, n3k/nproc), &
       INTENT(out)                            :: karray
     INTEGER, INTENT(in)                      :: mpi_group
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'Free_Kernel', &
       routineP = moduleN//':'//routineN
     INTEGER, PARAMETER                       :: n_gauss = 89, n_points = 2**6
     REAL(KIND=dp), PARAMETER                 :: p0_ref = 1._dp
 
-    INTEGER :: i, i01, i02, i03, i1, i2, i3, i_all, i_gauss, i_kern, i_stat, &
-      iend, istart, istart1, n1h, n2h, n3h, n_cell, n_iter, n_range, n_scf, &
-      nker1, nker2, nker3
-    LOGICAL                                  :: failure
+    INTEGER :: i, i01, i02, i03, i1, i2, i3, i_gauss, i_kern, iend, istart, &
+      istart1, n1h, n2h, n3h, n_cell, n_iter, n_range, n_scf, nker1, nker2, &
+      nker3
     REAL(KIND=dp) :: a1, a2, a3, a_range, absci, acc_gauss, dr_gauss, dx, &
       factor, factor2, kern, p0_cell, p0gauss, pgauss, ur_gauss
     REAL(KIND=dp), ALLOCATABLE, DIMENSION(:) :: kern_1_scf, kernel_scf, &
@@ -962,8 +915,7 @@ SUBROUTINE Free_Kernel(n01,n02,n03,nfft1,nfft2,nfft3,n1k,n2k,n3k,&
  END DO
 
  !this will be the array of the kernel in the real space
- ALLOCATE(kp(n1h+1,n3h+1,nker2/nproc),stat=i_all)
- CPPostcondition(i_all==0,cp_failure_level,routineP,error,failure)
+ ALLOCATE(kp(n1h+1,n3h+1,nker2/nproc))
 
  !defining proper extremes for the calculation of the
  !local part of the kernel
@@ -975,12 +927,8 @@ SUBROUTINE Free_Kernel(n01,n02,n03,nfft1,nfft2,nfft3,n1k,n2k,n3k,&
  IF(iproc .EQ. 0) istart1=n2h-n03+2
 
  !Allocations
- i_all = 0
- ALLOCATE(x_scf(0:n_scf),stat=i_stat)
- i_all = i_all + i_stat
- ALLOCATE(y_scf(0:n_scf),stat=i_stat)
- i_all = i_all + i_stat
- CPPostcondition(i_all==0,cp_failure_level,routineP,error,failure)
+ ALLOCATE(x_scf(0:n_scf))
+ ALLOCATE(y_scf(0:n_scf))
 
  !Build the scaling function
  CALL scaling_function(itype_scf,n_scf,n_range,x_scf,y_scf)
@@ -991,11 +939,8 @@ SUBROUTINE Free_Kernel(n01,n02,n03,nfft1,nfft2,nfft3,n1k,n2k,n3k,&
  n_range = MAX(n_cell,n_range)
 
  !Allocations
- ALLOCATE(kernel_scf(-n_range:n_range),stat=i_stat)
- i_all = i_all + i_stat
- ALLOCATE(kern_1_scf(-n_range:n_range),stat=i_stat)
- i_all = i_all + i_stat
- CPPostcondition(i_all==0,cp_failure_level,routineP,error,failure)
+ ALLOCATE(kernel_scf(-n_range:n_range))
+ ALLOCATE(kern_1_scf(-n_range:n_range))
 
  !Lengthes of the box (use FFT dimension)
  a1 = hgrid * REAL(n01,KIND=dp)
@@ -1077,24 +1022,20 @@ SUBROUTINE Free_Kernel(n01,n02,n03,nfft1,nfft2,nfft3,n1k,n2k,n3k,&
  END DO loop_gauss
 
  !De-allocations
- DEALLOCATE(kernel_scf,stat=i_all)
- DEALLOCATE(kern_1_scf,stat=i_stat)
- i_all=i_all+i_stat
- DEALLOCATE(x_scf,stat=i_stat)
- i_all=i_all+i_stat
- DEALLOCATE(y_scf,stat=i_stat)
- CPPostcondition(i_all+i_stat==0,cp_failure_level,routineP,error,failure)
+ DEALLOCATE(kernel_scf)
+ DEALLOCATE(kern_1_scf)
+ DEALLOCATE(x_scf)
+ DEALLOCATE(y_scf)
 
 !!!!END KERNEL CONSTRUCTION
 
 !!$ if(iproc .eq. 0) print *,"Do a 3D PHalFFT for the kernel"
 
  CALL kernelfft(nfft1,nfft2,nfft3,nker1,nker2,nker3,n1k,n2k,n3k,nproc,iproc,&
-      kp,karray,mpi_group,error)
+      kp,karray,mpi_group)
 
  !De-allocations
- DEALLOCATE(kp,stat=i_all)
- CPPostcondition(i_all==0,cp_failure_level,routineP,error,failure)
+ DEALLOCATE(kp)
 
 END SUBROUTINE Free_Kernel
 
@@ -1151,7 +1092,6 @@ END SUBROUTINE inserthalf
 !> \param zr Distributed Kernel FFT
 !>                   zr(2,i1,i2,i3)
 !> \param mpi_group ...
-!> \param error ...
 !> \date February 2006
 !> \par Restrictions
 !>      Copyright (C) Stefan Goedecker, Cornell University, Ithaca, USA, 1994
@@ -1165,7 +1105,7 @@ END SUBROUTINE inserthalf
 !>                   The detailed table with allowed transform lengths can
 !>                   be found in subroutine CTRIG 
 ! *****************************************************************************
-SUBROUTINE kernelfft(n1,n2,n3,nd1,nd2,nd3,nk1,nk2,nk3,nproc,iproc,zf,zr,mpi_group,error)
+SUBROUTINE kernelfft(n1,n2,n3,nd1,nd2,nd3,nk1,nk2,nk3,nproc,iproc,zf,zr,mpi_group)
 
     INTEGER, INTENT(in)                      :: n1, n2, n3, nd1, nd2, nd3, &
                                                 nk1, nk2, nk3, nproc, iproc
@@ -1176,20 +1116,18 @@ SUBROUTINE kernelfft(n1,n2,n3,nd1,nd2,nd3,nk1,nk2,nk3,nproc,iproc,zf,zr,mpi_grou
       DIMENSION(nk1, nk2, nk3/nproc), &
       INTENT(inout)                          :: zr
     INTEGER, INTENT(in)                      :: mpi_group
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'kernelfft', &
       routineP = moduleN//':'//routineN
     INTEGER, PARAMETER                       :: ncache_optimal = 8*1024
 
-    INTEGER                                  :: i, i1, i3, i_all, i_stat, &
-                                                ic1, ic2, ic3, inzee, j, j2, &
-                                                J2st, j3, Jp2st, lot, lzt, &
-                                                ma, mb, ncache, nfft
+    INTEGER                                  :: i, i1, i3, ic1, ic2, ic3, &
+                                                inzee, j, j2, J2st, j3, &
+                                                Jp2st, lot, lzt, ma, mb, &
+                                                ncache, nfft
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: after1, after2, after3, &
                                                 before1, before2, before3, &
                                                 now1, now2, now3
-    LOGICAL                                  :: failure
     REAL(kind=dp)                            :: twopion
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :)                        :: cosinarr, trig1, trig2, trig3
@@ -1208,11 +1146,11 @@ SUBROUTINE kernelfft(n1,n2,n3,nd1,nd2,nd3,nk1,nk2,nk3,nproc,iproc,zf,zr,mpi_grou
 !Body
 !check input
 
-  CPPrecondition (nd1.GE.n1,cp_failure_level,routineP,error,failure)
-  CPPrecondition (nd2.GE.n2 ,cp_failure_level,routineP,error,failure)
-  CPPrecondition (nd3.GE.n3/2+1 ,cp_failure_level,routineP,error,failure)
-  CPPrecondition (MOD(nd3,nproc).EQ.0 ,cp_failure_level,routineP,error,failure)
-  CPPrecondition (MOD(nd2,nproc).EQ.0 ,cp_failure_level,routineP,error,failure)
+  CPASSERT(nd1.GE.n1)
+  CPASSERT(nd2.GE.n2)
+  CPASSERT(nd3.GE.n3/2+1)
+  CPASSERT(MOD(nd3,nproc).EQ.0)
+  CPASSERT(MOD(nd2,nproc).EQ.0)
 
   !defining work arrays dimensions
   ncache=ncache_optimal
@@ -1222,42 +1160,26 @@ SUBROUTINE kernelfft(n1,n2,n3,nd1,nd2,nd3,nk1,nk2,nk3,nproc,iproc,zf,zr,mpi_grou
   IF (MOD(n2,4).EQ.0) lzt=lzt+1
 
   !Allocations
-  ALLOCATE(trig1(2,ctrig_length),stat=i_all)
-  ALLOCATE(after1(7),stat=i_stat)
-  i_all=i_all+i_stat
-  ALLOCATE(now1(7),stat=i_stat)
-  i_all=i_all+i_stat
-  ALLOCATE(before1(7),stat=i_stat)
-  i_all=i_all+i_stat
-  ALLOCATE(trig2(2,ctrig_length),stat=i_stat)
-  i_all=i_all+i_stat
-  ALLOCATE(after2(7),stat=i_stat)
-  i_all=i_all+i_stat
-  ALLOCATE(now2(7),stat=i_stat)
-  i_all=i_all+i_stat
-  ALLOCATE(before2(7),stat=i_stat)
-  i_all=i_all+i_stat
-  ALLOCATE(trig3(2,ctrig_length),stat=i_stat)
-  i_all=i_all+i_stat
-  ALLOCATE(after3(7),stat=i_stat)
-  i_all=i_all+i_stat
-  ALLOCATE(now3(7),stat=i_stat)
-  i_all=i_all+i_stat
-  ALLOCATE(before3(7),stat=i_stat)
-  i_all=i_all+i_stat
-  ALLOCATE(zw(2,ncache/4,2),stat=i_stat)
-  i_all=i_all+i_stat
-  ALLOCATE(zt(2,lzt,n1),stat=i_stat)
-  i_all=i_all+i_stat
-  ALLOCATE(zmpi2(2,n1,nd2/nproc,nd3),stat=i_stat)
-  i_all=i_all+i_stat
-  ALLOCATE(cosinarr(2,n3/2),stat=i_stat)
-  i_all=i_all+i_stat
+  ALLOCATE(trig1(2,ctrig_length))
+  ALLOCATE(after1(7))
+  ALLOCATE(now1(7))
+  ALLOCATE(before1(7))
+  ALLOCATE(trig2(2,ctrig_length))
+  ALLOCATE(after2(7))
+  ALLOCATE(now2(7))
+  ALLOCATE(before2(7))
+  ALLOCATE(trig3(2,ctrig_length))
+  ALLOCATE(after3(7))
+  ALLOCATE(now3(7))
+  ALLOCATE(before3(7))
+  ALLOCATE(zw(2,ncache/4,2))
+  ALLOCATE(zt(2,lzt,n1))
+  ALLOCATE(zmpi2(2,n1,nd2/nproc,nd3))
+  ALLOCATE(cosinarr(2,n3/2))
   IF (nproc.GT.1) THEN
-     ALLOCATE(zmpi1(2,n1,nd2/nproc,nd3/nproc,nproc),stat=i_stat)
+     ALLOCATE(zmpi1(2,n1,nd2/nproc,nd3/nproc,nproc))
      zmpi1 = 0.0_dp
   END IF
-  CPPostcondition(i_all==0,cp_failure_level,routineP,error,failure)
 
   zmpi2 = 0.0_dp
   !calculating the FFT work arrays (beware on the HalFFT in n3 dimension)
@@ -1275,7 +1197,7 @@ SUBROUTINE kernelfft(n1,n2,n3,nd1,nd2,nd3,nk1,nk2,nk3,nproc,iproc,zf,zr,mpi_grou
   !transform along z axis
 
   lot=ncache/(2*n3)
-  CPPostcondition(lot.GE.1,cp_failure_level,routineP,error,failure)
+  CPASSERT(lot.GE.1)
 
   DO j2=1,nd2/nproc
      !this condition ensures that we manage only the interesting part for the FFT
@@ -1326,7 +1248,7 @@ SUBROUTINE kernelfft(n1,n2,n3,nd1,nd2,nd3,nk1,nk2,nk3,nproc,iproc,zf,zr,mpi_grou
 
         !transform along x axis
         lot=ncache/(4*n1)
-        CPPostcondition(lot.GE.1,cp_failure_level,routineP,error,failure)
+        CPASSERT(lot.GE.1)
 
         DO j=1,n2,lot
            ma=j
@@ -1359,7 +1281,7 @@ SUBROUTINE kernelfft(n1,n2,n3,nd1,nd2,nd3,nk1,nk2,nk3,nproc,iproc,zf,zr,mpi_grou
 
         !transform along y axis, and taking only the first half
         lot=ncache/(4*n2)
-        CPPostcondition(lot.GE.1,cp_failure_level,routineP,error,failure)
+        CPASSERT(lot.GE.1)
 
         DO j=1,nk1,lot
            ma=j
@@ -1388,39 +1310,23 @@ SUBROUTINE kernelfft(n1,n2,n3,nd1,nd2,nd3,nk1,nk2,nk3,nproc,iproc,zf,zr,mpi_grou
   END DO
 
   !De-allocations
-  DEALLOCATE(trig1,stat=i_all)
-  DEALLOCATE(after1,stat=i_stat)
-  i_all=i_all+i_stat
-  DEALLOCATE(now1,stat=i_stat)
-  i_all=i_all+i_stat
-  DEALLOCATE(before1,stat=i_stat)
-  i_all=i_all+i_stat
-  DEALLOCATE(trig2,stat=i_stat)
-  i_all=i_all+i_stat
-  DEALLOCATE(after2,stat=i_stat)
-  i_all=i_all+i_stat
-  DEALLOCATE(now2,stat=i_stat)
-  i_all=i_all+i_stat
-  DEALLOCATE(before2,stat=i_stat)
-  i_all=i_all+i_stat
-  DEALLOCATE(trig3,stat=i_stat)
-  i_all=i_all+i_stat
-  DEALLOCATE(after3,stat=i_stat)
-  i_all=i_all+i_stat
-  DEALLOCATE(now3,stat=i_stat)
-  i_all=i_all+i_stat
-  DEALLOCATE(before3,stat=i_stat)
-  i_all=i_all+i_stat
-  DEALLOCATE(zmpi2,stat=i_stat)
-  i_all=i_all+i_stat
-  DEALLOCATE(zw,stat=i_stat)
-  i_all=i_all+i_stat
-  DEALLOCATE(zt,stat=i_stat)
-  i_all=i_all+i_stat
-  DEALLOCATE(cosinarr,stat=i_stat)
-  i_all=i_all+i_stat
-  IF (nproc.GT.1) DEALLOCATE(zmpi1,stat=i_stat)
-  CPPostcondition(i_all==0,cp_failure_level,routineP,error,failure)
+  DEALLOCATE(trig1)
+  DEALLOCATE(after1)
+  DEALLOCATE(now1)
+  DEALLOCATE(before1)
+  DEALLOCATE(trig2)
+  DEALLOCATE(after2)
+  DEALLOCATE(now2)
+  DEALLOCATE(before2)
+  DEALLOCATE(trig3)
+  DEALLOCATE(after3)
+  DEALLOCATE(now3)
+  DEALLOCATE(before3)
+  DEALLOCATE(zmpi2)
+  DEALLOCATE(zw)
+  DEALLOCATE(zt)
+  DEALLOCATE(cosinarr)
+  IF (nproc.GT.1) DEALLOCATE(zmpi1)
 
 END SUBROUTINE kernelfft
 

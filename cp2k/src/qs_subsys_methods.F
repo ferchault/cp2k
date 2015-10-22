@@ -40,6 +40,7 @@ MODULE qs_subsys_methods
   USE qs_subsys_types,                 ONLY: qs_subsys_set,&
                                              qs_subsys_type
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -62,10 +63,9 @@ CONTAINS
 !> \param cp_subsys ...
 !> \param cell ...
 !> \param cell_ref ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE qs_subsys_create(subsys, para_env, root_section,force_env_section, subsys_section, &
-                              use_motion_section, cp_subsys, cell, cell_ref, error)
+                              use_motion_section, cp_subsys, cell, cell_ref)
     TYPE(qs_subsys_type), POINTER            :: subsys
     TYPE(cp_para_env_type), POINTER          :: para_env
     TYPE(section_vals_type), POINTER         :: root_section, &
@@ -74,7 +74,6 @@ CONTAINS
     LOGICAL, INTENT(IN)                      :: use_motion_section
     TYPE(cp_subsys_type), OPTIONAL, POINTER  :: cp_subsys
     TYPE(cell_type), OPTIONAL, POINTER       :: cell, cell_ref
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'qs_subsys_create', &
       routineP = moduleN//':'//routineN
@@ -90,7 +89,7 @@ CONTAINS
 
     NULLIFY(atomic_kind_set,qs_kind_set,cell_section,kind_section,my_cell,my_cell_ref,my_cp_subsys)
 
-    IF(ASSOCIATED(subsys)) STOP "qs_subsys_create: subsys already associated"
+    IF(ASSOCIATED(subsys)) CPABORT("qs_subsys_create: subsys already associated")
 
     ! create cp_subsys
     IF (PRESENT(cp_subsys)) THEN
@@ -99,8 +98,7 @@ CONTAINS
        CALL cp_subsys_create(my_cp_subsys, para_env, root_section=root_section,&
                              force_env_section=force_env_section,&
                              subsys_section=subsys_section,&
-                             use_motion_section=use_motion_section,&
-                             error=error)
+                             use_motion_section=use_motion_section)
     END IF
 
     ! create cp_subsys%cell
@@ -111,26 +109,26 @@ CONTAINS
           my_cell_ref => cell_ref
           use_ref_cell = .TRUE.
        ELSE
-          CALL cell_create(my_cell_ref, error=error)
-          CALL cell_clone(my_cell, my_cell_ref, error)
+          CALL cell_create(my_cell_ref)
+          CALL cell_clone(my_cell, my_cell_ref)
           use_ref_cell = .FALSE.
        END IF
     ELSE
-       cell_section => section_vals_get_subs_vals(subsys_section,"CELL",error=error)
+       cell_section => section_vals_get_subs_vals(subsys_section,"CELL")
        CALL read_cell(my_cell, my_cell_ref, use_ref_cell=use_ref_cell, &
-            cell_section=cell_section, para_env=para_env, error=error)
+            cell_section=cell_section, para_env=para_env)
     END IF
-    CALL cp_subsys_set(my_cp_subsys, cell=my_cell, error=error)
-    CALL write_cell(my_cell,subsys_section,cell_ref=my_cell_ref,error=error)
+    CALL cp_subsys_set(my_cp_subsys, cell=my_cell)
+    CALL write_cell(my_cell,subsys_section,cell_ref=my_cell_ref)
 
     ! setup qs_kinds
-    CALL cp_subsys_get(my_cp_subsys, atomic_kind_set=atomic_kind_set, error=error)
-    kind_section => section_vals_get_subs_vals(subsys_section,"KIND",error=error)
+    CALL cp_subsys_get(my_cp_subsys, atomic_kind_set=atomic_kind_set)
+    kind_section => section_vals_get_subs_vals(subsys_section,"KIND")
     CALL create_qs_kind_set(qs_kind_set, atomic_kind_set, kind_section, &
-                            para_env, force_env_section, error)
+                            para_env, force_env_section)
 
     CALL num_ao_el_per_molecule(my_cp_subsys%molecule_kinds_new%els, &
-                                qs_kind_set, error=error)
+                                qs_kind_set)
 
     ! finally create qs_subsys
     ALLOCATE(subsys)
@@ -138,19 +136,17 @@ CONTAINS
                       cp_subsys=my_cp_subsys,&
                       cell_ref=my_cell_ref,&
                       use_ref_cell=use_ref_cell,&
-                      qs_kind_set=qs_kind_set,&
-                      error=error)
+                      qs_kind_set=qs_kind_set)
 
-    IF (.NOT.PRESENT(cell))      CALL cell_release(my_cell,error=error)
-    IF (.NOT.PRESENT(cell_ref))  CALL cell_release(my_cell_ref,error=error)
-    IF (.NOT.PRESENT(cp_subsys)) CALL cp_subsys_release(my_cp_subsys,error=error)
+    IF (.NOT.PRESENT(cell))      CALL cell_release(my_cell)
+    IF (.NOT.PRESENT(cell_ref))  CALL cell_release(my_cell_ref)
+    IF (.NOT.PRESENT(cp_subsys)) CALL cp_subsys_release(my_cp_subsys)
   END SUBROUTINE qs_subsys_create
 
 ! *****************************************************************************
 !> \brief   Read a molecule kind data set from the input file.
 !> \param molecule_kind_set ...
 !> \param qs_kind_set ...
-!> \param error ...
 !> \date    22.11.2004
 !> \par History
 !>      Rustam Z. Khaliullin 10.2014 - charges and electrons of molecules 
@@ -158,13 +154,12 @@ CONTAINS
 !> \author  MI
 !> \version 1.0
 ! *****************************************************************************
-  SUBROUTINE num_ao_el_per_molecule(molecule_kind_set,qs_kind_set,error)
+  SUBROUTINE num_ao_el_per_molecule(molecule_kind_set,qs_kind_set)
 
     TYPE(molecule_kind_type), DIMENSION(:), &
       POINTER                                :: molecule_kind_set
     TYPE(qs_kind_type), DIMENSION(:), &
       POINTER                                :: qs_kind_set
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'num_ao_el_per_molecule', &
       routineP = moduleN//':'//routineN
@@ -207,7 +202,7 @@ CONTAINS
         atomic_kind => molecule_kind%atom_list(iatom)%atomic_kind
         CALL get_atomic_kind(atomic_kind, kind_number=ikind)
         CALL get_qs_kind(qs_kind_set(ikind),&
-                         orb_basis_set=orb_basis_set,&
+                         basis_set=orb_basis_set,&
                          all_potential=all_potential,&
                          gth_potential=gth_potential)
 
@@ -223,8 +218,7 @@ CONTAINS
                                             ispin=ispin, & 
                                             ncalc=ne_explicit, &
                                             ncore=ne_core, &
-                                            nelem=ne_elem, &
-                                            error=error)
+                                            nelem=ne_elem)
 
            ! Get the number of electrons: explicit (i.e. with orbitals) and total
            ! Note that it is impossible to separate alpha and beta electrons
@@ -266,7 +260,7 @@ CONTAINS
       !  assigned to the molecule
       ARBITRARY_SPIN=1
 !      IF( n_occ_alpha_and_beta(1).ne.n_occ_alpha_and_beta(2) ) THEN
-!         CPErrorMessage(cp_failure_level,routineP,"SECOND SPIN CONFIG IS IGNORED WHEN MOLECULAR STATES ARE ASSIGNED!",error)
+!         CPErrorMessage(cp_failure_level,routineP,"SECOND SPIN CONFIG IS IGNORED WHEN MOLECULAR STATES ARE ASSIGNED!")
 !      END IF
       charge_molecule=REAL(z_molecule-n_occ_alpha_and_beta(ARBITRARY_SPIN),dp)
       CALL set_molecule_kind(molecule_kind=molecule_kind,&

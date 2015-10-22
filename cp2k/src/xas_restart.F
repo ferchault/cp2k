@@ -56,12 +56,11 @@ MODULE xas_restart
   USE qs_scf_types,                    ONLY: qs_scf_env_type
   USE scf_control_types,               ONLY: scf_control_type
   USE string_utilities,                ONLY: xstring
-  USE timings,                         ONLY: timeset,&
-                                             timestop
   USE xas_env_types,                   ONLY: get_xas_env,&
                                              set_xas_env,&
                                              xas_environment_type
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -87,29 +86,27 @@ CONTAINS
 !> \param iatom index of the absorbing atom
 !> \param estate index of the core-hole orbital
 !>      error:
-!> \param error ...
 !> \par History
 !>      09.2006 created [MI]
 !> \author MI
 ! *****************************************************************************
-  SUBROUTINE xas_read_restart(xas_env,xas_section,qs_env, xas_method,iatom,estate,error)
+  SUBROUTINE xas_read_restart(xas_env,xas_section,qs_env, xas_method,iatom,estate)
 
     TYPE(xas_environment_type), POINTER      :: xas_env
     TYPE(section_vals_type), POINTER         :: xas_section
     TYPE(qs_environment_type), POINTER       :: qs_env
     INTEGER, INTENT(IN)                      :: xas_method, iatom
     INTEGER, INTENT(OUT)                     :: estate
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'xas_read_restart', &
       routineP = moduleN//':'//routineN
 
     CHARACTER(LEN=default_path_length)       :: filename
-    INTEGER :: group, handle, i, ia, ie, ispin, istat, nao, nao_read, &
-      nelectron, nexc_atoms, nexc_atoms_read, nexc_search, nexc_search_read, &
-      nmo, nmo_read, output_unit, rst_unit, source, xas_estate, &
-      xas_estate_read, xas_method_read
-    LOGICAL                                  :: failure, file_exists
+    INTEGER :: group, handle, i, ia, ie, ispin, nao, nao_read, nelectron, &
+      nexc_atoms, nexc_atoms_read, nexc_search, nexc_search_read, nmo, &
+      nmo_read, output_unit, rst_unit, source, xas_estate, xas_estate_read, &
+      xas_method_read
+    LOGICAL                                  :: file_exists
     REAL(dp)                                 :: occ_estate, occ_estate_read, &
                                                 xas_nelectron, &
                                                 xas_nelectron_read
@@ -127,24 +124,23 @@ CONTAINS
 
     CALL timeset(routineN,handle)
 
-    failure = .FALSE.
     file_exists = .FALSE.
     rst_unit =  -1
 
     NULLIFY(eigenvalues, matrix_s, mos, occupation_numbers, vecbuffer)
     NULLIFY(logger)
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
 
     output_unit = cp_print_key_unit_nr(logger,xas_section,&
-         "PRINT%PROGRAM_RUN_INFO", extension=".Log",error=error)
+         "PRINT%PROGRAM_RUN_INFO", extension=".Log")
 
-    CALL get_qs_env( qs_env=qs_env, para_env=para_env ,error=error)
+    CALL get_qs_env( qs_env=qs_env, para_env=para_env)
     group = para_env%group
     source = para_env%source
 
     IF (para_env%ionode) THEN
       CALL wfn_restart_file_name(filename,file_exists,xas_section,logger,&
-           xas=.TRUE.,error=error)
+           xas=.TRUE.)
 
       CALL xstring (filename, ia, ie )
       filename = filename(ia:ie)//'-at'//&
@@ -173,50 +169,42 @@ CONTAINS
     CALL mp_bcast(file_exists,source,group)
 
     CALL get_xas_env(xas_env=xas_env,occ_estate=occ_estate,xas_estate=xas_estate, &
-            xas_nelectron=xas_nelectron, nexc_search=nexc_search, nexc_atoms=nexc_atoms,error=error)
+            xas_nelectron=xas_nelectron, nexc_search=nexc_search, nexc_atoms=nexc_atoms)
 
     IF(file_exists) THEN
-      CALL get_qs_env(qs_env=qs_env, mos=mos, matrix_s=matrix_s,&
-            error=error)
+      CALL get_qs_env(qs_env=qs_env, mos=mos, matrix_s=matrix_s)
 
       IF(rst_unit>0) THEN
          READ(rst_unit) xas_method_read
          READ(rst_unit) nexc_search_read, nexc_atoms_read, occ_estate_read, xas_nelectron_read
          READ(rst_unit) xas_estate_read
 
-         CALL cp_assert(xas_method_read==xas_method,cp_failure_level,cp_assertion_failed,routineP,&
-                 " READ XAS RESTART: restart with different XAS method is not possible. "//&
-                 CPSourceFileRef,&
-                 only_ionode=.TRUE.)
-         CALL cp_assert(nexc_atoms_read==nexc_atoms,cp_failure_level,cp_assertion_failed,routineP,&
+         IF(xas_method_read/=xas_method)&
+            CPABORT(" READ XAS RESTART: restart with different XAS method is not possible. ")
+         IF(nexc_atoms_read/=nexc_atoms)&
+            CALL cp_abort(__LOCATION__,&
                  " READ XAS RESTART: restart with different excited atoms "//&
-                 " is not possible. Start instead a new XAS run with the new set of atoms. "//&
-                 CPSourceFileRef,&
-                 only_ionode=.TRUE.)
+                 " is not possible. Start instead a new XAS run with the new set of atoms. ")
       ENDIF
 
       CALL mp_bcast(xas_estate_read,source,group)
-      CALL set_xas_env(xas_env=xas_env,xas_estate=xas_estate_read,error=error)
+      CALL set_xas_env(xas_env=xas_env,xas_estate=xas_estate_read)
       estate = xas_estate_read
 
       CALL get_mo_set(mo_set=mos(1)%mo_set,nao=nao)
-      ALLOCATE (vecbuffer(1,nao),STAT=istat)
-      CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE (vecbuffer(1,nao))
 
       DO ispin = 1, SIZE(mos)
         CALL get_mo_set(mo_set=mos(ispin)%mo_set, nmo=nmo, eigenvalues=eigenvalues,&
              occupation_numbers=occupation_numbers,mo_coeff=mo_coeff,nelectron=nelectron)
         eigenvalues = 0.0_dp
         occupation_numbers = 0.0_dp
-        CALL cp_fm_set_all(mo_coeff,0.0_dp,error=error)
+        CALL cp_fm_set_all(mo_coeff,0.0_dp)
         IF (para_env%ionode) THEN
           READ (rst_unit) nao_read, nmo_read
-          CALL cp_assert(nao==nao_read,cp_failure_level,cp_assertion_failed,routineP,&
-                 "To change basis is not possible. "//&
-                 CPSourceFileRef,&
-                 only_ionode=.TRUE.)
-          ALLOCATE(eig_read(nmo_read), occ_read(nmo_read), STAT=istat)
-          CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+          IF(nao/=nao_read)&
+             CPABORT("To change basis is not possible. ")
+          ALLOCATE(eig_read(nmo_read), occ_read(nmo_read))
           eig_read = 0.0_dp
           occ_read = 0.0_dp
           nmo = MIN(nmo,nmo_read)
@@ -224,16 +212,13 @@ CONTAINS
           eigenvalues(1:nmo) = eig_read(1:nmo)
           occupation_numbers(1:nmo) = occ_read(1:nmo)
           IF(nmo_read>nmo) THEN
-            CALL cp_assert(occupation_numbers(nmo)<EPSILON(0.0_dp),&
-                 cp_warning_level,cp_assertion_failed,routineP,&
-                "The number of occupied MOs on the restart unit is larger than "//&
-                 "the allocated MOs."//&
-CPSourceFileRef,&
-                 only_ionode=.TRUE.)
+            IF(occupation_numbers(nmo)>=EPSILON(0.0_dp))&
+               CALL cp_warn(__LOCATION__,&
+                    "The number of occupied MOs on the restart unit is larger than "//&
+                    "the allocated MOs.")
 
           END IF
-          DEALLOCATE(eig_read, occ_read, STAT=istat)
-          CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+          DEALLOCATE(eig_read, occ_read)
         ENDIF
         CALL mp_bcast(eigenvalues,source,group)
         CALL mp_bcast(occupation_numbers,source,group)
@@ -246,7 +231,7 @@ CPSourceFileRef,&
             END IF
             CALL mp_bcast(vecbuffer,source,group)
             CALL cp_fm_set_submatrix(mo_coeff,&
-                 vecbuffer,1,i,nao,1,transpose=.TRUE.,error=error)
+                 vecbuffer,1,i,nao,1,transpose=.TRUE.)
          END DO
          ! Skip extra MOs if there any
          IF (para_env%ionode) THEN
@@ -257,15 +242,14 @@ CPSourceFileRef,&
 
       END DO ! ispin
 
-      DEALLOCATE(vecbuffer,STAT=istat)
-      CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+      DEALLOCATE(vecbuffer)
 
 !      nspin = SIZE(mos,1)
 !      DO ispin = 1,nspin
 !      ! ortho so that one can restart for different positions (basis sets?)
 !         NULLIFY(mo_coeff)
 !         CALL get_mo_set(mo_set=mos(ispin)%mo_set, mo_coeff=mo_coeff,homo=homo)
-!         CALL make_basis_sm(mo_coeff,homo,matrix_s(1)%matrix,error=error)
+!         CALL make_basis_sm(mo_coeff,homo,matrix_s(1)%matrix)
 !      END DO
     END IF !file_exist
 
@@ -284,15 +268,13 @@ CPSourceFileRef,&
 !> \param qs_env ...
 !> \param xas_method ...
 !> \param iatom ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE xas_write_restart(xas_env,xas_section,qs_env,xas_method,iatom,error)
+  SUBROUTINE xas_write_restart(xas_env,xas_section,qs_env,xas_method,iatom)
 
     TYPE(xas_environment_type), POINTER      :: xas_env
     TYPE(section_vals_type), POINTER         :: xas_section
     TYPE(qs_environment_type), POINTER       :: qs_env
     INTEGER, INTENT(IN)                      :: xas_method, iatom
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'xas_write_restart', &
       routineP = moduleN//':'//routineN
@@ -303,7 +285,6 @@ CPSourceFileRef,&
                                                 nexc_atoms, nexc_search, nmo, &
                                                 output_unit, rst_unit, &
                                                 xas_estate
-    LOGICAL                                  :: failure
     REAL(dp)                                 :: occ_estate, xas_nelectron
     REAL(dp), DIMENSION(:), POINTER          :: eigenvalues, &
                                                 occupation_numbers
@@ -314,32 +295,31 @@ CPSourceFileRef,&
     TYPE(section_vals_type), POINTER         :: print_key
 
     CALL timeset(routineN,handle)
-    failure = .FALSE.
     NULLIFY(mos,logger,print_key)
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
 
     CALL get_xas_env(xas_env=xas_env,occ_estate=occ_estate,xas_estate=xas_estate, &
-            xas_nelectron=xas_nelectron, nexc_search=nexc_search, nexc_atoms=nexc_atoms, error=error)
+            xas_nelectron=xas_nelectron, nexc_search=nexc_search, nexc_atoms=nexc_atoms)
 
     IF (BTEST(cp_print_key_should_output(logger%iter_info,&
-              xas_section,"PRINT%RESTART",used_print_key=print_key,error=error),&
+              xas_section,"PRINT%RESTART",used_print_key=print_key),&
               cp_p_file)) THEN
 
        output_unit = cp_print_key_unit_nr(logger,xas_section,&
-            "PRINT%PROGRAM_RUN_INFO",extension=".Log",error=error)
+            "PRINT%PROGRAM_RUN_INFO",extension=".Log")
 
-       CALL get_qs_env( qs_env=qs_env, mos=mos, error=error)
+       CALL get_qs_env( qs_env=qs_env, mos=mos)
 
        ! Open file
        rst_unit = -1
        my_middle= 'at'//TRIM(ADJUSTL(cp_to_string(iatom)))
        rst_unit = cp_print_key_unit_nr(logger,xas_section,"PRINT%RESTART",&
                   extension=".rst", file_status="REPLACE", file_action="WRITE",&
-                  file_form="UNFORMATTED",middle_name=TRIM(my_middle), error=error)
+                  file_form="UNFORMATTED",middle_name=TRIM(my_middle))
 
        filename = cp_print_key_generate_filename(logger,print_key,&
                   middle_name=TRIM(my_middle),extension=".rst",&
-                  my_local=.FALSE.,error=error)
+                  my_local=.FALSE.)
 
        IF(output_unit>0) THEN
           WRITE (UNIT=output_unit,FMT="(/,T10,A,I5,A,A,/)")&
@@ -362,12 +342,12 @@ CPSourceFileRef,&
            WRITE (rst_unit) eigenvalues(1:nmo),&
                            occupation_numbers(1:nmo)
          END IF
-         CALL cp_fm_write_unformatted(mo_coeff,rst_unit,error)
+         CALL cp_fm_write_unformatted(mo_coeff,rst_unit)
        END DO
 
 ! Close file
        CALL cp_print_key_finished_output(rst_unit,logger,xas_section,&
-                  "PRINT%RESTART", error=error)
+                  "PRINT%RESTART")
     END IF
     CALL timestop(handle)
 
@@ -381,23 +361,20 @@ CPSourceFileRef,&
 !> \param qs_env ...
 !> \param scf_env ...
 !> \param scf_control ...
-!> \param error ...
 !> \par History
 !>      09-2006 MI created
 !> \author MI
 ! *****************************************************************************
-  SUBROUTINE xas_initialize_rho(qs_env,scf_env,scf_control,error)
+  SUBROUTINE xas_initialize_rho(qs_env,scf_env,scf_control)
 
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(qs_scf_env_type), POINTER           :: scf_env
     TYPE(scf_control_type), POINTER          :: scf_control
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'xas_initialize_rho', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, ispin, nelectron
-    LOGICAL                                  :: failure
     TYPE(cp_dbcsr_p_type), DIMENSION(:), &
       POINTER                                :: rho_ao
     TYPE(cp_para_env_type), POINTER          :: para_env
@@ -409,7 +386,6 @@ CPSourceFileRef,&
     TYPE(xas_environment_type), POINTER      :: xas_env
 
     CALL timeset(routineN,handle)
-    failure=.FALSE.
 
     NULLIFY(mos,rho,xas_env,para_env,rho_ao)
 
@@ -417,35 +393,32 @@ CPSourceFileRef,&
                     mos=mos,&
                     rho=rho,&
                     xas_env=xas_env,&
-                    para_env=para_env,&
-                    error=error)
+                    para_env=para_env)
 
-    CALL qs_rho_get(rho, rho_ao=rho_ao, error=error)
+    CALL qs_rho_get(rho, rho_ao=rho_ao)
     DO ispin=1,SIZE(mos)
        IF(ispin==1) THEN
          IF(xas_env%homo_occ == 0) THEN
            CALL get_mo_set(mos(ispin)%mo_set,nelectron=nelectron)
            nelectron = nelectron - 1
-           CALL set_mo_set(mos(ispin)%mo_set,nelectron=nelectron,error=error)
+           CALL set_mo_set(mos(ispin)%mo_set,nelectron=nelectron)
          END IF
          CALL set_mo_occupation(mo_set=qs_env%mos(ispin)%mo_set, smear=scf_control%smear,&
-              xas_env=xas_env, error=error)
+              xas_env=xas_env)
        ELSE
-         CALL set_mo_occupation(mo_set=qs_env%mos(ispin)%mo_set, smear=scf_control%smear,&
-              error=error)
+         CALL set_mo_occupation(mo_set=qs_env%mos(ispin)%mo_set, smear=scf_control%smear)
        END IF
       CALL calculate_density_matrix(mo_set=mos(ispin)%mo_set,&
-            density_matrix=rho_ao(ispin)%matrix,error=error)
+            density_matrix=rho_ao(ispin)%matrix)
     END DO
 
-    CALL qs_rho_update_rho(rho,qs_env=qs_env, error=error)
-    CALL qs_ks_did_change(qs_env%ks_env,rho_changed=.TRUE.,&
-                 error=error)
+    CALL qs_rho_update_rho(rho,qs_env=qs_env)
+    CALL qs_ks_did_change(qs_env%ks_env,rho_changed=.TRUE.)
 
     IF(scf_env%mixing_method>1) THEN
-       CALL get_qs_env(qs_env=qs_env,rho_atom_set=rho_atom,error=error)
+       CALL get_qs_env(qs_env=qs_env,rho_atom_set=rho_atom)
        CALL mixing_init(scf_env%mixing_method,rho,scf_env%mixing_store,&
-                           para_env,rho_atom=rho_atom,error=error)
+                           para_env,rho_atom=rho_atom)
     END IF
 
     CALL timestop(handle)
@@ -457,29 +430,25 @@ CPSourceFileRef,&
 !> \param xas_env ...
 !> \param mos ...
 !> \param matrix_s ...
-!> \param error ...
 !> \par History
 !>      03-2010 MI created
 !> \author MI
 ! *****************************************************************************
 
-  SUBROUTINE find_excited_core_orbital(xas_env,mos,matrix_s,error)
+  SUBROUTINE find_excited_core_orbital(xas_env,mos,matrix_s)
 
     TYPE(xas_environment_type), POINTER      :: xas_env
     TYPE(mo_set_p_type), DIMENSION(:), &
       POINTER                                :: mos
     TYPE(cp_dbcsr_p_type), DIMENSION(:), &
       POINTER                                :: matrix_s
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'find_excited_core_orbital', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, ic_max, ir_max, istat, m, &
-                                                n, nao, nexc_search, nmo, &
-                                                xas_estate
+    INTEGER                                  :: i, ic_max, ir_max, m, n, nao, &
+                                                nexc_search, nmo, xas_estate
     INTEGER, DIMENSION(:), POINTER           :: col_indices
-    LOGICAL                                  :: failure
     REAL(dp)                                 :: a_max, b_max, ip_energy, &
                                                 occ_estate
     REAL(KIND=dp), DIMENSION(:), POINTER     :: eigenvalues, &
@@ -488,31 +457,28 @@ CPSourceFileRef,&
     TYPE(cp_fm_type), POINTER                :: excvec_coeff, excvec_overlap, &
                                                 fm_work, mo_coeff
 
-    failure = .FALSE.
     NULLIFY(excvec_coeff,excvec_overlap,fm_work,mo_coeff)
     ! Some elements from the xas_env
     CALL get_xas_env(xas_env=xas_env,excvec_coeff=excvec_coeff,&
          excvec_overlap=excvec_overlap,fm_work=fm_work,nexc_search=nexc_search,&
-         xas_estate=xas_estate,occ_estate=occ_estate,error=error)
-    CPPrecondition(ASSOCIATED(excvec_overlap),cp_failure_level,routineP,error,failure)
+         xas_estate=xas_estate,occ_estate=occ_estate)
+    CPASSERT(ASSOCIATED(excvec_overlap))
 
     CALL get_mo_set(mos(1)%mo_set, mo_coeff=mo_coeff,nao=nao,nmo=nmo,&
          eigenvalues=eigenvalues,occupation_numbers=occupation_numbers)
-    ALLOCATE(vecbuffer(1,nao),STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(vecbuffer(1,nao))
     vecbuffer = 0.0_dp
-    ALLOCATE(vecbuffer2(1,nexc_search),STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(vecbuffer2(1,nexc_search))
     vecbuffer2 = 0.0_dp
 
   ! ** use the maximum overlap criterion to find the index of the excited orbital
-    CALL cp_dbcsr_sm_fm_multiply(matrix_s(1)%matrix,mo_coeff,fm_work,ncol=nmo,error=error)
+    CALL cp_dbcsr_sm_fm_multiply(matrix_s(1)%matrix,mo_coeff,fm_work,ncol=nmo)
     CALL cp_gemm("T","N",1,xas_env%nexc_search,nao,1.0_dp,excvec_coeff,&
-         fm_work,0.0_dp,excvec_overlap,b_first_col=1,error=error)
+         fm_work,0.0_dp,excvec_overlap,b_first_col=1)
     CALL cp_fm_get_info ( matrix=excvec_overlap, col_indices = col_indices,&
-         nrow_global = m, ncol_global = n ,error=error)
+         nrow_global = m, ncol_global = n)
     CALL cp_fm_get_submatrix(excvec_overlap,vecbuffer2,1,1,&
-         1,nexc_search,transpose=.FALSE.,error=error)
+         1,nexc_search,transpose=.FALSE.)
 
     b_max = 0.0_dp
     ic_max = xas_estate
@@ -533,15 +499,14 @@ CPSourceFileRef,&
 
     ! Ionization Potential
     iP_energy = eigenvalues(xas_estate)
-    CALL set_xas_env(xas_env=xas_env, xas_estate=xas_estate, ip_energy=ip_energy,error=error)
+    CALL set_xas_env(xas_env=xas_env, xas_estate=xas_estate, ip_energy=ip_energy)
 
     CALL cp_fm_get_submatrix(mo_coeff,vecbuffer,1,xas_estate,&
-         nao,1,transpose=.TRUE.,error=error)
+         nao,1,transpose=.TRUE.)
     CALL cp_fm_set_submatrix(excvec_coeff,vecbuffer,1,1,&
-         nao,1,transpose=.TRUE.,error=error)
+         nao,1,transpose=.TRUE.)
 
-    DEALLOCATE(vecbuffer,vecbuffer2,STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(vecbuffer,vecbuffer2)
 
  END SUBROUTINE find_excited_core_orbital
 

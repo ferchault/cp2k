@@ -22,6 +22,7 @@ MODULE input_cp2k_kpoints
   USE kinds,                           ONLY: dp
   USE string_utilities,                ONLY: s2a
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -51,94 +52,87 @@ CONTAINS
 !>      PARALLEL_GROUP_SIZE   [-1,0,n]
 !>
 !> \param section the section to create
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author JGH
 ! *****************************************************************************
-  SUBROUTINE create_kpoints_section(section,error)
+  SUBROUTINE create_kpoints_section(section)
     TYPE(section_type), POINTER              :: section
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'create_kpoints_section', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
     TYPE(keyword_type), POINTER              :: keyword
 
-    failure=.FALSE.
+    CPASSERT(.NOT.ASSOCIATED(section))
+    CALL section_create(section,name="KPOINTS",&
+         description="Sets up the kpoints.",&
+         n_keywords=1, n_subsections=0, repeats=.FALSE.)
 
-    CPPrecondition(.NOT.ASSOCIATED(section),cp_failure_level,routineP,error,failure)
-    IF (.NOT. failure) THEN
-       CALL section_create(section,name="KPOINTS",&
-            description="Sets up the kpoints.",&
-            n_keywords=1, n_subsections=0, repeats=.FALSE., &
-            error=error)
+    NULLIFY (keyword)
+    CALL keyword_create(keyword, name="SCHEME",&
+         description="Kpoint scheme to be used. ",&
+         usage="SCHEME {KPMETHOD}{integer} {integer} ..",&
+         n_var=-1, type_of_var=char_t)
+    CALL section_add_keyword(section,keyword)
+    CALL keyword_release(keyword)
 
-       NULLIFY (keyword)
-       CALL keyword_create(keyword, name="SCHEME",&
-            description="Kpoint scheme to be used. ",&
-            usage="SCHEME {KPMETHOD}{integer} {integer} ..",&
-            n_var=-1, type_of_var=char_t, error=error)
-       CALL section_add_keyword(section,keyword,error=error)
-       CALL keyword_release(keyword,error=error)
+    CALL keyword_create(keyword, name="KPOINT",&
+         description="Specify kpoint coordinates and weight. ",&
+         usage="KPOINT x  y  z  w",repeats=.TRUE.,&
+         n_var=4, type_of_var=real_t)
+    CALL section_add_keyword(section,keyword)
+    CALL keyword_release(keyword)
 
-       CALL keyword_create(keyword, name="KPOINT",&
-            description="Specify kpoint coordinates and weight. ",&
-            usage="KPOINT x  y  z  w",repeats=.TRUE.,&
-            n_var=4, type_of_var=real_t, error=error)
-       CALL section_add_keyword(section,keyword,error=error)
-       CALL keyword_release(keyword,error=error)
+    CALL keyword_create(keyword, name="SYMMETRY",&
+         description="Use symmetry to reduce the number of kpoints.",&
+         usage="SYMMETRY <LOGICAL>",&
+         default_l_val=.FALSE.,lone_keyword_l_val=.TRUE.)
+    CALL section_add_keyword(section,keyword)
+    CALL keyword_release(keyword)
 
-       CALL keyword_create(keyword, name="SYMMETRY",&
-            description="Use symmetry to reduce the number of kpoints.",&
-            usage="SYMMETRY <LOGICAL>",&
-            default_l_val=.FALSE.,lone_keyword_l_val=.TRUE.,error=error)
-       CALL section_add_keyword(section,keyword,error=error)
-       CALL keyword_release(keyword,error=error)
+    CALL keyword_create(keyword, name="FULL_GRID",&
+         description="Use full non-reduced kpoint grid.",&
+         usage="FULL_GRID <LOGICAL>",&
+         default_l_val=.FALSE.,lone_keyword_l_val=.TRUE.)
+    CALL section_add_keyword(section,keyword)
+    CALL keyword_release(keyword)
 
-       CALL keyword_create(keyword, name="FULL_GRID",&
-            description="Use full non-reduced kpoint grid.",&
-            usage="FULL_GRID <LOGICAL>",&
-            default_l_val=.FALSE.,lone_keyword_l_val=.TRUE.,error=error)
-       CALL section_add_keyword(section,keyword,error=error)
-       CALL keyword_release(keyword,error=error)
+    CALL keyword_create(keyword, name="VERBOSE",&
+         description="Verbose output information.",&
+         usage="VERBOSE <LOGICAL>",&
+         default_l_val=.FALSE.,lone_keyword_l_val=.TRUE.)
+    CALL section_add_keyword(section,keyword)
+    CALL keyword_release(keyword)
 
-       CALL keyword_create(keyword, name="VERBOSE",&
-            description="Verbose output information.",&
-            usage="VERBOSE <LOGICAL>",&
-            default_l_val=.FALSE.,lone_keyword_l_val=.TRUE.,error=error)
-       CALL section_add_keyword(section,keyword,error=error)
-       CALL keyword_release(keyword,error=error)
+    CALL keyword_create(keyword, name="EPS_GEO",&
+         description="Accuracy in symmetry determination.",&
+         usage="EPS_GEO <real>",&
+         default_r_val=1.0e-6_dp)
+    CALL section_add_keyword(section,keyword)
+    CALL keyword_release(keyword)
 
-       CALL keyword_create(keyword, name="EPS_GEO",&
-            description="Accuracy in symmetry determination.",&
-            usage="EPS_GEO <real>",&
-            default_r_val=1.0e-6_dp,error=error)
-       CALL section_add_keyword(section,keyword,error=error)
-       CALL keyword_release(keyword,error=error)
+    CALL keyword_create(keyword, name="PARALLEL_GROUP_SIZE",&
+         description="Number of processors to be used for a single kpoint. "//&
+                     " This number must divide the total number of processes."//&
+                     " The number of groups must divide the total number of kpoints."//&
+                     " Value=-1 (smallest possible number of processes per group, satisfying the constraints)."//&
+                     " Value=0 (all processes)."//&
+                     " Value=n (exactly n processes).",&
+         usage="PARALLEL_GROUP_SIZE <integer>",&
+         default_i_val=-1)
+    CALL section_add_keyword(section,keyword)
+    CALL keyword_release(keyword)
 
-       CALL keyword_create(keyword, name="PARALLEL_GROUP_SIZE",&
-            description="Number of processors to be used for a single kpoint."//&
-                        " Value=-1 (minimum number of processes)."//&
-                        " Value=0 (maximum number of processes)."//&
-                        " Value=n (exactly n processes).",&
-            usage="PARALLEL_GROUP_SIZE <integer>",&
-            default_i_val=-1,error=error)
-       CALL section_add_keyword(section,keyword,error=error)
-       CALL keyword_release(keyword,error=error)
+    CALL keyword_create(keyword, name="WAVEFUNCTIONS",&
+         description="Use real/complex wavefunctions if possible.",&
+         usage="WAVEFUNCTIONS REAL",&
+         default_i_val=use_complex_wfn,&
+         enum_c_vals=s2a("REAL","COMPLEX"),&
+         enum_desc=s2a("Use real wavefunctions (if possible by kpoints specified).",&
+                       "Use complex wavefunctions (default)."),&
+         enum_i_vals=(/ use_real_wfn, use_complex_wfn/))
+    CALL section_add_keyword(section,keyword)
+    CALL keyword_release(keyword)
 
-       CALL keyword_create(keyword, name="WAVEFUNCTIONS",&
-            description="Use real/complex wavefunctions if possible.",&
-            usage="WAVEFUNCTIONS REAL",&
-            default_i_val=use_complex_wfn,&
-            enum_c_vals=s2a("REAL","COMPLEX"),&
-            enum_desc=s2a("Use real wavefunctions (if possible by kpoints specified).",&
-                          "Use complex wavefunctions (default)."),&
-            enum_i_vals=(/ use_real_wfn, use_complex_wfn/), error=error)
-       CALL section_add_keyword(section,keyword,error=error)
-       CALL keyword_release(keyword,error=error)
-
-    END IF
   END SUBROUTINE create_kpoints_section
 
 END MODULE input_cp2k_kpoints

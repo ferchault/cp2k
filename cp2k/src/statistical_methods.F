@@ -18,6 +18,7 @@ MODULE statistical_methods
   USE parallel_rng_types,              ONLY: next_random_number
   USE util,                            ONLY: sort
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -39,15 +40,13 @@ CONTAINS
 !> \param n ...
 !> \param w ...
 !> \param pw ...
-!> \param error ...
 !> \par History
 !>      Teodoro Laino (02.2007) [tlaino]
 ! *****************************************************************************
-  SUBROUTINE sw_test ( ix, n, w, pw, error)
+  SUBROUTINE sw_test ( ix, n, w, pw)
     REAL(KIND=dp), DIMENSION(:), POINTER     :: ix
     INTEGER, INTENT(IN)                      :: n
     REAL(KIND=dp), INTENT(OUT)               :: w, pw
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'sw_test', &
       routineP = moduleN//':'//routineN
@@ -64,8 +63,7 @@ CONTAINS
     REAL(KIND=dp), PARAMETER :: stqr = 1.047198_dp, th = 0.375_dp, &
       two = 2.0_dp, zero = 0.0_dp
 
-    INTEGER                                  :: i, i1, j, n2, output_unit, &
-                                                stat
+    INTEGER                                  :: i, i1, j, n2, output_unit
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: itmp
     LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: a1, a2, an, an25, asa, fac, &
@@ -74,15 +72,11 @@ CONTAINS
                                                 ssx, summ2, sx, w1, xi, xsx, &
                                                 xx, y
     REAL(KIND=dp), ALLOCATABLE, DIMENSION(:) :: a, x
-    TYPE(cp_logger_type), POINTER            :: logger
 
     failure = .FALSE.
-    NULLIFY(logger)
-    logger => cp_error_get_logger(error)
-    output_unit= cp_logger_get_default_io_unit(logger)
+    output_unit= cp_logger_get_default_io_unit()
     ! Check for  N < 3
     IF (n  < 3 .OR. n > 5000)   THEN
-       failure = .TRUE.
        IF (output_unit>0) WRITE(output_unit,'(A)')&
             "Shapiro Wilk test: number of points less than 3 or greated than 5000."
        IF (output_unit>0) WRITE(output_unit,'(A)')&
@@ -94,125 +88,115 @@ CONTAINS
     ELSE
        n2 = (n-1)/2
     END IF
-    ALLOCATE(x(n),stat=stat)
-    CPPostcondition(stat==0,cp_warning_level,routineP,error,failure)
-    ALLOCATE(itmp(n),stat=stat)
-    CPPostcondition(stat==0,cp_warning_level,routineP,error,failure)
-    ALLOCATE(a(n2),stat=stat)
-    CPPostcondition(stat==0,cp_warning_level,routineP,error,failure)
+    ALLOCATE(x(n))
+    ALLOCATE(itmp(n))
+    ALLOCATE(a(n2))
     x(:) = ix
     CALL sort(x, n, itmp)
     ! Check for zero range
-    IF (.NOT.failure ) THEN
-       range = x(n) - x(1)
-       IF (range < small) failure = .TRUE.
-       IF (failure.AND.(output_unit>0)) THEN
-         WRITE(output_unit,'(A)')"Shapiro Wilk test: two data points are numerically identical."
-         WRITE(output_unit,'(A)')"Not able to perform the test!"
-       END IF
+    range = x(n) - x(1)
+    IF (range < small) failure = .TRUE.
+    IF (failure.AND.(output_unit>0)) THEN
+      WRITE(output_unit,'(A)')"Shapiro Wilk test: two data points are numerically identical."
+      WRITE(output_unit,'(A)')"Not able to perform the test!"
     END IF
-    IF (.NOT.failure) THEN
-       pw = one
-       w  = one
-       an = n
-       ! Calculates coefficients for the test
-       IF (n == 3) THEN
-          a(1) = sqrth
+    pw = one
+    w  = one
+    an = n
+    ! Calculates coefficients for the test
+    IF (n == 3) THEN
+       a(1) = sqrth
+    ELSE
+       an25 = an + qtr
+       summ2 = zero
+       DO i = 1, n2
+          CALL ppnd7((i - th)/an25, a(i))
+          summ2 = summ2 + a(i) ** 2
+       END DO
+       summ2 = summ2 * two
+       ssumm2 = SQRT(summ2)
+       rsn = one / SQRT(an)
+       a1 = poly(c1, 6, rsn) - a(1) / ssumm2
+       ! Normalize coefficients
+       IF (n > 5) THEN
+          i1 = 3
+          a2 = -a(2)/ssumm2 + poly(c2,6,rsn)
+          fac = SQRT((summ2 - two * a(1)**2 - two * a(2)**2)/(one - two * a1**2 - two * a2**2))
+          a(1) = a1
+          a(2) = a2
        ELSE
-          an25 = an + qtr
-          summ2 = zero
-          DO i = 1, n2
-             CALL ppnd7((i - th)/an25, a(i))
-             summ2 = summ2 + a(i) ** 2
-          END DO
-          summ2 = summ2 * two
-          ssumm2 = SQRT(summ2)
-          rsn = one / SQRT(an)
-          a1 = poly(c1, 6, rsn) - a(1) / ssumm2
-          ! Normalize coefficients
-          IF (n > 5) THEN
-             i1 = 3
-             a2 = -a(2)/ssumm2 + poly(c2,6,rsn)
-             fac = SQRT((summ2 - two * a(1)**2 - two * a(2)**2)/(one - two * a1**2 - two * a2**2))
-             a(1) = a1
-             a(2) = a2
-          ELSE
-             i1 = 2
-             fac = SQRT((summ2 - two * a(1)**2)/ (one - two * a1**2))
-             a(1) = a1
-          END IF
-          DO i = i1, n2
-             a(i) = -a(i)/fac
-          END DO
+          i1 = 2
+          fac = SQRT((summ2 - two * a(1)**2)/ (one - two * a1**2))
+          a(1) = a1
        END IF
-       ! scaled X
-       xx = x(1)/range
-       sx = xx
-       sa = -a(1)
-       j = n - 1
-       DO i = 2, n
-          xi = x(i)/range
-          sx = sx + xi
-          IF (i /= j) sa = sa + SIGN(1, i - j) * a(MIN(i, j))
-          xx = xi
-          j = j - 1
+       DO i = i1, n2
+          a(i) = -a(i)/fac
        END DO
-       ! Calculate W statistic as squared correlation
-       ! between data and coefficients
-       sa = sa/n
-       sx = sx/n
-       ssa = zero
-       ssx = zero
-       sax = zero
-       j = n
-       DO i = 1, n
-          IF (i /= j) THEN
-             asa = SIGN(1, i - j) * a(MIN(i, j)) - sa
-          ELSE
-             asa = -sa
-          END IF
-          xsx = x(i)/range - sx
-          ssa = ssa + asa * asa
-          ssx = ssx + xsx * xsx
-          sax = sax + asa * xsx
-          j = j - 1
-       END DO
-       ! W1 equals (1-W) calculated to avoid excessive rounding error
-       ! for W very near 1 (a potential problem in very large samples)
-       ssassx = SQRT(ssa * ssx)
-       w1 = (ssassx - sax) * (ssassx + sax)/(ssa * ssx)
-       w = one - w1
-       ! Calculate significance level for W (exact for N=3)
-       IF (n == 3) THEN
-          pw = pi6 * (ASIN(SQRT(w)) - stqr)
+    END IF
+    ! scaled X
+    xx = x(1)/range
+    sx = xx
+    sa = -a(1)
+    j = n - 1
+    DO i = 2, n
+       xi = x(i)/range
+       sx = sx + xi
+       IF (i /= j) sa = sa + SIGN(1, i - j) * a(MIN(i, j))
+       xx = xi
+       j = j - 1
+    END DO
+    ! Calculate W statistic as squared correlation
+    ! between data and coefficients
+    sa = sa/n
+    sx = sx/n
+    ssa = zero
+    ssx = zero
+    sax = zero
+    j = n
+    DO i = 1, n
+       IF (i /= j) THEN
+          asa = SIGN(1, i - j) * a(MIN(i, j)) - sa
        ELSE
-          y  = LOG(w1)
-          xx = LOG(an)
-          m = zero
-          s = one
-          IF (n <= 11) THEN
-             gamma = poly(g, 2, an)
-             IF (y >= gamma) THEN
-                pw = small
-             ELSE
-                y = -LOG(gamma - y)
-                m = poly(c3, 4, an)
-                s = EXP(poly(c4, 4, an))
-                pw = alnorm((y - m)/s, .TRUE.)
-             END IF
+          asa = -sa
+       END IF
+       xsx = x(i)/range - sx
+       ssa = ssa + asa * asa
+       ssx = ssx + xsx * xsx
+       sax = sax + asa * xsx
+       j = j - 1
+    END DO
+    ! W1 equals (1-W) calculated to avoid excessive rounding error
+    ! for W very near 1 (a potential problem in very large samples)
+    ssassx = SQRT(ssa * ssx)
+    w1 = (ssassx - sax) * (ssassx + sax)/(ssa * ssx)
+    w = one - w1
+    ! Calculate significance level for W (exact for N=3)
+    IF (n == 3) THEN
+       pw = pi6 * (ASIN(SQRT(w)) - stqr)
+    ELSE
+       y  = LOG(w1)
+       xx = LOG(an)
+       m = zero
+       s = one
+       IF (n <= 11) THEN
+          gamma = poly(g, 2, an)
+          IF (y >= gamma) THEN
+             pw = small
           ELSE
-             m = poly(c5, 4, xx)
-             s = EXP(poly(c6, 3, xx))
+             y = -LOG(gamma - y)
+             m = poly(c3, 4, an)
+             s = EXP(poly(c4, 4, an))
              pw = alnorm((y - m)/s, .TRUE.)
           END IF
+       ELSE
+          m = poly(c5, 4, xx)
+          s = EXP(poly(c6, 3, xx))
+          pw = alnorm((y - m)/s, .TRUE.)
        END IF
     END IF
-    DEALLOCATE(x,stat=stat)
-    CPPostcondition(stat==0,cp_warning_level,routineP,error,failure)
-    DEALLOCATE(itmp,stat=stat)
-    CPPostcondition(stat==0,cp_warning_level,routineP,error,failure)
-    DEALLOCATE(a,stat=stat)
-    CPPostcondition(stat==0,cp_warning_level,routineP,error,failure)
+    DEALLOCATE(x)
+    DEALLOCATE(itmp)
+    DEALLOCATE(a)
 
   END SUBROUTINE sw_test
 
@@ -372,7 +356,6 @@ CONTAINS
 !> \param tau ...
 !> \param z ...
 !> \param prob ...
-!> \param error ...
 !> \par History
 !>      Teodoro Laino (02.2007) [tlaino]
 !> \note
@@ -380,11 +363,10 @@ CONTAINS
 !>      z:    number of std devs from 0 of tau
 !>      prob: tau's probability
 ! *****************************************************************************
-  SUBROUTINE k_test(xdata,istart,n,tau,z,prob,error)
+  SUBROUTINE k_test(xdata,istart,n,tau,z,prob)
     REAL(KIND=dp), DIMENSION(:), POINTER     :: xdata
     INTEGER, INTENT(IN)                      :: istart, n
     REAL(KIND=dp)                            :: tau, z, prob
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'k_test', &
       routineP = moduleN//':'//routineN
@@ -423,15 +405,13 @@ CONTAINS
 !> \param r ...
 !> \param u ...
 !> \param prob ...
-!> \param error ...
 !> \par History
 !>      Teodoro Laino (02.2007) [tlaino]
 ! *****************************************************************************
-  SUBROUTINE vn_test(xdata,n,r,u,prob,error)
+  SUBROUTINE vn_test(xdata,n,r,u,prob)
     REAL(KIND=dp), DIMENSION(:), POINTER     :: xdata
     INTEGER, INTENT(IN)                      :: n
     REAL(KIND=dp)                            :: r, u, prob
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'vn_test', &
       routineP = moduleN//':'//routineN
@@ -471,60 +451,52 @@ CONTAINS
 !>      Debug use only
 !> \param xdata ...
 !> \param globenv ...
-!> \param error ...
 !> \par History
 !>      Teodoro Laino (02.2007) [tlaino]
 ! *****************************************************************************
-  SUBROUTINE tests(xdata, globenv, error)
+  SUBROUTINE tests(xdata, globenv)
     REAL(KIND=dp), DIMENSION(:), POINTER     :: xdata
     TYPE(global_environment_type), POINTER   :: globenv
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'tests', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, n, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: i, n
     REAL(KINd=dp)                            :: prob, pw, r, tau, u, w, z
     REAL(KIND=dp), DIMENSION(:), POINTER     :: ydata
 
-    failure = .FALSE.
     IF (debug_this_module) THEN
        n = 50 ! original sample size
        NULLIFY(xdata)
-       ALLOCATE(xdata(n), stat=stat)
-       CPPostcondition(stat==0,cp_warning_level,routineP,error,failure)
+       ALLOCATE(xdata(n))
        DO i = 1, 10
           xdata(i) = 5.0_dp - REAL(i,KIND=dp)/2.0_dp + 0.1*&
-                     next_random_number(globenv%gaussian_rng_stream,error=error)
+                     next_random_number(globenv%gaussian_rng_stream)
           WRITE(3,*)xdata(i)
        END DO
        DO i = 11, n
-          xdata(i) = 0.1*next_random_number(globenv%gaussian_rng_stream,error=error)
+          xdata(i) = 0.1*next_random_number(globenv%gaussian_rng_stream)
        END DO
 
        ! Test for trend
        DO i = 1, n
-          CALL k_test(xdata,i,n,tau,z,prob,error)
+          CALL k_test(xdata,i,n,tau,z,prob)
           IF (prob<=0.2_dp) EXIT
        END DO
        WRITE(*,*)"Mann-Kendall test",i
 
        ! Test for normality distribution and for serial correlation
        DO i = 1,n
-         ALLOCATE(ydata(n-i+1), stat=stat)
-         CPPostcondition(stat==0,cp_warning_level,routineP,error,failure)
+         ALLOCATE(ydata(n-i+1))
          ydata = xdata(i:n)
-         CALL sw_test ( ydata, n-i+1, w, pw, error)
-         CALL vn_test(ydata,n-i+1,r,u,prob,error)
+         CALL sw_test ( ydata, n-i+1, w, pw)
+         CALL vn_test(ydata,n-i+1,r,u,prob)
          WRITE(*,*)"Shapiro Wilks test",i,w,pw
          WRITE(*,*)"Von Neu",i,r,u,prob
-         DEALLOCATE(ydata, stat=stat)
-         CPPostcondition(stat==0,cp_warning_level,routineP,error,failure)
+         DEALLOCATE(ydata)
        END DO
 
-       DEALLOCATE(xdata, stat=stat)
-       CPPostcondition(stat==0,cp_warning_level,routineP,error,failure)
+       DEALLOCATE(xdata)
     END IF
   END SUBROUTINE tests
 

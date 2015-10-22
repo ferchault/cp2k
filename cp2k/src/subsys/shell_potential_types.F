@@ -12,6 +12,7 @@ MODULE shell_potential_types
   USE kinds,                           ONLY: default_string_length,&
                                              dp
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -65,17 +66,14 @@ CONTAINS
 !> \param k4_spring ...
 !> \param max_dist ...
 !> \param shell_cutoff ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE get_shell(shell,charge,charge_core,charge_shell,mass_core,&
-                       mass_shell,k2_spring,k4_spring,max_dist,shell_cutoff,&
-                       error)
+                       mass_shell,k2_spring,k4_spring,max_dist,shell_cutoff)
 
     TYPE(shell_kind_type), POINTER           :: shell
     REAL(KIND=dp), INTENT(OUT), OPTIONAL :: charge, charge_core, &
       charge_shell, mass_core, mass_shell, k2_spring, k4_spring, max_dist, &
       shell_cutoff
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'get_shell', &
       routineP = moduleN//':'//routineN
@@ -96,23 +94,16 @@ CONTAINS
 ! *****************************************************************************
 !> \brief ...
 !> \param shell ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE shell_create(shell,error)
+  SUBROUTINE shell_create(shell)
 
     TYPE(shell_kind_type), POINTER           :: shell
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'shell_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: istat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    CPPostcondition(.NOT.ASSOCIATED(shell),cp_failure_level,routineP,error,failure)
-    ALLOCATE(shell,STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    CPASSERT(.NOT.ASSOCIATED(shell))
+    ALLOCATE(shell)
     shell%ref_count = 1
 
   END SUBROUTINE shell_create
@@ -121,30 +112,24 @@ CONTAINS
 !> \brief ...
 !> \param shell_list ...
 !> \param ndim ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE shell_p_create(shell_list,ndim,error)
+  SUBROUTINE shell_p_create(shell_list,ndim)
 
     TYPE(shell_p_type), DIMENSION(:), &
       POINTER                                :: shell_list
     INTEGER, INTENT(IN)                      :: ndim
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'shell_p_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, istat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: i
 
-    failure = .FALSE.
-
-    CPPostcondition(.NOT.ASSOCIATED(shell_list),cp_failure_level,routineP,error,failure)
-    ALLOCATE(shell_list(ndim), STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    CPASSERT(.NOT.ASSOCIATED(shell_list))
+    ALLOCATE(shell_list(ndim))
 
     DO i = 1,ndim
       NULLIFY (shell_list(i)%shell)
-      CALL shell_create(shell_list(i)%shell,error)
+      CALL shell_create(shell_list(i)%shell)
       shell_list(i)%atm_name=''
     END DO
 
@@ -153,51 +138,36 @@ CONTAINS
 ! *****************************************************************************
 !> \brief ...
 !> \param shell ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE shell_retain(shell,error)
+  SUBROUTINE shell_retain(shell)
 
     TYPE(shell_kind_type), POINTER           :: shell
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'shell_retain', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-
-    CPPrecondition(ASSOCIATED(shell),cp_failure_level,routineP,error,failure)
-    IF(.NOT. failure) THEN
-      CPPrecondition(shell%ref_count>0,cp_failure_level,routineP,error,failure)
-      shell%ref_count=shell%ref_count+1
-    END IF
+    CPASSERT(ASSOCIATED(shell))
+    CPASSERT(shell%ref_count>0)
+    shell%ref_count=shell%ref_count+1
 
   END SUBROUTINE shell_retain
 
 ! *****************************************************************************
 !> \brief ...
 !> \param shell ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE shell_release(shell,error)
+  SUBROUTINE shell_release(shell)
 
     TYPE(shell_kind_type), POINTER           :: shell
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'shell_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: istat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
     IF(ASSOCIATED(shell)) THEN
-      CPPrecondition(shell%ref_count>0,cp_failure_level,routineP,error,failure)
+      CPASSERT(shell%ref_count>0)
       shell%ref_count=shell%ref_count-1
       IF(shell%ref_count==0) THEN
-        DEALLOCATE(shell,STAT=istat)
-        CPPostconditionNoFail(istat==0,cp_warning_level,routineP,error)
+        DEALLOCATE(shell)
       END IF
     END IF
     NULLIFY(shell)
@@ -207,24 +177,21 @@ CONTAINS
 ! *****************************************************************************
 !> \brief ...
 !> \param shell_list ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE shell_p_release(shell_list, error)
+  SUBROUTINE shell_p_release(shell_list)
     TYPE(shell_p_type), DIMENSION(:), &
       POINTER                                :: shell_list
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'shell_p_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, istat
+    INTEGER                                  :: i
 
     IF (ASSOCIATED(shell_list)) THEN
       DO i = 1,SIZE(shell_list)
-         CALL shell_release(shell_list(i)%shell,error=error)
+         CALL shell_release(shell_list(i)%shell)
       END DO
-      DEALLOCATE(shell_list,stat=istat)
-      CPPostconditionNoFail(istat==0,cp_warning_level,routineP,error)
+      DEALLOCATE(shell_list)
     END IF
 
     NULLIFY (shell_list)

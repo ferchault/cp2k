@@ -18,9 +18,8 @@ MODULE pint_gle
   USE parallel_rng_types,              ONLY: next_random_number,&
                                              rng_stream_type
   USE pint_types,                      ONLY: pint_env_type
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -34,11 +33,9 @@ MODULE pint_gle
 ! *****************************************************************************
 !> \brief ...
 !> \param pint_env ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE pint_calc_gle_energy( pint_env, error)
+  SUBROUTINE pint_calc_gle_energy( pint_env)
     TYPE(pint_env_type), POINTER             :: pint_env
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     INTEGER                                  :: i
 
@@ -53,19 +50,14 @@ MODULE pint_gle
 ! *****************************************************************************
 !> \brief ...
 !> \param pint_env ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE pint_gle_init( pint_env, error)
+  SUBROUTINE pint_gle_init( pint_env)
     TYPE(pint_env_type), POINTER             :: pint_env
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     INTEGER                                  :: i, ib, idim, imap, j
-    LOGICAL                                  :: failure
     REAL(dp) :: mf, rr(pint_env%gle%ndim), &
       cc(pint_env%gle%ndim,pint_env%gle%ndim)
     TYPE(rng_stream_type), POINTER           :: rng_stream
-
-    failure = .FALSE.
 
     CALL gle_cholesky_stab(pint_env%gle%c_mat, cc, pint_env%gle%ndim)
     DO i = 1, pint_env%gle%loc_num_gle
@@ -75,7 +67,7 @@ MODULE pint_gle
       mf=1.0_dp/SQRT(pint_env%mass_fict(ib,idim))
       rng_stream => pint_env%gle%nvt(i)%gaussian_rng_stream
       DO j = 1, pint_env%gle%ndim
-        rr(j) =  next_random_number( rng_stream,error=error)*mf
+        rr(j) =  next_random_number( rng_stream)*mf
       END DO
       pint_env%gle%nvt(i)%s = MATMUL(cc,rr)
     END DO
@@ -85,18 +77,15 @@ MODULE pint_gle
 ! *****************************************************************************
 !> \brief ...
 !> \param pint_env ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE pint_gle_step( pint_env, error)
+  SUBROUTINE pint_gle_step( pint_env)
     TYPE(pint_env_type), POINTER             :: pint_env
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'pint_gle_step', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, iadd, ib, ideg, idim, &
-                                                imap, istat, ndim, num
-    LOGICAL                                  :: failure
+                                                imap, ndim, num
     REAL(dp)                                 :: alpha, beta, mf, rr
     REAL(dp), DIMENSION(:, :), POINTER       :: a_mat, e_tmp, h_tmp, s_tmp
     TYPE(gle_type), POINTER                  :: gle
@@ -108,13 +97,10 @@ MODULE pint_gle
     NULLIFY( rng_stream)
     ndim = gle%ndim
 
-    ALLOCATE (s_tmp(ndim,gle%loc_num_gle),STAT=istat)
-       CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (s_tmp(ndim,gle%loc_num_gle))
     s_tmp = 0.0_dp
-    ALLOCATE (e_tmp(ndim,gle%loc_num_gle),STAT=istat)
-       CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE (h_tmp(ndim,gle%loc_num_gle),STAT=istat)
-       CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (e_tmp(ndim,gle%loc_num_gle))
+    ALLOCATE (h_tmp(ndim,gle%loc_num_gle))
 
     DO ideg = 1,gle%loc_num_gle
        imap = gle%map_info%index(ideg)
@@ -126,12 +112,12 @@ MODULE pint_gle
                +0.5_dp*pint_env%mass_fict(ib,idim)*gle%nvt(ideg)%s(1)**2
        s_tmp(1,imap) = gle%nvt(ideg)%s(1)
        rng_stream => gle%nvt(ideg)%gaussian_rng_stream
-       rr =  next_random_number( rng_stream,error=error)
+       rr =  next_random_number( rng_stream)
        mf=1.0_dp/SQRT(pint_env%mass_fict(ib,idim))
        e_tmp(1,imap)= rr*mf
        DO iadd = 2,ndim
           s_tmp(iadd,imap) = gle%nvt(ideg)%s(iadd)
-          rr =  next_random_number( rng_stream,error=error)
+          rr =  next_random_number( rng_stream)
           e_tmp(iadd,imap) = rr*mf
        END DO
     END DO
@@ -161,8 +147,7 @@ MODULE pint_gle
                -0.5_dp*pint_env%mass_fict(ib,idim)*gle%nvt(ideg)%s(1)**2
     END DO
        pint_env%e_kin_t=0.0_dp
-    DEALLOCATE(e_tmp,s_tmp,h_tmp,STAT=istat)
-       CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(e_tmp,s_tmp,h_tmp)
     CALL timestop(handle)
   END SUBROUTINE
 END MODULE

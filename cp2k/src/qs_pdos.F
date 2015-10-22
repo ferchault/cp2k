@@ -74,9 +74,8 @@ MODULE qs_pdos
                                              mo_set_type
   USE qs_ot_eigensolver,               ONLY: ot_eigensolver
   USE scf_control_types,               ONLY: scf_control_type
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -126,7 +125,6 @@ CONTAINS
 !> \param qs_env ...
 !> \param dft_section ...
 !> \param ispin ...
-!> \param error ...
 !> \date    26.02.2008
 !> \par History:
 !>       -
@@ -137,7 +135,7 @@ CONTAINS
 !> \version 1.0
 ! *****************************************************************************
   SUBROUTINE calculate_projected_dos(mo_set,atomic_kind_set,qs_kind_set,particle_set,qs_env,&
-                                 dft_section,ispin,error)
+                                 dft_section,ispin)
 
     TYPE(mo_set_type), POINTER               :: mo_set
     TYPE(atomic_kind_type), DIMENSION(:), &
@@ -149,7 +147,6 @@ CONTAINS
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(section_vals_type), POINTER         :: dft_section
     INTEGER, INTENT(IN), OPTIONAL            :: ispin
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'calculate_projected_dos', &
       routineP = moduleN//':'//routineN
@@ -166,12 +163,12 @@ CONTAINS
       in_z, ir, irow, iset, isgf, ishell, iso, iterstep, iw, j, jx, jy, jz, &
       k, lcomponent, lshell, maxl, maxlgto, my_spin, n_dependent, n_r_ldos, &
       n_rep, nao, natom, ncol_global, nkind, nldos, nlumo, nmo, np_tot, &
-      npoints, nrow_global, nset, nsgf, nvirt, out_each, output_unit, stat
+      npoints, nrow_global, nset, nsgf, nvirt, out_each, output_unit
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: firstrow
     INTEGER, DIMENSION(:), POINTER           :: list, nshell
     INTEGER, DIMENSION(:, :), POINTER        :: bo, l
     LOGICAL                                  :: append, do_ldos, do_r_ldos, &
-                                                do_virt, failure, ionode, &
+                                                do_virt, ionode, &
                                                 separate_components, &
                                                 should_output
     LOGICAL, DIMENSION(:, :), POINTER        :: read_r
@@ -204,11 +201,10 @@ CONTAINS
     TYPE(section_vals_type), POINTER         :: ldos_section
 
     NULLIFY(logger)
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
     ionode = logger%para_env%mepos==logger%para_env%source
-    failure = .FALSE.
     should_output = BTEST(cp_print_key_should_output(logger%iter_info,dft_section,&
-                          "PRINT%PDOS",error=error),cp_p_file)
+                          "PRINT%PDOS"),cp_p_file)
     output_unit= cp_logger_get_default_io_unit(logger)
 
     spin(1)="ALPHA"
@@ -226,7 +222,7 @@ CONTAINS
     IF (output_unit > 0) WRITE(UNIT=output_unit,FMT='(/,(T3,A,T61,I10))')&
       " Calculate PDOS at iteration step ", iterstep
     CALL get_qs_env(qs_env=qs_env,&
-         matrix_s=s_matrix,error=error)
+         matrix_s=s_matrix)
 
     CALL get_atomic_kind_set(atomic_kind_set, natom=natom)
     CALL get_qs_kind_set(qs_kind_set, nsgf=nsgf, maxlgto=maxlgto)
@@ -237,11 +233,11 @@ CONTAINS
     CALL cp_fm_get_info(mo_coeff,&
          context=context, para_env=para_env,&
          nrow_global=nrow_global,&
-         ncol_global=ncol_global,error=error)
+         ncol_global=ncol_global)
 
-    CALL section_vals_val_get(dft_section,"PRINT%PDOS%OUT_EACH_MO",i_val=out_each,error=error)
+    CALL section_vals_val_get(dft_section,"PRINT%PDOS%OUT_EACH_MO",i_val=out_each)
     IF(out_each==-1) out_each=nao+1
-    CALL section_vals_val_get(dft_section,"PRINT%PDOS%NLUMO",i_val=nlumo,error=error)
+    CALL section_vals_val_get(dft_section,"PRINT%PDOS%NLUMO",i_val=nlumo)
     IF (nlumo == -1) nlumo = nao - homo
     do_virt = (nlumo>(nmo-homo))
     nvirt = nlumo - (nmo-homo)
@@ -253,7 +249,7 @@ CONTAINS
          my_spin = 1
        END IF
 
-       CALL generate_virtual_mo(qs_env,mo_set, evals_virt, mo_virt, nvirt, ispin=my_spin, error=error )
+       CALL generate_virtual_mo(qs_env,mo_set, evals_virt, mo_virt, nvirt, ispin=my_spin)
     ELSE
        NULLIFY (evals_virt,mo_virt)
        nvirt = 0
@@ -261,62 +257,58 @@ CONTAINS
 
     ! Create S^1/2 : from sparse to full matrix
     CALL cp_fm_struct_create(fm_struct_tmp,para_env=para_env,context=context, &
-                  nrow_global=nrow_global,ncol_global=nrow_global,error=error)
-    CALL cp_fm_create(matrix_shalf, fm_struct_tmp,name="matrix_shalf",error=error)
-    CALL cp_fm_create(matrix_work, fm_struct_tmp,name="matrix_work",error=error)
-    CALL cp_fm_struct_release(fm_struct_tmp,error=error)
-    CALL copy_dbcsr_to_fm(s_matrix(1)%matrix,matrix_shalf,error=error)
-    CALL cp_fm_power(matrix_shalf,matrix_work,0.5_dp,EPSILON(0.0_dp),n_dependent,error=error)
-    CALL cp_fm_release(matrix_work,error=error)
+                  nrow_global=nrow_global,ncol_global=nrow_global)
+    CALL cp_fm_create(matrix_shalf, fm_struct_tmp,name="matrix_shalf")
+    CALL cp_fm_create(matrix_work, fm_struct_tmp,name="matrix_work")
+    CALL cp_fm_struct_release(fm_struct_tmp)
+    CALL copy_dbcsr_to_fm(s_matrix(1)%matrix,matrix_shalf)
+    CALL cp_fm_power(matrix_shalf,matrix_work,0.5_dp,EPSILON(0.0_dp),n_dependent)
+    CALL cp_fm_release(matrix_work)
 
     ! Multiply S^(1/2) time the mOS coefficients to get orthonormalized MOS
     CALL cp_fm_struct_create(fm_struct_tmp,para_env=para_env,context=context, &
-         nrow_global=nrow_global,ncol_global=ncol_global,error=error)
-    CALL cp_fm_create(matrix_shalfc,fm_struct_tmp,name="matrix_shalfc",error=error)
+         nrow_global=nrow_global,ncol_global=ncol_global)
+    CALL cp_fm_create(matrix_shalfc,fm_struct_tmp,name="matrix_shalfc")
     CALL cp_gemm("N","N",nrow_global,ncol_global,nrow_global, &
-                   1.0_dp,matrix_shalf,mo_coeff,0.0_dp,matrix_shalfc,error=error)
-    CALL cp_fm_struct_release(fm_struct_tmp,error=error)
+                   1.0_dp,matrix_shalf,mo_coeff,0.0_dp,matrix_shalfc)
+    CALL cp_fm_struct_release(fm_struct_tmp)
 
     IF (do_virt) THEN
       IF (output_unit > 0) WRITE(UNIT=output_unit,FMT='(/,(T3,A,T14,I10,T27,A))')&
       " Compute ", nvirt, " additional unoccupied KS orbitals"
       CALL cp_fm_struct_create(fm_struct_tmp,para_env=para_env,context=context, &
-            nrow_global=nrow_global,ncol_global=nvirt,error=error)
-      CALL cp_fm_create(matrix_work,fm_struct_tmp,name="matrix_shalfc",error=error)
+            nrow_global=nrow_global,ncol_global=nvirt)
+      CALL cp_fm_create(matrix_work,fm_struct_tmp,name="matrix_shalfc")
       CALL cp_gemm("N","N",nrow_global,nvirt,nrow_global, &
-                     1.0_dp,matrix_shalf,mo_virt,0.0_dp,matrix_work,error=error)
-      CALL cp_fm_struct_release(fm_struct_tmp,error=error)
+                     1.0_dp,matrix_shalf,mo_virt,0.0_dp,matrix_work)
+      CALL cp_fm_struct_release(fm_struct_tmp)
     END IF
 
-    CALL cp_fm_release(matrix_shalf,error=error)
+    CALL cp_fm_release(matrix_shalf)
     ! Array to store the PDOS per kind and angular momentum
     do_ldos = .FALSE.
-    ldos_section => section_vals_get_subs_vals(dft_section,"PRINT%PDOS%LDOS",error=error)
+    ldos_section => section_vals_get_subs_vals(dft_section,"PRINT%PDOS%LDOS")
 
-    CALL section_vals_get(ldos_section,n_repetition=nldos,error=error)
+    CALL section_vals_get(ldos_section,n_repetition=nldos)
     IF(nldos>0) THEN
       IF (output_unit > 0) WRITE(UNIT=output_unit,FMT='(/,(T3,A,T61,I10))')&
       " Prepare the list of atoms for LDOS.   Number of lists: ", nldos
       do_ldos = .TRUE.
-      ALLOCATE(ldos_p(nldos),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-      ALLOCATE(ldos_index(nldos),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(ldos_p(nldos))
+      ALLOCATE(ldos_index(nldos))
       DO ildos=1,nldos
         WRITE(ldos_index(ildos),'(I0)') ildos
-        ALLOCATE(ldos_p(ildos)%ldos,STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(ldos_p(ildos)%ldos)
         NULLIFY(ldos_p(ildos)%ldos%pdos_array)
         NULLIFY(ldos_p(ildos)%ldos%list_index)
 
-        CALL section_vals_val_get(ldos_section,"LIST",i_rep_section=ildos, n_rep_val=n_rep,&
-             error=error)
+        CALL section_vals_val_get(ldos_section,"LIST",i_rep_section=ildos, n_rep_val=n_rep)
         IF(n_rep>0) THEN
           ldos_p(ildos)%ldos%nlist = 0
           DO ir = 1,n_rep
             NULLIFY (list)
             CALL section_vals_val_get(ldos_section,"LIST",i_rep_section=ildos,i_rep_val=ir,&
-                 i_vals=list, error=error)
+                 i_vals=list)
             IF(ASSOCIATED(list)) THEN
                CALL reallocate(ldos_p(ildos)%ldos%list_index,1,ldos_p(ildos)%ldos%nlist+SIZE(list))
                DO i = 1,SIZE(list)
@@ -332,13 +324,11 @@ CONTAINS
         IF (output_unit > 0) WRITE(UNIT=output_unit,FMT='((T10,A,T18,I6,T25,A,T36,I10,A))')&
          " List ",ildos , " contains ",  ldos_p(ildos)%ldos%nlist , " atoms"
         CALL section_vals_val_get(ldos_section,"COMPONENTS",i_rep_section=ildos,&
-             l_val=ldos_p(ildos)%ldos%separate_components,error=error)
+             l_val=ldos_p(ildos)%ldos%separate_components)
         IF(ldos_p(ildos)%ldos%separate_components) THEN
-          ALLOCATE(ldos_p(ildos)%ldos%pdos_array(nsoset(maxlgto),nmo+nvirt),STAT=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          ALLOCATE(ldos_p(ildos)%ldos%pdos_array(nsoset(maxlgto),nmo+nvirt))
         ELSE
-          ALLOCATE(ldos_p(ildos)%ldos%pdos_array(0:maxlgto,nmo+nvirt),STAT=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          ALLOCATE(ldos_p(ildos)%ldos%pdos_array(0:maxlgto,nmo+nvirt))
         END IF
         ldos_p(ildos)%ldos%pdos_array=0.0_dp
         ldos_p(ildos)%ldos%maxl = -1
@@ -347,45 +337,41 @@ CONTAINS
     END IF
 
     do_r_ldos = .FALSE.
-    ldos_section => section_vals_get_subs_vals(dft_section,"PRINT%PDOS%R_LDOS",error=error)
-    CALL section_vals_get(ldos_section,n_repetition=n_r_ldos,error=error)
+    ldos_section => section_vals_get_subs_vals(dft_section,"PRINT%PDOS%R_LDOS")
+    CALL section_vals_get(ldos_section,n_repetition=n_r_ldos)
     IF(n_r_ldos>0) THEN
       do_r_ldos = .TRUE.
       IF (output_unit > 0) WRITE(UNIT=output_unit,FMT='(/,(T3,A,T61,I10))')&
       " Prepare the list of points for R_LDOS.   Number of lists: ", n_r_ldos
-      ALLOCATE(r_ldos_p(n_r_ldos),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-      ALLOCATE(r_ldos_index(n_r_ldos),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(r_ldos_p(n_r_ldos))
+      ALLOCATE(r_ldos_index(n_r_ldos))
       CALL get_qs_env(qs_env=qs_env,&
            cell=cell,&
            dft_control=dft_control,&
-           pw_env=pw_env,error=error)
+           pw_env=pw_env)
       CALL pw_env_get(pw_env, auxbas_pw_pool=auxbas_pw_pool,&
-                      pw_pools=pw_pools,error=error)
+                      pw_pools=pw_pools)
 
       CALL pw_pool_create_pw(auxbas_pw_pool,wf_r%pw,&
                               use_data = REALDATA3D,&
-                              in_space = REALSPACE, error=error)
+                              in_space = REALSPACE)
       CALL pw_pool_create_pw(auxbas_pw_pool,wf_g%pw,&
                               use_data = COMPLEXDATA1D,&
-                              in_space = RECIPROCALSPACE, error=error)
-      ALLOCATE(read_r(4,n_r_ldos),STAT=stat)
+                              in_space = RECIPROCALSPACE)
+      ALLOCATE(read_r(4,n_r_ldos))
       DO ildos=1,n_r_ldos
         WRITE(r_ldos_index(ildos),'(I0)') ildos
-        ALLOCATE(r_ldos_p(ildos)%ldos,STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(r_ldos_p(ildos)%ldos)
         NULLIFY(r_ldos_p(ildos)%ldos%pdos_array)
         NULLIFY(r_ldos_p(ildos)%ldos%list_index)
 
-        CALL section_vals_val_get(ldos_section,"LIST",i_rep_section=ildos, n_rep_val=n_rep,&
-             error=error)
+        CALL section_vals_val_get(ldos_section,"LIST",i_rep_section=ildos, n_rep_val=n_rep)
         IF(n_rep>0) THEN
           r_ldos_p(ildos)%ldos%nlist = 0
           DO ir = 1,n_rep
             NULLIFY (list)
             CALL section_vals_val_get(ldos_section,"LIST",i_rep_section=ildos,i_rep_val=ir,&
-                 i_vals=list, error=error)
+                 i_vals=list)
             IF(ASSOCIATED(list)) THEN
                CALL reallocate(r_ldos_p(ildos)%ldos%list_index,1,r_ldos_p(ildos)%ldos%nlist+SIZE(list))
                DO i = 1,SIZE(list)
@@ -398,39 +384,38 @@ CONTAINS
           ! stop, LDOS without list of atoms is not implemented
         END IF
 
-        ALLOCATE(r_ldos_p(ildos)%ldos%pdos_array(nmo+nvirt),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(r_ldos_p(ildos)%ldos%pdos_array(nmo+nvirt))
         r_ldos_p(ildos)%ldos%pdos_array=0.0_dp
         read_r(1:3, ildos) = .FALSE.
-        CALL section_vals_val_get(ldos_section,"XRANGE",i_rep_section=ildos,explicit=read_r(1,ildos),error=error)
+        CALL section_vals_val_get(ldos_section,"XRANGE",i_rep_section=ildos,explicit=read_r(1,ildos))
         IF (read_r(1,ildos)) THEN
           CALL section_vals_val_get(ldos_section,"XRANGE",i_rep_section=ildos,r_vals=&
-             r_ldos_p(ildos)%ldos%x_range, error=error)
+             r_ldos_p(ildos)%ldos%x_range)
         ELSE
           ALLOCATE(r_ldos_p(ildos)%ldos%x_range(2))
            r_ldos_p(ildos)%ldos%x_range=0.0_dp
         END IF
-        CALL section_vals_val_get(ldos_section,"YRANGE",i_rep_section=ildos,explicit=read_r(2,ildos),error=error)
+        CALL section_vals_val_get(ldos_section,"YRANGE",i_rep_section=ildos,explicit=read_r(2,ildos))
         IF (read_r(2,ildos)) THEN
           CALL section_vals_val_get(ldos_section,"YRANGE",i_rep_section=ildos,r_vals=&
-             r_ldos_p(ildos)%ldos%y_range, error=error)
+             r_ldos_p(ildos)%ldos%y_range)
         ELSE
           ALLOCATE(r_ldos_p(ildos)%ldos%y_range(2))
            r_ldos_p(ildos)%ldos%y_range=0.0_dp
         END IF
-        CALL section_vals_val_get(ldos_section,"ZRANGE",i_rep_section=ildos,explicit=read_r(3,ildos),error=error)
+        CALL section_vals_val_get(ldos_section,"ZRANGE",i_rep_section=ildos,explicit=read_r(3,ildos))
         IF (read_r(3,ildos)) THEN
           CALL section_vals_val_get(ldos_section,"ZRANGE",i_rep_section=ildos,r_vals=&
-             r_ldos_p(ildos)%ldos%z_range, error=error)
+             r_ldos_p(ildos)%ldos%z_range)
         ELSE
           ALLOCATE(r_ldos_p(ildos)%ldos%z_range(2))
            r_ldos_p(ildos)%ldos%z_range=0.0_dp
         END IF
 
-        CALL section_vals_val_get(ldos_section,"ERANGE",i_rep_section=ildos,explicit=read_r(4,ildos),error=error)
+        CALL section_vals_val_get(ldos_section,"ERANGE",i_rep_section=ildos,explicit=read_r(4,ildos))
         IF (read_r(4,ildos)) THEN
           CALL section_vals_val_get(ldos_section,"ERANGE",i_rep_section=ildos,&
-               r_vals=r_ldos_p(ildos)%ldos%eval_range, error=error)
+               r_vals=r_ldos_p(ildos)%ldos%eval_range)
         ELSE
           ALLOCATE(r_ldos_p(ildos)%ldos%eval_range(2))
           r_ldos_p(ildos)%ldos%eval_range(1)=-HUGE(0.0_dp)
@@ -441,8 +426,7 @@ CONTAINS
         dh = wf_r%pw%pw_grid%dh
         dvol = wf_r%pw%pw_grid%dvol
         np_tot = wf_r%pw%pw_grid%npts(1)*wf_r%pw%pw_grid%npts(2)*wf_r%pw%pw_grid%npts(3)
-        ALLOCATE(r_ldos_p(ildos)%ldos%index_grid_local(3,np_tot), STAT =stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(r_ldos_p(ildos)%ldos%index_grid_local(3,np_tot))
 
         r_ldos_p(ildos)%ldos%npoints = 0
         DO jz=bo(1,3),bo(2,3)
@@ -513,22 +497,17 @@ CONTAINS
     END IF
 
 
-    CALL section_vals_val_get(dft_section,"PRINT%PDOS%COMPONENTS",l_val=separate_components,&
-         error=error)
+    CALL section_vals_val_get(dft_section,"PRINT%PDOS%COMPONENTS",l_val=separate_components)
     IF (separate_components) THEN
-      ALLOCATE(pdos_array(nsoset(maxlgto),nkind,nmo+nvirt),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(pdos_array(nsoset(maxlgto),nkind,nmo+nvirt))
     ELSE
-      ALLOCATE(pdos_array(0:maxlgto,nkind,nmo+nvirt),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(pdos_array(0:maxlgto,nkind,nmo+nvirt))
     END IF
     IF(do_virt) THEN
-       ALLOCATE(eigenvalues(nmo+nvirt),STAT=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       ALLOCATE(eigenvalues(nmo+nvirt))
        eigenvalues(1:nmo) = mo_set%eigenvalues(1:nmo)
        eigenvalues(nmo+1:nmo+nvirt) = evals_virt(1:nvirt)
-       ALLOCATE(occupation_numbers(nmo+nvirt),STAT=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       ALLOCATE(occupation_numbers(nmo+nvirt))
        occupation_numbers(:) = 0.0_dp
        occupation_numbers(1:nmo) = mo_set%occupation_numbers(1:nmo)
     ELSE
@@ -538,11 +517,9 @@ CONTAINS
 
     pdos_array = 0.0_dp
     nao = mo_set%nao
-    ALLOCATE(vecbuffer(1,nao),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(vecbuffer(1,nao))
     vecbuffer = 0.0_dp
-    ALLOCATE(firstrow(natom),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(firstrow(natom))
     firstrow=0
 
     !Adjust energy range for r_ldos
@@ -563,10 +540,10 @@ CONTAINS
       ! Extract the eigenvector from the distributed full matrix
       IF(imo>nmo) THEN
         CALL cp_fm_get_submatrix(matrix_work,vecbuffer,1,imo-nmo,&
-                       nao,1,transpose=.TRUE.,error=error)
+                       nao,1,transpose=.TRUE.)
       ELSE
         CALL cp_fm_get_submatrix(matrix_shalfc,vecbuffer,1,imo,&
-                       nao,1,transpose=.TRUE.,error=error)
+                       nao,1,transpose=.TRUE.)
       END IF
 
       ! Calculate the pdos for all the kinds
@@ -575,7 +552,7 @@ CONTAINS
           firstrow(iatom)=irow
           NULLIFY(orb_basis_set)
           CALL get_atomic_kind(particle_set(iatom)%atomic_kind, kind_number=ikind)
-          CALL get_qs_kind(qs_kind_set(ikind), orb_basis_set=orb_basis_set)
+          CALL get_qs_kind(qs_kind_set(ikind), basis_set=orb_basis_set)
           CALL get_gto_basis_set(gto_basis_set=orb_basis_set,&
                           nset=nset,&
                           nshell=nshell,&
@@ -618,7 +595,7 @@ CONTAINS
           irow=firstrow(iatom)
           NULLIFY(orb_basis_set)
           CALL get_atomic_kind(particle_set(iatom)%atomic_kind, kind_number=ikind)
-          CALL get_qs_kind(qs_kind_set(ikind), orb_basis_set=orb_basis_set)
+          CALL get_qs_kind(qs_kind_set(ikind), basis_set=orb_basis_set)
 
           CALL get_gto_basis_set(gto_basis_set=orb_basis_set,&
                           nset=nset,&
@@ -665,11 +642,11 @@ CONTAINS
            IF(imo>nmo) THEN
              CALL calculate_wavefunction(mo_virt,imo-nmo,&
                     wf_r, wf_g, atomic_kind_set, qs_kind_set,cell,dft_control,particle_set, &
-                  pw_env, error = error )
+                  pw_env)
            ELSE
              CALL calculate_wavefunction(mo_coeff,imo,&
                    wf_r, wf_g, atomic_kind_set,qs_kind_set,cell,dft_control,particle_set, &
-                  pw_env, error = error )
+                  pw_env)
            END IF
            r_ldos_p(ildos)%ldos%pdos_array(imo)  = 0.0_dp
            DO il = 1,r_ldos_p(ildos)%ldos%npoints
@@ -685,12 +662,11 @@ CONTAINS
       END DO
     END DO  ! imo
 
-    CALL cp_fm_release(matrix_shalfc,error=error)
-    DEALLOCATE(vecbuffer,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    CALL cp_fm_release(matrix_shalfc)
+    DEALLOCATE(vecbuffer)
 
 
-    CALL section_vals_val_get(dft_section,"PRINT%PDOS%APPEND",l_val=append,error=error)
+    CALL section_vals_val_get(dft_section,"PRINT%PDOS%APPEND",l_val=append)
     IF(append .AND. iterstep > 1 ) THEN
       my_pos = "APPEND"
     ELSE
@@ -701,7 +677,7 @@ CONTAINS
 
       NULLIFY(orb_basis_set)
       CALL get_atomic_kind(atomic_kind_set(ikind), name=kind_name)
-      CALL get_qs_kind(qs_kind_set(ikind), orb_basis_set=orb_basis_set)
+      CALL get_qs_kind(qs_kind_set(ikind), basis_set=orb_basis_set)
       CALL get_gto_basis_set(gto_basis_set=orb_basis_set, maxl=maxl)
 
       ! basis none has no associated maxl, and no pdos
@@ -717,8 +693,7 @@ CONTAINS
 
       iw = cp_print_key_unit_nr(logger,dft_section,"PRINT%PDOS",&
            extension=".pdos", file_position=my_pos, file_action=my_act,&
-           file_form="FORMATTED", middle_name=TRIM(my_mittle), &
-           error=error)
+           file_form="FORMATTED", middle_name=TRIM(my_mittle))
       IF(iw>0) THEN
 
         fmtstr1 = "(I8,2X,2F16.6,  (2X,F16.8))"
@@ -735,8 +710,7 @@ CONTAINS
           "# Projected DOS for atomic kind "//TRIM(kind_name)//" at iteration step i = ",&
           iterstep,", E(Fermi) = ",e_fermi," a.u."
         IF (separate_components) THEN
-          ALLOCATE(tmp_str(0:0,0:maxl,-maxl:maxl),stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          ALLOCATE(tmp_str(0:0,0:maxl,-maxl:maxl))
           tmp_str = ""
           DO j = 0, maxl
              DO i = -j,j
@@ -751,8 +725,7 @@ CONTAINS
             WRITE (UNIT=iw,FMT=fmtstr1) imo,eigenvalues(imo),occupation_numbers(imo),&
               (pdos_array(lshell,ikind,imo),lshell=1,nsoset(maxl))
           END DO
-          DEALLOCATE(tmp_str,stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          DEALLOCATE(tmp_str)
         ELSE
           WRITE (UNIT=iw,FMT=fmtstr2)&
             "#     MO Eigenvalue [a.u.]      Occupation",&
@@ -764,7 +737,7 @@ CONTAINS
         END IF
       END IF
       CALL cp_print_key_finished_output(iw,logger,dft_section,&
-                "PRINT%PDOS", error=error)
+                "PRINT%PDOS")
 
     END DO  ! ikind
 
@@ -785,8 +758,7 @@ CONTAINS
 
         iw = cp_print_key_unit_nr(logger,dft_section,"PRINT%PDOS",&
              extension=".pdos", file_position=my_pos, file_action=my_act,&
-             file_form="FORMATTED", middle_name=TRIM(my_mittle), &
-             error=error)
+             file_form="FORMATTED", middle_name=TRIM(my_mittle))
         IF(iw>0) THEN
 
           fmtstr1 = "(I8,2X,2F16.6,  (2X,F16.8))"
@@ -803,8 +775,7 @@ CONTAINS
             "# Projected DOS for list ", ildos, " of ",ldos_p(ildos)%ldos%nlist," atoms, at iteration step i = ",iterstep,&
              ", E(Fermi) = ",e_fermi," a.u."
           IF(ldos_p(ildos)%ldos%separate_components) THEN
-            ALLOCATE(tmp_str(0:0,0:ldos_p(ildos)%ldos%maxl,-ldos_p(ildos)%ldos%maxl:ldos_p(ildos)%ldos%maxl),stat=stat)
-            CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+            ALLOCATE(tmp_str(0:0,0:ldos_p(ildos)%ldos%maxl,-ldos_p(ildos)%ldos%maxl:ldos_p(ildos)%ldos%maxl))
             tmp_str = ""
             DO j = 0, ldos_p(ildos)%ldos%maxl
                DO i = -j,j
@@ -819,8 +790,7 @@ CONTAINS
               WRITE (UNIT=iw,FMT=fmtstr1) imo,eigenvalues(imo),occupation_numbers(imo),&
                 (ldos_p(ildos)%ldos%pdos_array(lshell,imo),lshell=1,nsoset(ldos_p(ildos)%ldos%maxl))
             END DO
-            DEALLOCATE(tmp_str,stat=stat)
-            CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+            DEALLOCATE(tmp_str)
           ELSE
             WRITE (UNIT=iw,FMT=fmtstr2)&
               "#     MO Eigenvalue [a.u.]      Occupation",&
@@ -832,7 +802,7 @@ CONTAINS
           END IF
         END IF
         CALL cp_print_key_finished_output(iw,logger,dft_section,&
-                  "PRINT%PDOS", error=error)
+                  "PRINT%PDOS")
       END IF  ! maxl>0
     END DO  ! ildos
 
@@ -854,8 +824,7 @@ CONTAINS
 
         iw = cp_print_key_unit_nr(logger,dft_section,"PRINT%PDOS",&
              extension=".pdos", file_position=my_pos, file_action=my_act,&
-             file_form="FORMATTED", middle_name=TRIM(my_mittle), &
-             error=error)
+             file_form="FORMATTED", middle_name=TRIM(my_mittle))
         IF(iw>0) THEN
           fmtstr1 = "(I8,2X,2F16.6,  (2X,F16.8))"
           fmtstr2 = "(A42,  (10X,A8))"
@@ -876,37 +845,27 @@ CONTAINS
 
         END IF
         CALL cp_print_key_finished_output(iw,logger,dft_section,&
-                  "PRINT%PDOS", error=error)
+                  "PRINT%PDOS")
     END DO
 
 
     ! deallocate local variables
-    DEALLOCATE(pdos_array, STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    DEALLOCATE(firstrow, STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(pdos_array)
+    DEALLOCATE(firstrow)
     IF(do_ldos) THEN
        DO ildos = 1,nldos
-         DEALLOCATE(ldos_p(ildos)%ldos%pdos_array, STAT=stat)
-         CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-         DEALLOCATE(ldos_p(ildos)%ldos%list_index, STAT=stat)
-         CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-         DEALLOCATE(ldos_p(ildos)%ldos, STAT=stat)
-         CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+         DEALLOCATE(ldos_p(ildos)%ldos%pdos_array)
+         DEALLOCATE(ldos_p(ildos)%ldos%list_index)
+         DEALLOCATE(ldos_p(ildos)%ldos)
        END DO
-       DEALLOCATE(ldos_p, STAT=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       DEALLOCATE(ldos_index, STAT=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE(ldos_p)
+       DEALLOCATE(ldos_index)
     END IF
     IF(do_r_ldos) THEN
        DO ildos = 1,n_r_ldos
-         DEALLOCATE(r_ldos_p(ildos)%ldos%index_grid_local,STAT=stat)
-         CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-         DEALLOCATE(r_ldos_p(ildos)%ldos%pdos_array,STAT=stat)
-         CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-         DEALLOCATE(r_ldos_p(ildos)%ldos%list_index,STAT=stat)
-         CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+         DEALLOCATE(r_ldos_p(ildos)%ldos%index_grid_local)
+         DEALLOCATE(r_ldos_p(ildos)%ldos%pdos_array)
+         DEALLOCATE(r_ldos_p(ildos)%ldos%list_index)
          IF(.NOT. read_r(1,ildos)) THEN
            DEALLOCATE(r_ldos_p(ildos)%ldos%x_range)
          END IF
@@ -919,26 +878,20 @@ CONTAINS
          IF(.NOT. read_r(4,ildos)) THEN
            DEALLOCATE(r_ldos_p(ildos)%ldos%eval_range)
          END IF
-         DEALLOCATE(r_ldos_p(ildos)%ldos,STAT=stat)
-         CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+         DEALLOCATE(r_ldos_p(ildos)%ldos)
        END DO
-       DEALLOCATE(read_r,STAT=stat)
-       DEALLOCATE(r_ldos_p, STAT=stat)
-       DEALLOCATE(r_ldos_index, STAT=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       CALL pw_pool_give_back_pw(auxbas_pw_pool,wf_r%pw, error=error)
-       CALL pw_pool_give_back_pw(auxbas_pw_pool,wf_g%pw, error=error)
+       DEALLOCATE(read_r)
+       DEALLOCATE(r_ldos_p)
+       DEALLOCATE(r_ldos_index)
+       CALL pw_pool_give_back_pw(auxbas_pw_pool,wf_r%pw)
+       CALL pw_pool_give_back_pw(auxbas_pw_pool,wf_g%pw)
     END IF
     IF(do_virt) THEN
-      DEALLOCATE(evals_virt,STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-      CALL cp_fm_release(mo_virt,error=error)
-      CALL cp_fm_release(matrix_work,error=error)
-      DEALLOCATE(eigenvalues,STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-      DEALLOCATE(occupation_numbers,STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      DEALLOCATE(evals_virt)
+      CALL cp_fm_release(mo_virt)
+      CALL cp_fm_release(matrix_work)
+      DEALLOCATE(eigenvalues)
+      DEALLOCATE(occupation_numbers)
     END IF
 
     CALL timestop(handle)
@@ -953,7 +906,6 @@ CONTAINS
 !> \param mo_virt ...
 !> \param nvirt ...
 !> \param ispin ...
-!> \param error ...
 !> \date    08.03.2008
 !> \par History:
 !>       -
@@ -965,20 +917,18 @@ CONTAINS
 ! *****************************************************************************
 
   SUBROUTINE generate_virtual_mo (qs_env, mo_set, evals_virt, mo_virt, &
-             nvirt, ispin, error )
+             nvirt, ispin)
 
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(mo_set_type), POINTER               :: mo_set
     REAL(KIND=dp), DIMENSION(:), POINTER     :: evals_virt
     TYPE(cp_fm_type), POINTER                :: mo_virt
     INTEGER, INTENT(IN)                      :: nvirt, ispin
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'generate_virtual_mo', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: nmo, nrow_global, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: nmo, nrow_global
     TYPE(cp_blacs_env_type), POINTER         :: context
     TYPE(cp_dbcsr_p_type), DIMENSION(:), &
       POINTER                                :: ks_matrix, s_matrix
@@ -988,22 +938,20 @@ CONTAINS
     TYPE(preconditioner_type), POINTER       :: local_preconditioner
     TYPE(scf_control_type), POINTER          :: scf_control
 
-    failure = .FALSE.
     NULLIFY(evals_virt,mo_virt)
-    ALLOCATE(evals_virt(nvirt),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(evals_virt(nvirt))
 
     CALL get_qs_env(qs_env,matrix_ks=ks_matrix, matrix_s=s_matrix, &
-         scf_control=scf_control, error=error)
+         scf_control=scf_control)
     CALL get_mo_set(mo_set=mo_set, mo_coeff=mo_coeff, nmo=nmo )
     CALL cp_fm_get_info(mo_coeff, context=context, para_env=para_env,&
-         nrow_global=nrow_global, error=error)
+         nrow_global=nrow_global)
 
     CALL cp_fm_struct_create(fm_struct_tmp,para_env=para_env,context=context, &
-         nrow_global=nrow_global,ncol_global=nvirt,error=error)
-    CALL cp_fm_create(mo_virt, fm_struct_tmp,name="virtual",error=error)
-    CALL cp_fm_struct_release(fm_struct_tmp,error=error)
-    CALL cp_fm_init_random(mo_virt,nvirt,error=error)
+         nrow_global=nrow_global,ncol_global=nvirt)
+    CALL cp_fm_create(mo_virt, fm_struct_tmp,name="virtual")
+    CALL cp_fm_struct_release(fm_struct_tmp)
+    CALL cp_fm_init_random(mo_virt,nvirt)
 
     NULLIFY (local_preconditioner)
 
@@ -1012,10 +960,10 @@ CONTAINS
          eps_gradient=scf_control%eps_lumos, &
          preconditioner=local_preconditioner, &
          iter_max=scf_control%max_iter_lumos,&
-         size_ortho_space=nmo,error=error)
+         size_ortho_space=nmo)
 
     CALL calculate_subspace_eigenvalues(mo_virt,ks_matrix(ispin)%matrix,&
-         evals_virt, error=error)
+         evals_virt)
 
 
   END SUBROUTINE generate_virtual_mo

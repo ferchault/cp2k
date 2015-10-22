@@ -20,6 +20,7 @@ MODULE hfx_helpers
   USE kinds,                           ONLY: dp
   USE message_passing,                 ONLY: mp_sum
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -96,41 +97,32 @@ MODULE hfx_helpers
 !> \brief - Auxiliary function for getting the occupation of a sparse matrix
 !> \param matrix ...
 !> \param para_env ...
-!> \param error ...
 !> \retval get_occupation ...
 !> \par History
 !>      12.2008 created [Manuel Guidon]
 !> \author Manuel Guidon
 ! *****************************************************************************
-FUNCTION get_occupation(matrix,para_env,error)
+FUNCTION get_occupation(matrix,para_env)
     TYPE(cp_dbcsr_type), POINTER             :: matrix
     TYPE(cp_para_env_type), POINTER          :: para_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
     REAL(dp)                                 :: get_occupation
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'get_occupation', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: group, mype, natom, &
-                                                nblock_sum, nblock_tot, npe, &
-                                                stat
+                                                nblock_sum, nblock_tot, npe
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: nblock, nelement
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-
 
     group = para_env%group
     mype = para_env%mepos + 1
     npe = para_env%num_pe
 
     ! *** Allocate work storage ***
-    ALLOCATE (nblock(npe),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (nblock(npe))
     nblock(:) = 0
 
-    ALLOCATE (nelement(npe),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (nelement(npe))
     nelement(:) = 0
 
     nblock(mype) = cp_dbcsr_get_num_blocks(matrix)

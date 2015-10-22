@@ -24,6 +24,7 @@ MODULE lri_debug_integrals
                                              indco,&
                                              ncoset
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -41,11 +42,9 @@ CONTAINS
 
 ! ******************************************************************************
 !> \brief recursive test routines for integral (a,b) for only two exponents
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE overlap_ab_test_simple(error)
+  SUBROUTINE overlap_ab_test_simple()
    
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'overlap_ab_test_simple', &
       routineP = moduleN//':'//routineN
@@ -53,9 +52,8 @@ CONTAINS
     INTEGER                                  :: ia1, iax, iay, iaz, ib1, ibx, &
                                                 iby, ibz, la_max, la_min, &
                                                 lb_max, lb_min, lds, ma, &
-                                                maxl, mb, stat
+                                                maxl, mb
     INTEGER, DIMENSION(3)                    :: na, nb
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: dab, dmax, res1, xa, xb
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :)                        :: sab
@@ -78,13 +76,11 @@ CONTAINS
   
 
     !---------------------------------------
-    ALLOCATE(sab(ncoset(la_max),ncoset(lb_max)),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(sab(ncoset(la_max),ncoset(lb_max)))
 
     maxl=MAX(la_max, lb_max)
     lds = ncoset(maxl)
-    ALLOCATE(swork(lds,lds,1),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(swork(lds,lds,1))
     sab=0._dp
     rab(:)= B(:) - A(:)
     dab = SQRT(DOT_PRODUCT(rab,rab))
@@ -125,8 +121,7 @@ CONTAINS
    
     WRITE(*,*) "dmax", dmax
 
-   DEALLOCATE(sab,swork,STAT=stat) 
-   CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+   DEALLOCATE(sab,swork)
 
   END SUBROUTINE overlap_ab_test_simple
 
@@ -144,10 +139,9 @@ CONTAINS
 !> \param rb ...
 !> \param sab ...
 !> \param dmax ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE overlap_ab_test(la_max,la_min,npgfa,zeta,lb_max,lb_min,npgfb,zetb,&
-                           ra,rb,sab,dmax,error)
+                           ra,rb,sab,dmax)
    
     INTEGER, INTENT(IN)                      :: la_max, la_min, npgfa
     REAL(KIND=dp), DIMENSION(:), INTENT(IN)  :: zeta
@@ -157,7 +151,6 @@ CONTAINS
     REAL(KIND=dp), DIMENSION(:, :), &
       INTENT(IN)                             :: sab
     REAL(KIND=dp), INTENT(INOUT)             :: dmax
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'overlap_ab_test', &
       routineP = moduleN//':'//routineN
@@ -209,19 +202,16 @@ CONTAINS
 
 ! ******************************************************************************
 !> \brief recursive test routines for integral (a,b,c) for only three exponents
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE overlap_abc_test_simple(error)
+  SUBROUTINE overlap_abc_test_simple()
    
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'overlap_abc_test_simple', &
       routineP = moduleN//':'//routineN
 
     INTEGER :: ia1, iax, iay, iaz, ib1, ibx, iby, ibz, ic1, icx, icy, icz, &
-      la_max, la_min, lb_max, lb_min, lc_max, lc_min, ma, mb, mc, stat
+      la_max, la_min, lb_max, lb_min, lc_max, lc_min, ma, mb, mc
     INTEGER, DIMENSION(3)                    :: na, nb, nc
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: dab, dac, dbc, dmax, res1, &
                                                 xa, xb, xc
     REAL(KIND=dp), ALLOCATABLE, &
@@ -253,8 +243,7 @@ CONTAINS
     dac = SQRT(DOT_PRODUCT(rac,rac))
     rbc(:)= C(:) - B(:)
     dbc = SQRT(DOT_PRODUCT(rbc,rbc))
-    ALLOCATE(sabc(ncoset(la_max),ncoset(lb_max),ncoset(lc_max)),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(sabc(ncoset(la_max),ncoset(lb_max),ncoset(lc_max)))
     xa_work(1)=xa
     xb_work(1)=xb
     xc_work(1)=xc
@@ -266,7 +255,7 @@ CONTAINS
     CALL overlap3(la_max_set=la_max,npgfa=1,zeta=xa_work,rpgfa=rpgfa,la_min_set=la_min,&
                   lb_max_set=lb_max,npgfb=1,zetb=xb_work,rpgfb=rpgfb,lb_min_set=lb_min,&
                   lc_max_set=lc_max,npgfc=1,zetc=xc_work,rpgfc=rpgfc,lc_min_set=lc_min,&
-                  rab=rab,dab=dab,rac=rac,dac=dac,rbc=rbc,dbc=dbc,sabc=sabc,error=error)
+                  rab=rab,dab=dab,rac=rac,dac=dac,rbc=rbc,dbc=dbc,sabc=sabc)
     !sabc(:,:,:)=0._dp 
    !CALL overlap3_old(la_max=la_max,npgfa=1,zeta=xa_work,rpgfa=rpgfa,la_min=la_min,&
    !              lb_max=lb_max,npgfb=1,zetb=xb_work,rpgfb=rpgfb,lb_min=lb_min,&
@@ -312,8 +301,7 @@ CONTAINS
    
     WRITE(*,*) "dmax", dmax
 
-   DEALLOCATE(sabc,STAT=stat) 
-   CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+   DEALLOCATE(sabc)
     
   END SUBROUTINE overlap_abc_test_simple
 
@@ -336,12 +324,11 @@ CONTAINS
 !> \param rc ...
 !> \param sabc ...
 !> \param dmax ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE overlap_abc_test(la_max,npgfa,zeta,la_min,&
                            lb_max,npgfb,zetb,lb_min,&
                            lc_max,npgfc,zetc,lc_min,&
-                           ra,rb,rc,sabc,dmax,error)
+                           ra,rb,rc,sabc,dmax)
    
     INTEGER, INTENT(IN)                      :: la_max, npgfa
     REAL(KIND=dp), DIMENSION(:), INTENT(IN)  :: zeta
@@ -354,7 +341,6 @@ CONTAINS
     REAL(KIND=dp), DIMENSION(:, :, :), &
       INTENT(IN)                             :: sabc
     REAL(KIND=dp), INTENT(INOUT)             :: dmax
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'overlap_abc_test', &
       routineP = moduleN//':'//routineN
@@ -427,20 +413,17 @@ CONTAINS
 
 ! ******************************************************************************
 !> \brief recursive test routines for integral (aa,bb) for only four exponents
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE overlap_aabb_test_simple(error)
+  SUBROUTINE overlap_aabb_test_simple()
    
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'overlap_aabb_test_simple', &
       routineP = moduleN//':'//routineN
 
     INTEGER :: i, iax, iay, iaz, ibx, iby, ibz, j, k, l, la_max, la_max1, &
       la_max2, la_min, la_min1, la_min2, lb_max, lb_max1, lb_max2, lb_min, &
-      lb_min1, lb_min2, lds, ma, maxl, mb, stat
+      lb_min1, lb_min2, lds, ma, maxl, mb
     INTEGER, DIMENSION(3)                    :: na, naa, nb, nbb
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: dab, dmax, res1, xa, xa1, &
                                                 xa2, xb, xb1, xb2
     REAL(KIND=dp), ALLOCATABLE, &
@@ -472,13 +455,11 @@ CONTAINS
   
 
     !---------------------------------------
-    ALLOCATE(saabb(ncoset(la_max1),ncoset(la_max2),ncoset(lb_max1),ncoset(lb_max2)),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(saabb(ncoset(la_max1),ncoset(la_max2),ncoset(lb_max1),ncoset(lb_max2)))
 
     maxl=MAX(la_max1+la_max2, lb_max1+lb_max2)
     lds = ncoset(maxl)
-    ALLOCATE(swork(lds,lds),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(swork(lds,lds))
     saabb=0._dp
     rab(:)= B(:) - A(:)
     dab = SQRT(DOT_PRODUCT(rab,rab))
@@ -540,8 +521,7 @@ CONTAINS
    
     WRITE(*,*) "dmax", dmax
 
-   DEALLOCATE(saabb,swork,STAT=stat) 
-   CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+   DEALLOCATE(saabb,swork)
 
   END SUBROUTINE overlap_aabb_test_simple
 
@@ -567,13 +547,12 @@ CONTAINS
 !> \param rb ...
 !> \param saabb ...
 !> \param dmax ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE overlap_aabb_test(la_max1,la_min1,npgfa1,zeta1,&
                                  la_max2,la_min2,npgfa2,zeta2,&
                                  lb_max1,lb_min1,npgfb1,zetb1,&
                                  lb_max2,lb_min2,npgfb2,zetb2,&
-                                 ra,rb,saabb,dmax,error)
+                                 ra,rb,saabb,dmax)
    
     INTEGER, INTENT(IN)                      :: la_max1, la_min1, npgfa1
     REAL(KIND=dp), DIMENSION(:), INTENT(IN)  :: zeta1
@@ -587,7 +566,6 @@ CONTAINS
     REAL(KIND=dp), DIMENSION(:, :, :, :), &
       INTENT(IN)                             :: saabb
     REAL(KIND=dp), INTENT(INOUT)             :: dmax
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'overlap_aabb_test', &
       routineP = moduleN//':'//routineN

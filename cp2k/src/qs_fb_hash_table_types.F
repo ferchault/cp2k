@@ -24,6 +24,7 @@ MODULE qs_fb_hash_table_types
 
   USE kinds,                           ONLY: int_8
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -100,34 +101,30 @@ CONTAINS
 !> \param hash_table : the fb_hash_table object
 !> \param key        : key of the element
 !> \param val        : value of the element
-!> \param error      : CP2K error handler container
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
-  RECURSIVE SUBROUTINE fb_hash_table_add(hash_table, key, val, error)
+  RECURSIVE SUBROUTINE fb_hash_table_add(hash_table, key, val)
     TYPE(fb_hash_table_obj), INTENT(INOUT)   :: hash_table
     INTEGER(KIND=int_8), INTENT(IN)          :: key
     INTEGER, INTENT(IN)                      :: val
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_hash_table_add', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: islot
-    LOGICAL                                  :: check_ok, failure
+    LOGICAL                                  :: check_ok
 
-    failure = .FALSE.
     check_ok = fb_hash_table_has_data(hash_table)
-    CPPostcondition(check_ok, cp_failure_level, routineP, error, failure)
+    CPASSERT(check_ok)
     ! check hash table size, if too small rehash in a larger table
     IF (hash_table%obj%nelements*ENLARGE_RATIO .GE. &
         hash_table%obj%nmax) THEN
        CALL fb_hash_table_rehash(hash_table=hash_table, &
-                                 nmax=hash_table%obj%nmax*EXPAND_FACTOR, &
-                                 error=error)
+                                 nmax=hash_table%obj%nmax*EXPAND_FACTOR)
     END IF
     ! find the right slot for the given key
     islot = fb_hash_table_linear_probe(hash_table, key)
-    CPPostcondition(islot>0, cp_failure_level, routineP, error, failure)
+    CPASSERT(islot>0)
     ! we are adding a new entry only if islot points to an empty slot,
     ! otherwise just change the val of the existing entry
     IF (hash_table%obj%table(islot)%key == EMPTY_KEY) THEN
@@ -156,40 +153,33 @@ CONTAINS
 !>                     and cannot be UNDEFINED
 !> \param nmax       : total size of the table, optional. If absent default
 !>                     size is 1.
-!> \param error      : CP2K data container for error logging
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
-  SUBROUTINE fb_hash_table_create(hash_table, nmax, error)
+  SUBROUTINE fb_hash_table_create(hash_table, nmax)
     TYPE(fb_hash_table_obj), INTENT(INOUT)   :: hash_table
     INTEGER, INTENT(IN), OPTIONAL            :: nmax
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_hash_table_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: my_nmax, stat
-    LOGICAL                                  :: check_ok, failure
+    INTEGER                                  :: my_nmax
+    LOGICAL                                  :: check_ok
 
-    failure = .FALSE.
     check_ok = .NOT. fb_hash_table_has_data(hash_table)
-    CPPostcondition(check_ok, cp_failure_level, routineP, error, failure)
-    IF (.NOT. failure) THEN
-       ALLOCATE(hash_table%obj, STAT=stat)
-       CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-       NULLIFY(hash_table%obj%table)
-       hash_table%obj%nmax = 0
-       hash_table%obj%nelements = 0
-       hash_table%obj%prime = 2
-       my_nmax = 1
-       IF (PRESENT(nmax)) my_nmax = nmax
-       CALL fb_hash_table_init(hash_table=hash_table, &
-                               nmax=my_nmax, &
-                               error=error)
-       ! book keeping stuff
-       hash_table%obj%ref_count = 1
-       hash_table%obj%id_nr = last_fb_hash_table_id + 1
-       last_fb_hash_table_id = hash_table%obj%id_nr
-    END IF
+    CPASSERT(check_ok)
+    ALLOCATE(hash_table%obj)
+    NULLIFY(hash_table%obj%table)
+    hash_table%obj%nmax = 0
+    hash_table%obj%nelements = 0
+    hash_table%obj%prime = 2
+    my_nmax = 1
+    IF (PRESENT(nmax)) my_nmax = nmax
+    CALL fb_hash_table_init(hash_table=hash_table, &
+                            nmax=my_nmax)
+    ! book keeping stuff
+    hash_table%obj%ref_count = 1
+    hash_table%obj%id_nr = last_fb_hash_table_id + 1
+    last_fb_hash_table_id = hash_table%obj%id_nr
   END SUBROUTINE fb_hash_table_create
 
 ! *****************************************************************************
@@ -198,25 +188,22 @@ CONTAINS
 !> \param key        : input key
 !> \param val        : output value, equals to 0 if key not found
 !> \param found      : .TRUE. if key is found, .FALSE. otherwise
-!> \param error      : CP2K data container for error logging
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
-  SUBROUTINE fb_hash_table_get(hash_table, key, val, found, error)
+  SUBROUTINE fb_hash_table_get(hash_table, key, val, found)
     TYPE(fb_hash_table_obj), INTENT(IN)      :: hash_table
     INTEGER(KIND=int_8), INTENT(IN)          :: key
     INTEGER, INTENT(OUT)                     :: val
     LOGICAL, INTENT(OUT)                     :: found
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_hash_table_get', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: islot
-    LOGICAL                                  :: check_ok, failure
+    LOGICAL                                  :: check_ok
 
-    failure = .FALSE.
     check_ok = fb_hash_table_has_data(hash_table)
-    CPPostcondition(check_ok, cp_failure_level, routineP, error, failure)
+    CPASSERT(check_ok)
     found = .FALSE.
     val = 0
     islot = fb_hash_table_linear_probe(hash_table, key)
@@ -247,23 +234,20 @@ CONTAINS
 !>                     and cannot be UNDEFINED
 !> \param nmax       : new size of the table, optional. If absent use the
 !>                     old size
-!> \param error      : CP2K data container for error logging
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
-  SUBROUTINE fb_hash_table_init(hash_table, nmax, error)
+  SUBROUTINE fb_hash_table_init(hash_table, nmax)
     TYPE(fb_hash_table_obj), INTENT(INOUT)   :: hash_table
     INTEGER, INTENT(IN), OPTIONAL            :: nmax
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_hash_table_init', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: ii, my_nmax, power, stat
-    LOGICAL                                  :: check_ok, failure
+    INTEGER                                  :: ii, my_nmax, power
+    LOGICAL                                  :: check_ok
 
-    failure = .FALSE.
     check_ok = fb_hash_table_has_data(hash_table)
-    CPPostcondition(check_ok, cp_failure_level, routineP, error, failure)
+    CPASSERT(check_ok)
     my_nmax = hash_table%obj%nmax
     IF (PRESENT(nmax)) my_nmax = nmax
     ! table length should always be power of 2. Find the least
@@ -275,14 +259,11 @@ CONTAINS
     my_nmax = 2**power
     IF (ASSOCIATED(hash_table%obj%table)) THEN
        IF (SIZE(hash_table%obj%table) .NE. my_nmax) THEN
-          DEALLOCATE(hash_table%obj%table, STAT=stat)
-          CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-          ALLOCATE(hash_table%obj%table(my_nmax), STAT=stat)
-          CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+          DEALLOCATE(hash_table%obj%table)
+          ALLOCATE(hash_table%obj%table(my_nmax))
        END IF
     ELSE
-       ALLOCATE(hash_table%obj%table(my_nmax), STAT=stat)
-       CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+       ALLOCATE(hash_table%obj%table(my_nmax))
     END IF
     hash_table%obj%nmax = my_nmax
     hash_table%obj%prime = fb_hash_table_matching_prime(my_nmax)
@@ -310,25 +291,21 @@ CONTAINS
 !>        to MAX(nmax, number_of_non_empty_elements).
 !> \param hash_table      : the fb_hash_table object
 !> \param nmax [OPTIONAL] : maximum size of the rehashed table
-!> \param error           : CP2K data container for error logging
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
-  SUBROUTINE fb_hash_table_rehash(hash_table, nmax, error)
+  SUBROUTINE fb_hash_table_rehash(hash_table, nmax)
     TYPE(fb_hash_table_obj), INTENT(INOUT)   :: hash_table
     INTEGER, INTENT(IN), OPTIONAL            :: nmax
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_hash_table_rehash', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: ii, my_nmax, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: ii, my_nmax
     TYPE(fb_hash_table_element), &
       ALLOCATABLE, DIMENSION(:)              :: tmp_table
 
-    failure = .FALSE.
     IF (.NOT. fb_hash_table_has_data(hash_table)) THEN
-       CALL fb_hash_table_create(hash_table, nmax, error)
+       CALL fb_hash_table_create(hash_table, nmax)
        RETURN
     END IF
     IF (PRESENT(nmax)) THEN
@@ -336,55 +313,45 @@ CONTAINS
     ELSE
        my_nmax = hash_table%obj%nmax
     END IF
-    ALLOCATE(tmp_table(hash_table%obj%nmax), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    ALLOCATE(tmp_table(hash_table%obj%nmax))
     tmp_table(:) = hash_table%obj%table(:)
-    CALL fb_hash_table_release(hash_table, error)
+    CALL fb_hash_table_release(hash_table)
     CALL fb_hash_table_create(hash_table=hash_table, &
-                              nmax=my_nmax, &
-                              error=error)
+                              nmax=my_nmax)
     DO ii = 1, SIZE(tmp_table)
        IF (tmp_table(ii)%key .NE. EMPTY_KEY) THEN
           CALL fb_hash_table_add(hash_table=hash_table, &
                                  key=tmp_table(ii)%key, &
-                                 val=tmp_table(ii)%val, &
-                                 error=error)
+                                 val=tmp_table(ii)%val)
        END IF
     END DO
-    DEALLOCATE(tmp_table, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    DEALLOCATE(tmp_table)
   END SUBROUTINE fb_hash_table_rehash
 
 ! *****************************************************************************
 !> \brief releases given object
 !> \param hash_table : the fb_hash_table object in question
-!> \param error      : cp2k error container
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
-  SUBROUTINE fb_hash_table_release(hash_table, error)
+  SUBROUTINE fb_hash_table_release(hash_table)
     TYPE(fb_hash_table_obj), INTENT(INOUT)   :: hash_table
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_hash_table_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: check_ok, failure
+    LOGICAL                                  :: check_ok
 
-    failure = .FALSE.
     IF (ASSOCIATED(hash_table%obj)) THEN
        check_ok = hash_table%obj%ref_count > 0
-       CPPreconditionNoFail(check_ok, cp_failure_level, routineP, error)
+       CPASSERT(check_ok)
        hash_table%obj%ref_count = hash_table%obj%ref_count - 1
        IF (hash_table%obj%ref_count == 0) THEN
           hash_table%obj%ref_count = 1
           IF (ASSOCIATED(hash_table%obj%table)) THEN
-             DEALLOCATE(hash_table%obj%table, STAT=stat)
-             CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+             DEALLOCATE(hash_table%obj%table)
           END IF
           hash_table%obj%ref_count = 0
-          DEALLOCATE(hash_table%obj, STAT=stat)
-          CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+          DEALLOCATE(hash_table%obj)
        END IF
     ELSE
        NULLIFY(hash_table%obj)
@@ -395,23 +362,20 @@ CONTAINS
 !> \brief Remove element from a table, automatic resize if necessary
 !> \param hash_table : the fb_hash_table object
 !> \param key        : key of the element to be removed
-!> \param error      : CP2K data container for error logging
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
-  SUBROUTINE fb_hash_table_remove(hash_table, key, error)
+  SUBROUTINE fb_hash_table_remove(hash_table, key)
     TYPE(fb_hash_table_obj), INTENT(INOUT)   :: hash_table
     INTEGER(KIND=int_8), INTENT(IN)          :: key
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_hash_table_remove', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: islot
-    LOGICAL                                  :: check_ok, failure
+    LOGICAL                                  :: check_ok
 
-    failure = .FALSE.
     check_ok = fb_hash_table_has_data(hash_table)
-    CPPostcondition(check_ok, cp_failure_level, routineP, error, failure)
+    CPASSERT(check_ok)
     islot = fb_hash_table_linear_probe(hash_table, key)
     ! we are only removing an entry if the key is found
     IF (islot > 0) THEN
@@ -423,11 +387,9 @@ CONTAINS
           IF (hash_table%obj%nelements*REDUCE_RATIO .LT. &
                hash_table%obj%nmax) THEN
              CALL fb_hash_table_rehash(hash_table=hash_table, &
-                                       nmax=hash_table%obj%nmax/SHRINK_FACTOR, &
-                                       error=error)
+                                       nmax=hash_table%obj%nmax/SHRINK_FACTOR)
           ELSE
-             CALL fb_hash_table_rehash(hash_table=hash_table, &
-                                       error=error)
+             CALL fb_hash_table_rehash(hash_table=hash_table)
           END IF
        END IF
     END IF
@@ -436,26 +398,21 @@ CONTAINS
 ! *****************************************************************************
 !> \brief retains given object
 !> \param hash_table : the fb_hash_table object in question
-!> \param error      : cp2k error container
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
-  SUBROUTINE fb_hash_table_retain(hash_table, error)
+  SUBROUTINE fb_hash_table_retain(hash_table)
     TYPE(fb_hash_table_obj), INTENT(INOUT)   :: hash_table
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_hash_table_retain', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: check_ok, failure
+    LOGICAL                                  :: check_ok
 
-    failure = .FALSE.
     check_ok = ASSOCIATED(hash_table%obj)
-    CPPostcondition(check_ok, cp_failure_level, routineP, error, failure)
-    IF (.NOT. failure) THEN
-       check_ok = hash_table%obj%ref_count > 0
-       CPPreconditionNoFail(check_ok, cp_failure_level, routineP, error)
-       hash_table%obj%ref_count = hash_table%obj%ref_count + 1
-    END IF
+    CPASSERT(check_ok)
+    check_ok = hash_table%obj%ref_count > 0
+    CPASSERT(check_ok)
+    hash_table%obj%ref_count = hash_table%obj%ref_count + 1
   END SUBROUTINE fb_hash_table_retain
 
 ! *****************************************************************************
@@ -464,22 +421,19 @@ CONTAINS
 !> \param nelements  : number of non-empty slots in the table
 !> \param nmax       : maximum number of slots in the table
 !> \param prime      : the prime used in the hash function
-!> \param error      : cp2k error container
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
-  SUBROUTINE fb_hash_table_status(hash_table, nelements, nmax, prime, error)
+  SUBROUTINE fb_hash_table_status(hash_table, nelements, nmax, prime)
     TYPE(fb_hash_table_obj), INTENT(INOUT)   :: hash_table
     INTEGER, INTENT(OUT), OPTIONAL           :: nelements, nmax, prime
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_hash_table_status', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: check_ok, failure
+    LOGICAL                                  :: check_ok
 
-    failure = .FALSE.
     check_ok = fb_hash_table_has_data(hash_table)
-    CPPostcondition(check_ok, cp_failure_level, routineP, error, failure)
+    CPASSERT(check_ok)
     IF (PRESENT(nelements)) nelements = hash_table%obj%nelements
     IF (PRESENT(nmax)) nmax = hash_table%obj%nmax
     IF (PRESENT(prime)) prime = hash_table%obj%prime

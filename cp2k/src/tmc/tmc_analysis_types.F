@@ -18,6 +18,7 @@ MODULE tmc_analysis_types
   USE tmc_tree_types,                  ONLY: tree_type
   USE tmc_types,                       ONLY: tmc_atom_type
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -135,26 +136,17 @@ CONTAINS
 ! *****************************************************************************
 !> \brief creates a new structure environment for TMC analysis
 !> \param tmc_ana structure with parameters for TMC analysis
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 02.2013
 ! *****************************************************************************
-  SUBROUTINE tmc_ana_env_create(tmc_ana,error)
+  SUBROUTINE tmc_ana_env_create(tmc_ana)
     TYPE(tmc_analysis_env), POINTER          :: tmc_ana
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'tmc_ana_env_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
+    CPASSERT(.NOT.ASSOCIATED(tmc_ana))
 
-    failure = .FALSE.
-
-    CPPrecondition(.NOT.ASSOCIATED(tmc_ana),cp_failure_level,routineP,error,failure)
-
-    ALLOCATE(tmc_ana,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(tmc_ana)
 
     NULLIFY(tmc_ana%dirs, tmc_ana%cell, tmc_ana%atoms, tmc_ana%density_3d, &
             tmc_ana%pair_correl, tmc_ana%dip_mom, tmc_ana%last_elem, &
@@ -190,43 +182,34 @@ CONTAINS
 ! *****************************************************************************
 !> \brief releases the structure environment for TMC analysis
 !> \param tmc_ana structure with parameters for TMC analysis
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 02.2013
 ! *****************************************************************************
-  SUBROUTINE tmc_ana_env_release(tmc_ana,error)
+  SUBROUTINE tmc_ana_env_release(tmc_ana)
     TYPE(tmc_analysis_env), POINTER          :: tmc_ana
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'tmc_ana_env_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
-
-    CPPostcondition(ASSOCIATED(tmc_ana),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(tmc_ana))
 
     IF(ASSOCIATED(tmc_ana%dirs)) &
       DEALLOCATE(tmc_ana%dirs)
 
     IF(ASSOCIATED(tmc_ana%density_3d)) &
-      CALL tmc_ana_dens_release(tmc_ana%density_3d, error)
+      CALL tmc_ana_dens_release(tmc_ana%density_3d)
     IF(ASSOCIATED(tmc_ana%pair_correl)) &
-      CALL tmc_ana_pair_correl_release(tmc_ana%pair_correl, error)
+      CALL tmc_ana_pair_correl_release(tmc_ana%pair_correl)
 
     IF(ASSOCIATED(tmc_ana%dip_mom)) &
-      CALL tmc_ana_dipole_moment_release(tmc_ana%dip_mom, error)
+      CALL tmc_ana_dipole_moment_release(tmc_ana%dip_mom)
 
     IF(ASSOCIATED(tmc_ana%dip_ana)) &
-      CALL tmc_ana_dipole_analysis_release(tmc_ana%dip_ana, error)
+      CALL tmc_ana_dipole_analysis_release(tmc_ana%dip_ana)
 
     IF(ASSOCIATED(tmc_ana%displace)) &
-      CALL tmc_ana_displacement_release(ana_disp=tmc_ana%displace, error=error)
+      CALL tmc_ana_displacement_release(ana_disp=tmc_ana%displace)
 
-    DEALLOCATE(tmc_ana,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(tmc_ana)
 
   END SUBROUTINE tmc_ana_env_release
 
@@ -238,27 +221,18 @@ CONTAINS
 !> \brief creates a new structure environment for TMC analysis
 !> \param ana_dens structure with parameters for TMC density analysis
 !> \param nr_bins ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 02.2013
 ! *****************************************************************************
-  SUBROUTINE tmc_ana_density_create(ana_dens, nr_bins, error)
+  SUBROUTINE tmc_ana_density_create(ana_dens, nr_bins)
     TYPE(density_3d_type), POINTER           :: ana_dens
     INTEGER, DIMENSION(3)                    :: nr_bins
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'tmc_ana_density_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
+    CPASSERT(.NOT.ASSOCIATED(ana_dens))
 
-    failure = .FALSE.
-
-    CPPrecondition(.NOT.ASSOCIATED(ana_dens),cp_failure_level,routineP,error,failure)
-
-    ALLOCATE(ana_dens,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(ana_dens)
 
     NULLIFY(ana_dens%sum_density, ana_dens%sum_dens2)
 
@@ -279,28 +253,19 @@ CONTAINS
 ! *****************************************************************************
 !> \brief releases the structure environment for TMC analysis
 !> \param ana_dens structure with parameters for TMC analysis
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 02.2013
 ! *****************************************************************************
-  SUBROUTINE tmc_ana_dens_release(ana_dens,error)
+  SUBROUTINE tmc_ana_dens_release(ana_dens)
     TYPE(density_3d_type), POINTER           :: ana_dens
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'tmc_ana_dens_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
-
-    CPPostcondition(ASSOCIATED(ana_dens),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(ana_dens))
 
     DEALLOCATE(ana_dens%sum_density)
     DEALLOCATE(ana_dens%sum_dens2)
-    DEALLOCATE(ana_dens,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(ana_dens)
   END SUBROUTINE tmc_ana_dens_release
 
   !============================================================================
@@ -311,27 +276,18 @@ CONTAINS
 !> \brief creates a new structure environment for TMC analysis
 !> \param ana_pair_correl ...
 !> \param nr_bins ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \param
 !> \author Mandes 02.2013
 ! *****************************************************************************
-  SUBROUTINE tmc_ana_pair_correl_create(ana_pair_correl, nr_bins, error)
+  SUBROUTINE tmc_ana_pair_correl_create(ana_pair_correl, nr_bins)
     TYPE(pair_correl_type), POINTER          :: ana_pair_correl
     INTEGER                                  :: nr_bins
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'tmc_ana_pair_correl_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-
-    CPPrecondition(.NOT.ASSOCIATED(ana_pair_correl),cp_failure_level,routineP,error,failure)
-    ALLOCATE(ana_pair_correl,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    CPASSERT(.NOT.ASSOCIATED(ana_pair_correl))
+    ALLOCATE(ana_pair_correl)
 
     NULLIFY(ana_pair_correl%g_r, ana_pair_correl%pairs)
     ana_pair_correl%conf_counter = 0
@@ -344,29 +300,20 @@ CONTAINS
 ! *****************************************************************************
 !> \brief releases the structure environment for TMC analysis
 !> \param ana_pair_correl ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \param 
 !> \author Mandes 02.2013
 ! *****************************************************************************
-  SUBROUTINE tmc_ana_pair_correl_release(ana_pair_correl,error)
+  SUBROUTINE tmc_ana_pair_correl_release(ana_pair_correl)
     TYPE(pair_correl_type), POINTER          :: ana_pair_correl
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'tmc_ana_pair_correl_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
-
-    CPPostcondition(ASSOCIATED(ana_pair_correl),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(ana_pair_correl))
 
     DEALLOCATE(ana_pair_correl%g_r)
     DEALLOCATE(ana_pair_correl%pairs)
-    DEALLOCATE(ana_pair_correl, STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(ana_pair_correl)
   END SUBROUTINE tmc_ana_pair_correl_release
 
 ! *****************************************************************************
@@ -375,28 +322,24 @@ CONTAINS
 !> \param n1 atom names
 !> \param n2 atom names
 !> \param list_end ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \retval ind ...
 !> \author Mandes 02.2013
 ! *****************************************************************************
-  FUNCTION search_pair_in_list(pair_list, n1, n2, list_end, error) RESULT(ind)
+  FUNCTION search_pair_in_list(pair_list, n1, n2, list_end) RESULT(ind)
     TYPE(atom_pairs_type), DIMENSION(:), &
       POINTER                                :: pair_list
     CHARACTER(LEN=default_string_length)     :: n1, n2
     INTEGER, OPTIONAL                        :: list_end
-    TYPE(cp_error_type), INTENT(inout)       :: error
     INTEGER                                  :: ind
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'search_pair_in_list', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: last, list_nr
-    LOGICAL                                  :: failure
 
-    CPPrecondition(ASSOCIATED(pair_list),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(pair_list))
     IF(PRESENT(list_end)) THEN
-      CPPrecondition(list_end.LE.SIZE(pair_list),cp_failure_level,routineP,error,failure)
+      CPASSERT(list_end.LE.SIZE(pair_list))
       last = list_end
     ELSE
       last = SIZE(pair_list)
@@ -425,31 +368,24 @@ CONTAINS
 !> \param charge_atm ...
 !> \param charge ...
 !> \param dim_per_elem ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \param
 !> \author Mandes 02.2013
 ! *****************************************************************************
   SUBROUTINE tmc_ana_dipole_moment_create(ana_dip_mom, charge_atm, charge, &
-                                          dim_per_elem, error)
+                                          dim_per_elem)
     TYPE(dipole_moment_type), POINTER        :: ana_dip_mom
     CHARACTER(LEN=default_string_length), &
       POINTER                                :: charge_atm(:)
     REAL(KIND=dp), POINTER                   :: charge(:)
     INTEGER                                  :: dim_per_elem
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'tmc_ana_dipole_moment_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: i
 
-    failure = .FALSE.
-
-    CPPrecondition(.NOT.ASSOCIATED(ana_dip_mom),cp_failure_level,routineP,error,failure)
-    ALLOCATE(ana_dip_mom,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    CPASSERT(.NOT.ASSOCIATED(ana_dip_mom))
+    ALLOCATE(ana_dip_mom)
 
     NULLIFY(ana_dip_mom%charges_inp, ana_dip_mom%charges)
 
@@ -468,57 +404,39 @@ CONTAINS
 ! *****************************************************************************
 !> \brief releases the structure environment for TMC analysis
 !> \param ana_dip_mom ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \param 
 !> \author Mandes 02.2013
 ! *****************************************************************************
-  SUBROUTINE tmc_ana_dipole_moment_release(ana_dip_mom, error)
+  SUBROUTINE tmc_ana_dipole_moment_release(ana_dip_mom)
     TYPE(dipole_moment_type), POINTER        :: ana_dip_mom
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: &
       routineN = 'tmc_ana_dipole_moment_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
-
-    CPPostcondition(ASSOCIATED(ana_dip_mom),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(ana_dip_mom))
 
     IF(ASSOCIATED(ana_dip_mom%charges_inp)) DEALLOCATE(ana_dip_mom%charges_inp)
     IF(ASSOCIATED(ana_dip_mom%charges))     DEALLOCATE(ana_dip_mom%charges)
     DEALLOCATE(ana_dip_mom%last_dip_cl)
-    DEALLOCATE(ana_dip_mom, STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(ana_dip_mom)
   END SUBROUTINE tmc_ana_dipole_moment_release
 
 ! *****************************************************************************
 !> \brief creates a new structure environment for TMC analysis
 !> \param ana_dip_ana ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \param
 !> \author Mandes 02.2013
 ! *****************************************************************************
-  SUBROUTINE tmc_ana_dipole_analysis_create(ana_dip_ana, error)
+  SUBROUTINE tmc_ana_dipole_analysis_create(ana_dip_ana)
     TYPE(dipole_analysis_type), POINTER      :: ana_dip_ana
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: &
       routineN = 'tmc_ana_dipole_analysis_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-
-    CPPrecondition(.NOT.ASSOCIATED(ana_dip_ana),cp_failure_level,routineP,error,failure)
-    ALLOCATE(ana_dip_ana,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    CPASSERT(.NOT.ASSOCIATED(ana_dip_ana))
+    ALLOCATE(ana_dip_ana)
 
     ana_dip_ana%conf_counter = 0
     ana_dip_ana%ana_type     = -1
@@ -536,33 +454,24 @@ CONTAINS
 ! *****************************************************************************
 !> \brief releases the structure environment for TMC analysis
 !> \param ana_dip_ana ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \param 
 !> \author Mandes 02.2013
 ! *****************************************************************************
-  SUBROUTINE tmc_ana_dipole_analysis_release(ana_dip_ana, error)
+  SUBROUTINE tmc_ana_dipole_analysis_release(ana_dip_ana)
     TYPE(dipole_analysis_type), POINTER      :: ana_dip_ana
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: &
       routineN = 'tmc_ana_dipole_analysis_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
-
-    CPPostcondition(ASSOCIATED(ana_dip_ana),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(ana_dip_ana))
 
     DEALLOCATE(ana_dip_ana%mu_psv)
     DEALLOCATE(ana_dip_ana%mu_pv)
     DEALLOCATE(ana_dip_ana%mu2_pv)
     DEALLOCATE(ana_dip_ana%mu2_pv_mat)
 
-    DEALLOCATE(ana_dip_ana, STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(ana_dip_ana)
   END SUBROUTINE tmc_ana_dipole_analysis_release
 
   !============================================================================
@@ -573,28 +482,20 @@ CONTAINS
 !> \brief creates a new structure environment for TMC analysis
 !> \param ana_disp ...
 !> \param dim_per_elem ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \param
 !> \author Mandes 02.2013
 ! *****************************************************************************
-  SUBROUTINE tmc_ana_displacement_create(ana_disp, dim_per_elem, error)
+  SUBROUTINE tmc_ana_displacement_create(ana_disp, dim_per_elem)
     TYPE(displacement_type), POINTER         :: ana_disp
     INTEGER                                  :: dim_per_elem
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'tmc_ana_displacement_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
+    CPASSERT(.NOT.ASSOCIATED(ana_disp))
+    CPASSERT(dim_per_elem.GT.0)
 
-    failure = .FALSE.
-    CPPrecondition(.NOT.ASSOCIATED(ana_disp),cp_failure_level,routineP,error,failure)
-    CPPrecondition(dim_per_elem.GT.0,cp_failure_level,routineP,error,failure)
-
-    ALLOCATE(ana_disp,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(ana_disp)
 
     ana_disp%disp = 0.0_dp
     ana_disp%conf_counter = 0
@@ -604,25 +505,17 @@ CONTAINS
 ! *****************************************************************************
 !> \brief releases a structure environment for TMC analysis
 !> \param ana_disp ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \param
 !> \author Mandes 02.2013
 ! *****************************************************************************
-  SUBROUTINE tmc_ana_displacement_release(ana_disp, error)
+  SUBROUTINE tmc_ana_displacement_release(ana_disp)
     TYPE(displacement_type), POINTER         :: ana_disp
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'tmc_ana_displacement_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
+    CPASSERT(ASSOCIATED(ana_disp))
 
-    failure = .FALSE.
-    CPPrecondition(ASSOCIATED(ana_disp),cp_failure_level,routineP,error,failure)
-
-    DEALLOCATE(ana_disp,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(ana_disp)
   END SUBROUTINE tmc_ana_displacement_release
 END MODULE tmc_analysis_types

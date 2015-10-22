@@ -18,7 +18,10 @@ MODULE fftw3_lib
                                              integer8_kind
   USE fft_plan,                        ONLY: fft_plan_type
 
-  !$ USE OMP_LIB
+  !$ USE OMP_LIB, ONLY: omp_get_max_threads, omp_get_thread_num, omp_get_num_threads
+
+#include "../../common/cp_common_uses.f90"
+#include "../../base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -336,7 +339,7 @@ SUBROUTINE sortint ( iarr, n, index )
      INDEX(l) = INDEX(j)
      INDEX(j) = ib
      jstack = jstack + 2
-     IF (jstack>nstack) STOP ' Nstack too small in sortr'
+     IF (jstack>nstack) CPABORT(" Nstack too small in sortr")
      IF (ir-i+1>=j-l) THEN
         istack(jstack) = ir
         istack(jstack-1) = i
@@ -542,7 +545,7 @@ SUBROUTINE fftw3_create_3d_plans(plan, plan_r, dim_n, dim_istride, dim_ostride, 
                                  fft_direction, fftw_plan_type, valid)
 
     IF (.NOT. valid) THEN
-         STOP "fftw3_create_plan"
+         CPABORT("fftw3_create_plan")
     ENDIF
 
     !!!! Remainder
@@ -553,7 +556,7 @@ SUBROUTINE fftw3_create_3d_plans(plan, plan_r, dim_n, dim_istride, dim_ostride, 
                                  input, output, &
                                  fft_direction, fftw_plan_type, valid)
     IF (.NOT. valid) THEN
-         STOP "fftw3_create_plan (remaining)"
+         CPABORT("fftw3_create_plan (remaining)")
     ENDIF
 
 
@@ -599,7 +602,7 @@ SUBROUTINE fftw3_create_plan_3d(plan, zin, zout, plan_style)
   CASE(4)
          fftw_plan_type = FFTW_EXHAUSTIVE
   CASE DEFAULT
-         STOP "fftw3_create_plan_3d"
+         CPABORT("fftw3_create_plan_3d")
   END SELECT
 
 #if defined (__FFTW3_UNALIGNED)
@@ -928,7 +931,7 @@ SUBROUTINE fftw3_create_plan_1dm(plan, zin, zout, plan_style)
   CASE(4)
          fftw_plan_type = FFTW_EXHAUSTIVE
   CASE DEFAULT
-   STOP "fftw3_create_plan_1dm"
+         CPABORT("fftw3_create_plan_1dm")
   END SELECT
 
 #if defined (__FFTW3_UNALIGNED)

@@ -10,7 +10,7 @@
 
 SUBROUTINE cp_init_cp2k(init_mpi,ierr) BIND(C,name="cp_c_init_cp2k")
   USE f77_interface,                   ONLY: icp => init_cp2k
-  USE, INTRINSIC :: ISO_C_BINDING,     ONLY: c_int
+  USE               ISO_C_BINDING,     ONLY: c_int
 
   IMPLICIT NONE
 
@@ -27,7 +27,7 @@ END SUBROUTINE cp_init_cp2k
 ! *****************************************************************************
 SUBROUTINE cp_finalize_cp2k(finalize_mpi,ierr) BIND(C,name="cp_c_finalize_cp2k")
   USE f77_interface,                   ONLY: kcp => finalize_cp2k
-  USE, INTRINSIC :: ISO_C_BINDING,     ONLY: c_int
+  USE               ISO_C_BINDING,     ONLY: c_int
 
   IMPLICIT NONE
 
@@ -49,13 +49,11 @@ SUBROUTINE cp_create_fenv(new_env_id,input_file_path,output_file_path,&
   USE f77_interface,                   ONLY: create_force_env
   USE input_cp2k,                      ONLY: create_cp2k_root_section
   USE input_section_types,             ONLY: section_type, section_release
-  USE cp_error_handling,               ONLY: cp_error_type
-  USE, INTRINSIC :: ISO_C_BINDING,     ONLY: c_int, c_char, c_null_char
+  USE               ISO_C_BINDING,     ONLY: c_int, c_char, c_null_char
   USE kinds,                           ONLY: default_path_length
 
   IMPLICIT NONE
 
-  TYPE(cp_error_type)                  :: error
   TYPE(section_type), POINTER          :: input_declaration
   CHARACTER(len=1,kind=c_char)         :: input_file_path(*), output_file_path(*)
   INTEGER(c_int)                       :: new_env_id, ierr
@@ -75,9 +73,9 @@ SUBROUTINE cp_create_fenv(new_env_id,input_file_path,output_file_path,&
   END DO
 
   NULLIFY(input_declaration)
-  CALL create_cp2k_root_section(input_declaration, error)
+  CALL create_cp2k_root_section(input_declaration)
   CALL create_force_env(new_env_id,input_declaration,ifp,ofp,ierr=ierr)
-  CALL section_release(input_declaration,error=error)
+  CALL section_release(input_declaration)
 END SUBROUTINE cp_create_fenv
 
 ! *****************************************************************************
@@ -93,13 +91,11 @@ SUBROUTINE cp_create_fenv_comm(new_env_id,input_file_path,output_file_path,&
   USE f77_interface,                   ONLY: create_force_env
   USE input_cp2k,                      ONLY: create_cp2k_root_section
   USE input_section_types,             ONLY: section_type, section_release
-  USE cp_error_handling,               ONLY: cp_error_type
-  USE, INTRINSIC :: ISO_C_BINDING,     ONLY: c_int, c_char, c_null_char
+  USE               ISO_C_BINDING,     ONLY: c_int, c_char, c_null_char
   USE kinds,                           ONLY: default_path_length
 
   IMPLICIT NONE
 
-  TYPE(cp_error_type)                  :: error
   TYPE(section_type), POINTER          :: input_declaration
   CHARACTER(len=1,kind=c_char)         :: input_file_path(*), output_file_path(*)
   INTEGER(c_int)                       :: new_env_id, mpi_comm, ierr
@@ -119,9 +115,9 @@ SUBROUTINE cp_create_fenv_comm(new_env_id,input_file_path,output_file_path,&
   END DO
 
   NULLIFY(input_declaration)
-  CALL create_cp2k_root_section(input_declaration, error)
+  CALL create_cp2k_root_section(input_declaration)
   CALL create_force_env(new_env_id,input_declaration,ifp,ofp,mpi_comm,ierr=ierr)
-  CALL section_release(input_declaration,error=error)
+  CALL section_release(input_declaration)
 END SUBROUTINE cp_create_fenv_comm
 
 ! *****************************************************************************
@@ -131,7 +127,7 @@ END SUBROUTINE cp_create_fenv_comm
 ! *****************************************************************************
 RECURSIVE SUBROUTINE cp_destroy_fenv(env_id, ierr) BIND(C,name="cp_c_destroy_fenv") 
   USE f77_interface,                   ONLY: dfe => destroy_force_env
-  USE, INTRINSIC :: ISO_C_BINDING,     ONLY: c_int
+  USE               ISO_C_BINDING,     ONLY: c_int
 
   IMPLICIT NONE
 
@@ -150,7 +146,7 @@ END SUBROUTINE cp_destroy_fenv
 SUBROUTINE cp_set_pos(env_id, new_pos, n_el, ierr) BIND(C,name="cp_c_set_pos")
   USE kinds,                           ONLY: dp
   USE f77_interface,                   ONLY: sp => set_pos
-  USE, INTRINSIC :: ISO_C_BINDING,     ONLY: c_int, c_double
+  USE               ISO_C_BINDING,     ONLY: c_int, c_double
 
   IMPLICIT NONE
 
@@ -172,7 +168,7 @@ END SUBROUTINE cp_set_pos
 SUBROUTINE cp_set_vel(env_id, new_vel, n_el, ierr) BIND(C,name="cp_c_set_vel")
   USE kinds,                           ONLY: dp
   USE f77_interface,                   ONLY: sv => set_vel
-  USE, INTRINSIC :: ISO_C_BINDING,     ONLY: c_int, c_double
+  USE               ISO_C_BINDING,     ONLY: c_int, c_double
 
   IMPLICIT NONE
 
@@ -195,7 +191,7 @@ END SUBROUTINE cp_set_vel
 SUBROUTINE cp_get_result_r1(env_id, description, N, RESULT, ierr) BIND(C,name="cp_c_get_result_r1")
   USE kinds,                           ONLY: dp, default_string_length
   USE f77_interface,                   ONLY: get_result_r1
-  USE, INTRINSIC :: ISO_C_BINDING,     ONLY: c_int, c_char, c_double, c_null_char
+  USE               ISO_C_BINDING,     ONLY: c_int, c_char, c_double, c_null_char
 
   IMPLICIT NONE
 
@@ -228,7 +224,7 @@ END SUBROUTINE cp_get_result_r1
 ! *****************************************************************************
 SUBROUTINE cp_get_natom(env_id, natom, ierr) BIND(C,name="cp_c_get_natom")
   USE f77_interface,                   ONLY: gna => get_natom
-  USE, INTRINSIC :: ISO_C_BINDING,     ONLY: c_int
+  USE               ISO_C_BINDING,     ONLY: c_int
 
   IMPLICIT NONE
 
@@ -245,7 +241,7 @@ END SUBROUTINE cp_get_natom
 ! *****************************************************************************
 SUBROUTINE cp_get_nparticle(env_id, nparticle, ierr) BIND(C,name="cp_c_get_nparticle")
   USE f77_interface,                   ONLY: gnp => get_nparticle
-  USE, INTRINSIC :: ISO_C_BINDING,     ONLY: c_int
+  USE               ISO_C_BINDING,     ONLY: c_int
 
   IMPLICIT NONE
 
@@ -264,7 +260,7 @@ END SUBROUTINE cp_get_nparticle
 SUBROUTINE cp_get_pos(env_id, pos, n_el, ierr) BIND(C,name="cp_c_get_pos")
   USE kinds,                           ONLY: dp
   USE f77_interface,                   ONLY: gp => get_pos
-  USE, INTRINSIC :: ISO_C_BINDING,     ONLY: c_int, c_double
+  USE               ISO_C_BINDING,     ONLY: c_int, c_double
 
   IMPLICIT NONE
 
@@ -286,7 +282,7 @@ END SUBROUTINE cp_get_pos
 SUBROUTINE cp_get_force(env_id,force, n_el, ierr) BIND(C,name="cp_c_get_force")
   USE kinds,                           ONLY: dp
   USE f77_interface,                   ONLY: gf => get_force
-  USE, INTRINSIC :: ISO_C_BINDING,     ONLY: c_int, c_double
+  USE               ISO_C_BINDING,     ONLY: c_int, c_double
 
   IMPLICIT NONE
 
@@ -306,7 +302,7 @@ END SUBROUTINE cp_get_force
 ! *****************************************************************************
 RECURSIVE SUBROUTINE cp_get_energy(env_id, e_pot, ierr) BIND(C,name="cp_c_get_energy")
   USE f77_interface,                   ONLY: ge => get_energy
-  USE, INTRINSIC :: ISO_C_BINDING,     ONLY: c_int, c_double
+  USE               ISO_C_BINDING,     ONLY: c_int, c_double
 
   IMPLICIT NONE
 
@@ -324,7 +320,7 @@ END SUBROUTINE cp_get_energy
 ! *****************************************************************************
 RECURSIVE SUBROUTINE cp_calc_energy_force(env_id,calc_force,ierr) BIND(C,name="cp_c_calc_energy_force")
   USE f77_interface,                   ONLY: cef => calc_energy_force
-  USE, INTRINSIC :: ISO_C_BINDING,     ONLY: c_int, c_bool
+  USE               ISO_C_BINDING,     ONLY: c_int, c_bool
 
   IMPLICIT NONE
 
@@ -348,7 +344,7 @@ END SUBROUTINE cp_calc_energy_force
 RECURSIVE SUBROUTINE cp_calc_energy(env_id,pos,n_el,e_pot,ierr) BIND(C,name="cp_c_calc_energy")
   USE kinds,                           ONLY: dp
   USE f77_interface,                   ONLY: ce => calc_energy
-  USE, INTRINSIC :: ISO_C_BINDING,     ONLY: c_int, c_double
+  USE               ISO_C_BINDING,     ONLY: c_int, c_double
 
   IMPLICIT NONE
 
@@ -375,7 +371,7 @@ SUBROUTINE cp_calc_force(env_id,pos,n_el_pos,e_pot,force,n_el_force,ierr)&
   BIND(C,name="cp_c_calc_force")
   USE kinds,                           ONLY: dp
   USE f77_interface,                   ONLY: cf => calc_force
-  USE, INTRINSIC :: ISO_C_BINDING,     ONLY: c_int, c_double
+  USE               ISO_C_BINDING,     ONLY: c_int, c_double
 
   IMPLICIT NONE
 
@@ -402,13 +398,11 @@ SUBROUTINE cp_run_input(input_file_path,output_file_path,ierr) BIND(C,name="cp_c
   USE cp2k_runs,                       ONLY: run_input
   USE input_cp2k,                      ONLY: create_cp2k_root_section
   USE input_section_types,             ONLY: section_type, section_release
-  USE cp_error_handling,               ONLY: cp_error_type
-  USE, INTRINSIC :: ISO_C_BINDING,     ONLY: c_int, c_char, c_null_char
+  USE               ISO_C_BINDING,     ONLY: c_int, c_char, c_null_char
   USE kinds,                           ONLY: default_path_length
 
   IMPLICIT NONE
 
-  TYPE(cp_error_type)                  :: error
   TYPE(section_type), POINTER          :: input_declaration
   CHARACTER(len=1,kind=c_char)         :: input_file_path(*), output_file_path(*)
   INTEGER(c_int)                       :: ierr
@@ -428,9 +422,9 @@ SUBROUTINE cp_run_input(input_file_path,output_file_path,ierr) BIND(C,name="cp_c
   END DO
 
   NULLIFY(input_declaration)
-  CALL create_cp2k_root_section(input_declaration, error)
+  CALL create_cp2k_root_section(input_declaration)
   CALL run_input(input_declaration,ifp,ofp,ierr=ierr)
-  CALL section_release(input_declaration,error=error)
+  CALL section_release(input_declaration)
 END SUBROUTINE cp_run_input
 
 ! *****************************************************************************
@@ -445,13 +439,11 @@ RECURSIVE SUBROUTINE cp_run_input_comm(input_file_path,output_file_path,&
   USE cp2k_runs,                       ONLY: run_input
   USE input_cp2k,                      ONLY: create_cp2k_root_section
   USE input_section_types,             ONLY: section_type, section_release
-  USE cp_error_handling,               ONLY: cp_error_type
-  USE, INTRINSIC :: ISO_C_BINDING,     ONLY: c_int, c_char, c_null_char
+  USE               ISO_C_BINDING,     ONLY: c_int, c_char, c_null_char
   USE kinds,                           ONLY: default_path_length
 
   IMPLICIT NONE
 
-  TYPE(cp_error_type)                  :: error
   TYPE(section_type), POINTER          :: input_declaration
   CHARACTER(len=1,kind=c_char)         :: input_file_path(*), output_file_path(*)
   INTEGER(c_int)                       :: mpi_comm, ierr
@@ -471,9 +463,9 @@ RECURSIVE SUBROUTINE cp_run_input_comm(input_file_path,output_file_path,&
   END DO
 
   NULLIFY(input_declaration)
-  CALL create_cp2k_root_section(input_declaration, error)
+  CALL create_cp2k_root_section(input_declaration)
   CALL run_input(input_declaration,ifp,ofp,ierr,mpi_comm)
-  CALL section_release(input_declaration,error=error)
+  CALL section_release(input_declaration)
 END SUBROUTINE cp_run_input_comm
 
 ! *****************************************************************************
@@ -485,7 +477,7 @@ END SUBROUTINE cp_run_input_comm
 ! *****************************************************************************
 SUBROUTINE cp_do_shake(f_env_id,dt,shake_tol,ierr) BIND(C,name="cp_c_do_shake")
   USE f77_interface,                   ONLY: do_shake
-  USE, INTRINSIC :: ISO_C_BINDING,     ONLY: c_int, c_double
+  USE               ISO_C_BINDING,     ONLY: c_int, c_double
 
   IMPLICIT NONE
 
@@ -506,9 +498,8 @@ END SUBROUTINE cp_do_shake
 !> \author Mohammad Hossein Bani-Hashemian
 ! *****************************************************************************
 SUBROUTINE cp_c_ext_method_set_ptr(f_env_id,func,ierr) BIND(C,name="cp_c_ext_method_set_ptr")
-  USE, INTRINSIC :: ISO_C_BINDING,     ONLY: c_int, c_funptr
+  USE               ISO_C_BINDING,     ONLY: c_int, c_funptr
   USE f77_interface,                   ONLY: f_env_add_defaults, f_env_rm_defaults, f_env_type 
-  USE cp_error_handling,               ONLY: cp_error_type
   USE force_env_types,                 ONLY: force_env_get, use_qs_force
 
   IMPLICIT NONE
@@ -517,19 +508,16 @@ SUBROUTINE cp_c_ext_method_set_ptr(f_env_id,func,ierr) BIND(C,name="cp_c_ext_met
   INTEGER(c_int)                       :: ierr
   INTEGER(c_int)                       :: f_env_id
   LOGICAL                              :: failure
-  TYPE(cp_error_type)                  :: error
   TYPE(f_env_type), POINTER            :: f_env
   INTEGER                              :: in_use
 
   failure = .FALSE.
   NULLIFY (f_env)
-  CALL f_env_add_defaults(f_env_id,f_env,error,failure)
-  IF (.NOT. failure) THEN
-     CALL force_env_get(f_env%force_env,in_use=in_use,error=error)
-     IF (in_use .EQ. use_qs_force) THEN
-         f_env%force_env%qs_env%transport_env%ext_c_method_ptr = func
-     END IF
+  CALL f_env_add_defaults(f_env_id,f_env,failure)
+  CALL force_env_get(f_env%force_env,in_use=in_use)
+  IF (in_use .EQ. use_qs_force) THEN
+      f_env%force_env%qs_env%transport_env%ext_c_method_ptr = func
   END IF
-  CALL f_env_rm_defaults(f_env,error,ierr) 
+  CALL f_env_rm_defaults(f_env,ierr) 
 END SUBROUTINE cp_c_ext_method_set_ptr
 

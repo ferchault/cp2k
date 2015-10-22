@@ -28,6 +28,7 @@ MODULE ai_overlap_ppl
   USE mathconstants,                   ONLY: fac,&
                                              pi
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -78,14 +79,13 @@ CONTAINS
 !> \param force_a ...
 !> \param force_b ...
 !> \param fs ...
-!> \param error ...
 !> \date    May 2011
 !> \author  Juerg Hutter
 !> \version 1.0
 ! *****************************************************************************
   SUBROUTINE ppl_integral(la_max_set,la_min_set,npgfa,rpgfa,zeta,&
        lb_max_set,lb_min_set,npgfb,rpgfb,zetb,nexp_ppl,alpha_ppl,nct_ppl,cexp_ppl,rpgfc,&
-       rab,dab,rac,dac,rbc,dbc,vab,s,pab,force_a,force_b,fs,error)
+       rab,dab,rac,dac,rbc,dbc,vab,s,pab,force_a,force_b,fs)
     INTEGER, INTENT(IN)                      :: la_max_set, la_min_set, npgfa
     REAL(KIND=dp), DIMENSION(:), INTENT(IN)  :: rpgfa, zeta
     INTEGER, INTENT(IN)                      :: lb_max_set, lb_min_set, npgfb
@@ -112,24 +112,21 @@ CONTAINS
       INTENT(OUT), OPTIONAL                  :: force_a, force_b
     REAL(KIND=dp), DIMENSION(:, :, :), &
       INTENT(INOUT), OPTIONAL                :: fs
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'ppl_integral', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: iexp, ij, ipgf, istat, jpgf, &
-                                                mmax, nexp
-    LOGICAL                                  :: failure
+    INTEGER                                  :: iexp, ij, ipgf, jpgf, mmax, &
+                                                nexp
     REAL(KIND=dp)                            :: rho, sab, t, zetc
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :)                        :: auxint
     REAL(KIND=dp), DIMENSION(3)              :: pci
 
-    failure = .FALSE.
     IF (PRESENT(pab)) THEN
-      CPPostcondition(PRESENT(force_a),cp_failure_level,routineP,error,failure)
-      CPPostcondition(PRESENT(force_b),cp_failure_level,routineP,error,failure)
-      CPPostcondition(PRESENT(fs),cp_failure_level,routineP,error,failure)
+      CPASSERT(PRESENT(force_a))
+      CPASSERT(PRESENT(force_b))
+      CPASSERT(PRESENT(fs))
       mmax = la_max_set + lb_max_set + 2
       force_a(:) = 0.0_dp
       force_b(:) = 0.0_dp
@@ -137,8 +134,7 @@ CONTAINS
       mmax = la_max_set + lb_max_set
     END IF
 
-    ALLOCATE (auxint(0:mmax,npgfa*npgfb),STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (auxint(0:mmax,npgfa*npgfb))
     auxint = 0._dp
 
     ! *** Calculate auxiliary integrals ***
@@ -169,10 +165,9 @@ CONTAINS
 
     CALL os_3center(la_max_set,la_min_set,npgfa,rpgfa,zeta,&
          lb_max_set,lb_min_set,npgfb,rpgfb,zetb,auxint,rpgfc,&
-         rab,dab,rac,dac,rbc,dbc,vab,s,pab,force_a,force_b,fs,error)
+         rab,dab,rac,dac,rbc,dbc,vab,s,pab,force_a,force_b,fs)
 
-    DEALLOCATE (auxint,STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE (auxint)
 
   END SUBROUTINE ppl_integral
 ! *****************************************************************************
@@ -238,7 +233,7 @@ CONTAINS
       pmax = 3
     END IF
     IF(nexp_ppl > 4) THEN
-      STOP "nexp_ppl > 4"
+      CPABORT("nexp_ppl > 4")
     END IF
 
     f = zetc/q

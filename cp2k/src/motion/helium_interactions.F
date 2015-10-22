@@ -25,6 +25,7 @@ MODULE helium_interactions
   USE pint_types,                      ONLY: pint_env_type
   USE splines_types,                   ONLY: spline_data_p_type
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -196,15 +197,12 @@ vkin = 0.0_dp
     INTEGER                                  :: hbeads, hi, i, ig, &
                                                 num_chlorine, num_hydrogen, &
                                                 num_oxygen, qi
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: d, d2, dd, ep, eps, s1, s2, &
                                                 sig
     REAL(KIND=dp), DIMENSION(3)              :: dr, helium_r, solute_r
-    TYPE(cp_error_type)                      :: error
 
-    failure=.FALSE.
-    CPPrecondition(ASSOCIATED(helium),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(pint_env),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(helium))
+    CPASSERT(ASSOCIATED(pint_env))
 
     num_chlorine = helium%solute_number(1)
     num_oxygen   = helium%solute_number(2)

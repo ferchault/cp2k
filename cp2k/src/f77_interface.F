@@ -24,16 +24,10 @@ MODULE f77_interface
   USE cp2k_info,                       ONLY: get_runtime_info
   USE cp_dbcsr_interface,              ONLY: cp_dbcsr_finalize_lib,&
                                              cp_dbcsr_init_lib
+  USE cp_error_handling,               ONLY: cp_error_handling_setup
   USE cp_files,                        ONLY: init_preconnection_list,&
                                              open_file
-  USE cp_ma_interface,                 ONLY: cp_ma_default_affinity,&
-                                             cp_ma_finalize_lib,&
-                                             cp_ma_init_lib,&
-                                             cp_ma_mpi_reorder_strategy,&
-                                             cp_ma_mpi_reordering,&
-                                             cp_ma_set_mpi_reordering,&
-                                             has_ma,&
-                                             has_ma_topology
+  USE cp_log_handling,                 ONLY: cp_logger_retain
   USE cp_output_handling,              ONLY: cp_iterate
   USE cp_para_env,                     ONLY: cp_para_env_create,&
                                              cp_para_env_release,&
@@ -76,6 +70,7 @@ MODULE f77_interface
                                              do_fist,&
                                              do_mixed,&
                                              do_qmmm,&
+                                             do_qmmmx,&
                                              do_qs
   USE input_cp2k_check,                ONLY: check_cp2k_input
   USE input_cp2k_force_eval,           ONLY: create_force_eval_section
@@ -87,7 +82,7 @@ MODULE f77_interface
                                              keyword_type
   USE input_section_types,             ONLY: &
        section_get_keyword, section_release, section_type, &
-       section_vals_duplicate, section_vals_get_subs_vals, &
+       section_vals_duplicate, section_vals_get, section_vals_get_subs_vals, &
        section_vals_release, section_vals_remove_values, section_vals_retain, &
        section_vals_type, section_vals_val_get, section_vals_write
   USE kinds,                           ONLY: default_path_length,&
@@ -95,7 +90,8 @@ MODULE f77_interface
                                              dp
   USE machine,                         ONLY: default_output_unit,&
                                              m_chdir,&
-                                             m_getcwd
+                                             m_getcwd,&
+                                             m_memory
   USE message_passing,                 ONLY: &
        MPI_COMM_WORLD, add_mp_perf_env, get_mp_perf_env, mp_max, &
        mp_perf_env_release, mp_perf_env_retain, mp_perf_env_type, &
@@ -109,7 +105,12 @@ MODULE f77_interface
   USE periodic_table,                  ONLY: init_periodic_table
   USE pw_cuda,                         ONLY: pw_cuda_finalize,&
                                              pw_cuda_init
-  USE qmmm_create,                     ONLY: qmmm_create_force_env
+  USE qmmm_create,                     ONLY: qmmm_env_create
+  USE qmmm_types,                      ONLY: qmmm_env_release,&
+                                             qmmm_env_type
+  USE qmmmx_create,                    ONLY: qmmmx_env_create
+  USE qmmmx_types,                     ONLY: qmmmx_env_release,&
+                                             qmmmx_env_type
   USE qs_environment,                  ONLY: qs_init
   USE qs_environment_types,            ONLY: qs_env_create,&
                                              qs_env_release,&
@@ -122,11 +123,11 @@ MODULE f77_interface
                                              rm_timer_env,&
                                              timer_env_release,&
                                              timer_env_retain,&
-                                             timeset,&
-                                             timestop
+                                             timings_register_hooks
   USE timings_types,                   ONLY: timer_env_type
   USE virial_types,                    ONLY: virial_type
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -143,7 +144,7 @@ MODULE f77_interface
   TYPE f_env_type
      INTEGER :: id_nr
      TYPE(force_env_type), POINTER      :: force_env
-     TYPE(cp_error_type)                :: error
+     TYPE(cp_logger_type), POINTER      :: logger
      TYPE(timer_env_type), POINTER      :: timer_env
      TYPE(mp_perf_env_type), POINTER    :: mp_perf_env
      CHARACTER(len=default_path_length) :: my_path,old_path
@@ -153,10 +154,8 @@ MODULE f77_interface
   TYPE(cp_para_env_type), POINTER, SAVE :: default_para_env
   LOGICAL, SAVE :: module_initialized=.FALSE.
   INTEGER, SAVE :: last_f_env_id=0, n_f_envs=0
-  INTEGER       :: mpi_mapping_method
 
   PUBLIC :: default_para_env
-  PUBLIC :: init_f77_default
   PUBLIC :: init_cp2k, finalize_cp2k
   PUBLIC :: create_force_env, destroy_force_env, set_pos, get_pos,&
             get_force, calc_energy_force, get_energy, get_stress_tensor,&
@@ -165,17 +164,6 @@ MODULE f77_interface
             f_env_get_from_id,&
             set_vel, do_shake, set_cell, get_cell, get_result_r1
 CONTAINS
-
-! ****************************************************************************
-!> \brief set the default mpi reordering method
-!> \param mapping_method the selected method
-!> \author Christiane Pousa Ribeiro
-! *****************************************************************************
- SUBROUTINE init_f77_default(mapping_method)
-    INTEGER, INTENT(IN)                      :: mapping_method
-
-   mpi_mapping_method = mapping_method
- END SUBROUTINE init_f77_default
 
 ! *****************************************************************************
 !> \brief returns the position of the force env corresponding to the given id
@@ -213,26 +201,22 @@ CONTAINS
 
     CHARACTER(len=*), PARAMETER :: routineN = 'init_cp2k', &
       routineP = moduleN//':'//routineN
- 
-#if defined __GEMINI || __SEASTAR || __BLUEGENE || __NET
-    CHARACTER                                :: strategy
-#endif
 
-    INTEGER                                  :: mpi_comm_default, stat, &
-                                                unit_nr
-    TYPE(cp_error_type)                      :: error
+    INTEGER                                  :: mpi_comm_default, unit_nr
     TYPE(cp_logger_type), POINTER            :: logger
 
     IF (.NOT. module_initialized) THEN
+       ! install error handler hooks
+       CALL cp_error_handling_setup()
+
+       ! install timming handler hooks
+       CALL timings_register_hooks()
 
        ! Initialise preconnection list
        CALL init_preconnection_list()
 
        ! get runtime information
        CALL get_runtime_info
-
-       ! initialize with a default error (a proper error will be initialized later)
-       CALL cp_error_init(error)
 
        IF (init_mpi) THEN
           ! get the default system wide communicator
@@ -245,15 +229,10 @@ CONTAINS
        CALL add_mp_perf_env()
        CALL add_timer_env()
        
-#if defined __GEMINI || __SEASTAR || __BLUEGENE || __NET
-       CALL cp_ma_mpi_reorder_strategy(mpi_mapping_method,strategy)
-       CALL cp_ma_mpi_reordering(mpi_comm_default,mp_reorder=strategy, error=error)
-#endif
-
        ! re-create the para_env and log with correct (reordered) ranks
        NULLIFY(default_para_env)
        CALL cp_para_env_create(default_para_env, group=mpi_comm_default, &
-            owns_group=.FALSE.,error=error)
+            owns_group=.FALSE.)
        IF (default_para_env%source==default_para_env%mepos) THEN
           unit_nr=default_output_unit
        ELSE
@@ -267,21 +246,9 @@ CONTAINS
        CALL cp_add_default_logger(logger)
        CALL cp_logger_release(logger)
 
-       ALLOCATE(f_envs(0),stat=stat)
-       CPPostconditionNoErr(stat==0,cp_fatal_level,routineP)
+       ALLOCATE(f_envs(0))
        module_initialized=.TRUE.
        ierr=0
-
-#if defined __GEMINI || __SEASTAR || __BLUEGENE || __NET
-     CALL cp_ma_set_mpi_reordering(strategy)
-#endif
-
-       ! Initialize the MA_ARCH configuration
-       IF (has_ma) THEN
-         CALL cp_ma_init_lib(init_mpi,group=mpi_comm_default,error=error)
-         !default binding only if mpi_init - all MPI tasks will be present
-         CALL cp_ma_default_affinity(init_mpi)
-       ENDIF
 
        !   *** Initialize mathematical constants ***
        CALL init_periodic_table()
@@ -296,11 +263,14 @@ CONTAINS
        CALL pw_cuda_init()
 
        ! Initialize the DBCSR configuration
-       CALL cp_dbcsr_init_lib (group=mpi_comm_default, error=error)
+       CALL cp_dbcsr_init_lib ()
 
     ELSE
        ierr=cp_failure_level
     END IF
+
+    !sample peak memory
+    CALL m_memory()
 
   END SUBROUTINE init_cp2k
 
@@ -317,26 +287,24 @@ CONTAINS
     CHARACTER(len=*), PARAMETER :: routineN = 'finalize_cp2k', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: ienv, stat
-    TYPE(cp_error_type)                      :: error
+    INTEGER                                  :: ienv
+
+!sample peak memory
+
+    CALL m_memory()
 
     IF (.NOT.module_initialized) THEN
        ierr=cp_failure_level
     ELSE
        ! Finalize the DBCSR configuration
-       CALL cp_dbcsr_finalize_lib (group=default_para_env%group, output_unit=0, error=error)
-       IF (has_ma .OR. has_ma_topology) THEN
-         CALL cp_ma_finalize_lib(error=error)
-       ENDIF
-       CALL cp_error_init(error)
+       CALL cp_dbcsr_finalize_lib (group=default_para_env%group, output_unit=0)
        CALL pw_cuda_finalize()
        DO ienv=n_f_envs,1,-1
           CALL destroy_force_env(f_envs(ienv)%f_env%id_nr,ierr=ierr)
-          CPAssertNoFail(ierr==0,cp_warning_level,routineP,error)
+          CPASSERT(ierr==0)
        END DO
-       DEALLOCATE(f_envs,stat=stat)
-       CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
-       CALL cp_para_env_release(default_para_env,error)
+       DEALLOCATE(f_envs)
+       CALL cp_para_env_release(default_para_env)
        ierr=0
        CALL cp_rm_default_logger()
 
@@ -354,108 +322,83 @@ CONTAINS
 ! *****************************************************************************
 !> \brief deallocates a f_env
 !> \param f_env the f_env to deallocate
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author fawzi
 ! *****************************************************************************
-  RECURSIVE SUBROUTINE f_env_dealloc(f_env,error)
+  RECURSIVE SUBROUTINE f_env_dealloc(f_env)
     TYPE(f_env_type), POINTER                :: f_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'f_env_dealloc', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: ierr
-    LOGICAL                                  :: failure
 
-    failure=.FALSE.
-
-    CPPrecondition(ASSOCIATED(f_env),cp_failure_level,routineP,error,failure)
-    IF (.NOT. failure) THEN
-       CALL force_env_release(f_env%force_env,error=error)
-       CALL cp_error_dealloc_ref(f_env%error,error=error)
-       CALL timer_env_release(f_env%timer_env)
-       CALL mp_perf_env_release(f_env%mp_perf_env)
-       IF (f_env%old_path/=f_env%my_path) THEN
-          CALL m_chdir(f_env%old_path,ierr)
-          CPAssert(ierr==0,cp_failure_level,routineP,error,failure)
-       END IF
+    CPASSERT(ASSOCIATED(f_env))
+    CALL force_env_release(f_env%force_env)
+    CALL cp_logger_release(f_env%logger)
+    CALL timer_env_release(f_env%timer_env)
+    CALL mp_perf_env_release(f_env%mp_perf_env)
+    IF (f_env%old_path/=f_env%my_path) THEN
+       CALL m_chdir(f_env%old_path,ierr)
+       CPASSERT(ierr==0)
     END IF
   END SUBROUTINE f_env_dealloc
 
 ! *****************************************************************************
 !> \brief createates a f_env
 !> \param f_env the f_env to createate
-!> \param template_error the error to be used as template for the one stored
 !> \param force_env the force_environment to be stored
 !> \param timer_env the timer env to be stored
 !> \param mp_perf_env the mp performance environement to be stored
 !> \param id_nr ...
-!> \param error ...
+!> \param logger ...
 !> \param old_dir ...
 !> \author fawzi
 ! *****************************************************************************
-  SUBROUTINE f_env_create(f_env,template_error,force_env, timer_env,mp_perf_env,&
-       id_nr,error,old_dir)
+  SUBROUTINE f_env_create(f_env,force_env, timer_env,mp_perf_env,id_nr,logger,old_dir)
     TYPE(f_env_type), POINTER                :: f_env
-    TYPE(cp_error_type), INTENT(inout), &
-      OPTIONAL                               :: template_error
     TYPE(force_env_type), POINTER            :: force_env
     TYPE(timer_env_type), POINTER            :: timer_env
     TYPE(mp_perf_env_type), POINTER          :: mp_perf_env
     INTEGER, INTENT(in)                      :: id_nr
-    TYPE(cp_error_type), INTENT(inout)       :: error
+    TYPE(cp_logger_type), POINTER            :: logger
     CHARACTER(len=*), INTENT(in), OPTIONAL   :: old_dir
 
     CHARACTER(len=*), PARAMETER :: routineN = 'f_env_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
-
-    ALLOCATE(f_env,stat=stat)
-    CPPostcondition(stat==0,cp_fatal_level,routineP,error,failure)
-    IF (.NOT. failure) THEN
-       f_env%force_env => force_env
-       CALL force_env_retain(f_env%force_env,error=error)
-       CALL cp_error_init(f_env%error,template_error=template_error)
-       f_env%timer_env => timer_env
-       CALL timer_env_retain(f_env%timer_env)
-       f_env%mp_perf_env => mp_perf_env
-       CALL mp_perf_env_retain(f_env%mp_perf_env)
-       f_env%id_nr=id_nr
-       CALL m_getcwd(f_env%my_path)
-       f_env%old_path=f_env%my_path
-       IF (PRESENT(old_dir)) f_env%old_path=old_dir
-    END IF
+    ALLOCATE(f_env)
+    f_env%force_env => force_env
+    CALL force_env_retain(f_env%force_env)
+    f_env%logger => logger
+    CALL cp_logger_retain(logger)
+    f_env%timer_env => timer_env
+    CALL timer_env_retain(f_env%timer_env)
+    f_env%mp_perf_env => mp_perf_env
+    CALL mp_perf_env_retain(f_env%mp_perf_env)
+    f_env%id_nr=id_nr
+    CALL m_getcwd(f_env%my_path)
+    f_env%old_path=f_env%my_path
+    IF (PRESENT(old_dir)) f_env%old_path=old_dir
   END SUBROUTINE f_env_create
 
 ! *****************************************************************************
 !> \brief ...
 !> \param f_env_id ...
 !> \param f_env ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE f_env_get_from_id(f_env_id,f_env,error)
+  SUBROUTINE f_env_get_from_id(f_env_id,f_env)
     INTEGER, INTENT(in)                      :: f_env_id
     TYPE(f_env_type), POINTER                :: f_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'f_env_get_from_id', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: f_env_pos
-    LOGICAL                                  :: failure
 
-    failure=.FALSE.
     NULLIFY(f_env)
     f_env_pos = get_pos_of_env(f_env_id)
     IF (f_env_pos<1) THEN
-       CALL cp_assert(.FALSE.,cp_failure_level,cp_assertion_failed,routineP,&
-            "invalid env_id "//cp_to_string(f_env_id),error=error,&
-            failure=failure)
+       CPABORT("invalid env_id "//cp_to_string(f_env_id))
     ELSE
        f_env => f_envs(f_env_pos)%f_env
     END IF
@@ -468,7 +411,6 @@ CONTAINS
 !>      something went wrong
 !> \param f_env_id the f_env from where to take the defaults
 !> \param f_env will contain the f_env corresponding to f_env_id
-!> \param new_error an error that can be used for the given f_env
 !> \param failure will be set to true if something went wrong
 !> \param handle ...
 !> \author fawzi
@@ -479,45 +421,36 @@ CONTAINS
 !>      f77_interface:f_env_add_defaults, f77_interface:f_env_rm_defaults,
 !>      f77_interface:create_force_env, f77_interface:destroy_force_env
 ! *****************************************************************************
-  SUBROUTINE f_env_add_defaults(f_env_id,f_env,new_error, failure, handle)
+  SUBROUTINE f_env_add_defaults(f_env_id,f_env,failure, handle)
     INTEGER, INTENT(in)                      :: f_env_id
     TYPE(f_env_type), POINTER                :: f_env
-    TYPE(cp_error_type), INTENT(out)         :: new_error
-    LOGICAL                                  :: failure
+    LOGICAL, INTENT(out)                     :: failure
     INTEGER, INTENT(out), OPTIONAL           :: handle
 
     CHARACTER(len=*), PARAMETER :: routineN = 'f_env_add_defaults', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: f_env_pos, ierr
-    LOGICAL                                  :: my_failure
     TYPE(cp_logger_type), POINTER            :: logger
 
-    my_failure=.FALSE.
-
+    failure = .FALSE.
     NULLIFY(f_env)
     f_env_pos = get_pos_of_env(f_env_id)
     IF (f_env_pos<1) THEN
-       CALL cp_error_init(new_error)
-       CALL cp_assert(.FALSE.,cp_failure_level,cp_assertion_failed,routineP,&
-            "invalid env_id "//cp_to_string(f_env_id),error=new_error,&
-            failure=failure)
+       CPABORT("invalid env_id "//cp_to_string(f_env_id))
     ELSE
        f_env => f_envs(f_env_pos)%f_env
-       CALL cp_error_init(new_error,template_error=f_env%error)
-       logger => cp_error_get_logger(f_env%error)
-       CPPrecondition(ASSOCIATED(logger),cp_failure_level,routineP,new_error,my_failure)
-       IF (.NOT.my_failure) THEN
-          CALL m_getcwd(f_env%old_path)
-          IF (f_env%old_path/=f_env%my_path) THEN
-             CALL m_chdir(TRIM(f_env%my_path),ierr)
-             CPAssert(ierr==0,cp_failure_level,routineP,new_error,failure)
-          END IF
-          CALL add_mp_perf_env(f_env%mp_perf_env)
-          CALL add_timer_env(f_env%timer_env)
-          CALL cp_add_default_logger(logger)
-          IF (PRESENT(handle)) handle=cp_default_logger_stack_size()
+       logger => f_env%logger
+       CPASSERT(ASSOCIATED(logger))
+       CALL m_getcwd(f_env%old_path)
+       IF (f_env%old_path/=f_env%my_path) THEN
+          CALL m_chdir(TRIM(f_env%my_path),ierr)
+          CPASSERT(ierr==0)
        END IF
+       CALL add_mp_perf_env(f_env%mp_perf_env)
+       CALL add_timer_env(f_env%timer_env)
+       CALL cp_add_default_logger(logger)
+       IF (PRESENT(handle)) handle=cp_default_logger_stack_size()
     END IF
   END SUBROUTINE f_env_add_defaults
 
@@ -526,7 +459,6 @@ CONTAINS
 !>      defaults, and sets ierr accordingly to the failuers stored in error
 !>      It also releases the error
 !> \param f_env the f_env from where to take the defaults
-!> \param error the error to be checked (will be released)
 !> \param ierr variable that will be set to a number different from 0 if
 !>        error contains an error (otherwise it will be set to 0)
 !> \param handle ...
@@ -538,9 +470,8 @@ CONTAINS
 !>      f77_interface:f_env_add_defaults, f77_interface:f_env_rm_defaults,
 !>      f77_interface:create_force_env, f77_interface:destroy_force_env
 ! *****************************************************************************
-  SUBROUTINE f_env_rm_defaults(f_env,error,ierr,handle)
+  SUBROUTINE f_env_rm_defaults(f_env,ierr,handle)
     TYPE(f_env_type), POINTER                :: f_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
     INTEGER, INTENT(out), OPTIONAL           :: ierr
     INTEGER, INTENT(in), OPTIONAL            :: handle
 
@@ -548,49 +479,40 @@ CONTAINS
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: ierr2
-    LOGICAL                                  :: failure
     TYPE(cp_logger_type), POINTER            :: d_logger, logger
     TYPE(mp_perf_env_type), POINTER          :: d_mp_perf_env
     TYPE(timer_env_type), POINTER            :: d_timer_env
 
-    failure=.FALSE.
-
     IF (ASSOCIATED(f_env)) THEN
        IF (PRESENT(handle)) THEN
-          CPAssert(handle==cp_default_logger_stack_size(),cp_failure_level,routineP,error,failure)
+          CPASSERT(handle==cp_default_logger_stack_size())
        END IF
 
-       logger => cp_error_get_logger(f_env%error)
+       logger => f_env%logger
        d_logger => cp_get_default_logger()
        d_timer_env => get_timer_env()
        d_mp_perf_env => get_mp_perf_env()
-       CPPrecondition(ASSOCIATED(logger),cp_failure_level,routineP,error,failure)
-       CPPrecondition(ASSOCIATED(d_logger),cp_failure_level,routineP,error,failure)
-       CPPrecondition(ASSOCIATED(d_timer_env),cp_failure_level,routineP,error,failure)
-       CPPrecondition(ASSOCIATED(d_mp_perf_env),cp_failure_level,routineP,error,failure)
-       IF (.NOT.failure) THEN
-          CPPrecondition(logger%id_nr==d_logger%id_nr,cp_failure_level,routineP,error,failure)
-          ! CPPrecondition(d_timer_env%id_nr==f_env%timer_env%id_nr,cp_failure_level,routineP,error,failure)
-          CPPrecondition(d_mp_perf_env%id_nr==f_env%mp_perf_env%id_nr,cp_failure_level,routineP,error,failure)
-       END IF
+       CPASSERT(ASSOCIATED(logger))
+       CPASSERT(ASSOCIATED(d_logger))
+       CPASSERT(ASSOCIATED(d_timer_env))
+       CPASSERT(ASSOCIATED(d_mp_perf_env))
+       CPASSERT(logger%id_nr==d_logger%id_nr)
+       ! CPASSERT(d_timer_env%id_nr==f_env%timer_env%id_nr)
+       CPASSERT(d_mp_perf_env%id_nr==f_env%mp_perf_env%id_nr)
        IF (f_env%old_path/=f_env%my_path) THEN
           CALL m_chdir(TRIM(f_env%old_path),ierr2)
-          CPAssert(ierr2==0,cp_failure_level,routineP,error,failure)
+          CPASSERT(ierr2==0)
        END IF
        IF (PRESENT(ierr)) THEN
           ierr=0
        ENDIF
-       CALL cp_error_dealloc_ref(error)
-       IF (.NOT.failure) THEN
-          CALL cp_rm_default_logger()
-          CALL rm_timer_env()
-          CALL rm_mp_perf_env()
-       END IF
+       CALL cp_rm_default_logger()
+       CALL rm_timer_env()
+       CALL rm_mp_perf_env()
     ELSE
        IF (PRESENT(ierr)) THEN
           ierr=0
        ENDIF
-       CALL cp_error_dealloc_ref(error)
     END IF
   END SUBROUTINE f_env_rm_defaults
 
@@ -641,15 +563,13 @@ CONTAINS
 
     CHARACTER(len=default_path_length)       :: old_dir, wdir
     INTEGER :: handle, i, ierr2, iforce_eval, isubforce_eval, k, &
-      method_name_id, my_group, nforce_eval, ngroups, nsubforce_size, stat, &
-      unit_nr
+      method_name_id, my_group, nforce_eval, ngroups, nsubforce_size, unit_nr
     INTEGER, DIMENSION(:), POINTER           :: group_distribution, &
                                                 i_force_eval, &
                                                 lgroup_distribution
-    LOGICAL :: check, failure, multiple_subsys, my_echo, my_owns_out_unit, &
-      use_motion_section, use_multiple_para_env
-    TYPE(cp_error_type)                      :: error, my_error
-    TYPE(cp_logger_type), POINTER            :: logger
+    LOGICAL :: check, do_qmmm_force_mixing, multiple_subsys, my_echo, &
+      my_owns_out_unit, use_motion_section, use_multiple_para_env
+    TYPE(cp_logger_type), POINTER            :: logger, my_logger
     TYPE(cp_para_env_type), POINTER          :: my_para_env, para_env
     TYPE(eip_environment_type), POINTER      :: eip_env
     TYPE(enumeration_type), POINTER          :: enum
@@ -662,24 +582,24 @@ CONTAINS
     TYPE(meta_env_type), POINTER             :: meta_env
     TYPE(mixed_environment_type), POINTER    :: mixed_env
     TYPE(mp_perf_env_type), POINTER          :: mp_perf_env
+    TYPE(qmmm_env_type), POINTER             :: qmmm_env
+    TYPE(qmmmx_env_type), POINTER            :: qmmmx_env
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(section_type), POINTER              :: section
     TYPE(section_vals_type), POINTER :: fe_section, force_env_section, &
-      force_env_sections, fp_section, input_file, root_section, &
-      subsys_section, wrk_section
+      force_env_sections, fp_section, input_file, qmmm_section, &
+      qmmmx_section, root_section, subsys_section, wrk_section
     TYPE(timer_env_type), POINTER            :: timer_env
 
-    failure=.FALSE.
-
-    CPPrecondition(ASSOCIATED(input_declaration),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(input_declaration))
     NULLIFY(para_env, force_env,timer_env,mp_perf_env, globenv,meta_env,&
-            fp_env,eip_env,mixed_env,qs_env)
+            fp_env,eip_env,mixed_env,qs_env,qmmm_env)
     new_env_id=-1
     IF (PRESENT(mpi_comm)) THEN
-       CALL cp_para_env_create(para_env, group=mpi_comm, owns_group=.FALSE.,error=error)
+       CALL cp_para_env_create(para_env, group=mpi_comm, owns_group=.FALSE.)
     ELSE
        para_env => default_para_env
-       CALL cp_para_env_retain(para_env,error=error)
+       CALL cp_para_env_retain(para_env)
     END IF
 
     CALL timeset(routineN,handle)
@@ -714,236 +634,243 @@ CONTAINS
     END IF
     my_owns_out_unit=unit_nr/=default_output_unit
     IF (PRESENT(owns_out_unit)) my_owns_out_unit=owns_out_unit
-    CALL globenv_create(globenv,error=error)
+    CALL globenv_create(globenv)
     CALL cp2k_init(para_env, output_unit=unit_nr, globenv=globenv, input_file_name=input_path,&
                    wdir=wdir)
     logger => cp_get_default_logger()
     ! warning this is dangerous, I did not check that all the subfunctions
     ! support it, the program might crash upon error
-    CALL cp_error_init(error,logger=logger)
 
     NULLIFY(input_file)
     IF (PRESENT(input)) input_file => input
     IF (.NOT.ASSOCIATED(input_file)) THEN
        IF (PRESENT(initial_variables)) THEN
-         input_file => read_input(input_declaration, input_path,initial_variables,para_env=para_env,error=error)
+         input_file => read_input(input_declaration, input_path,initial_variables,para_env=para_env)
        ELSE
-         input_file => read_input(input_declaration, input_path,empty_initial_variables,para_env=para_env,error=error)
+         input_file => read_input(input_declaration, input_path,empty_initial_variables,para_env=para_env)
        ENDIF
     ELSE
-       CALL section_vals_retain(input_file,error=error)
+       CALL section_vals_retain(input_file)
     END IF
     CALL section_vals_val_get(input_file,"GLOBAL%ECHO_INPUT",&
-         l_val=my_echo,error=error)
+         l_val=my_echo)
     ! echo after check?
     IF (para_env%ionode.and.my_echo) THEN
        CALL section_vals_write(input_file,unit_nr=cp_logger_get_default_unit_nr(logger), &
-               hide_root=.TRUE., hide_defaults=.FALSE., error=error)
+               hide_root=.TRUE., hide_defaults=.FALSE.)
     END IF
     ! XXXXXXXXXXXXXXXXXXXXXXXXXXX
     ! root_section => input_file
     ! XXXXXXXXXXXXXXXXXXXXXXXXXXX
 
-    CALL check_cp2k_input(input_declaration,input_file,para_env=para_env,output_unit=unit_nr,error=error)
+    CALL check_cp2k_input(input_declaration,input_file,para_env=para_env,output_unit=unit_nr)
     ! XXXXXXXXXXXXXXXXXXXXXXXXXXX
     ! NULLIFY(input_file)
     ! XXXXXXXXXXXXXXXXXXXXXXXXXXX
     root_section => input_file
-    CALL section_vals_retain(root_section,error)
-    CALL cp_error_dealloc_ref(error)
-    CALL cp_error_init(error,logger=logger)
+    CALL section_vals_retain(root_section)
 
     IF (n_f_envs+1>SIZE(f_envs)) THEN
        f_envs_old => f_envs
-       ALLOCATE(f_envs(n_f_envs+10), stat=stat)
-       CPPostcondition(stat==0,cp_fatal_level,routineP,error,failure)
+       ALLOCATE(f_envs(n_f_envs+10))
        DO i=1,n_f_envs
           f_envs(i)%f_env => f_envs_old(i)%f_env
        END DO
        DO i=n_f_envs+1,SIZE(f_envs)
           NULLIFY(f_envs(i)%f_env)
        END DO
-       DEALLOCATE(f_envs_old,stat=stat)
-       CPPostcondition(stat==0,cp_fatal_level,routineP,error,failure)
+       DEALLOCATE(f_envs_old)
     END IF
 
-    IF (.NOT.failure) THEN
 
-       CALL cp2k_read(root_section,para_env,globenv,error=error)
+    CALL cp2k_read(root_section,para_env,globenv)
 
-       CALL cp2k_setup(root_section,para_env,globenv,error)
-       ! Group Distribution
-       ALLOCATE(group_distribution(0:para_env%num_pe-1),stat=stat)
-       CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
-       group_distribution  = 0
-       lgroup_distribution => group_distribution
-       ! Setup all possible force_env
-       force_env_sections => section_vals_get_subs_vals(root_section,"FORCE_EVAL",error=error)
-       CALL section_vals_val_get(root_section,"MULTIPLE_FORCE_EVALS%MULTIPLE_SUBSYS",&
-            l_val=multiple_subsys,error=error)
-       CALL multiple_fe_list(force_env_sections, root_section, i_force_eval, nforce_eval,&
-            error)
-       ! Enforce the deletion of the subsys (unless not explicitly required)
+    CALL cp2k_setup(root_section,para_env,globenv)
+    ! Group Distribution
+    ALLOCATE(group_distribution(0:para_env%num_pe-1))
+    group_distribution  = 0
+    lgroup_distribution => group_distribution
+    ! Setup all possible force_env
+    force_env_sections => section_vals_get_subs_vals(root_section,"FORCE_EVAL")
+    CALL section_vals_val_get(root_section,"MULTIPLE_FORCE_EVALS%MULTIPLE_SUBSYS",&
+         l_val=multiple_subsys)
+    CALL multiple_fe_list(force_env_sections, root_section, i_force_eval, nforce_eval)
+    ! Enforce the deletion of the subsys (unless not explicitly required)
+    IF (.NOT.multiple_subsys) THEN
+       DO iforce_eval = 2, nforce_eval
+          wrk_section => section_vals_get_subs_vals(force_env_sections,"SUBSYS",&
+               i_rep_section=i_force_eval(iforce_eval))
+          CALL section_vals_remove_values(wrk_section)
+       END DO
+    END IF
+    nsubforce_size        = nforce_eval-1
+    use_multiple_para_env = .FALSE.
+    use_motion_section    = .TRUE.
+    DO iforce_eval = 1, nforce_eval
+       NULLIFY(force_env_section, my_force_env, subsys_section)
+       ! Reference subsys from the first ordered force_eval
        IF (.NOT.multiple_subsys) THEN
-          DO iforce_eval = 2, nforce_eval
-             wrk_section => section_vals_get_subs_vals(force_env_sections,"SUBSYS",&
-                  i_rep_section=i_force_eval(iforce_eval),error=error)
-             CALL section_vals_remove_values(wrk_section, error=error)
-          END DO
+          subsys_section => section_vals_get_subs_vals(force_env_sections,"SUBSYS",&
+               i_rep_section=i_force_eval(1))
        END IF
-       nsubforce_size        = nforce_eval-1
-       use_multiple_para_env = .FALSE.
-       use_motion_section    = .TRUE.
-       DO iforce_eval = 1, nforce_eval
-          NULLIFY(force_env_section, my_force_env, subsys_section)
-          ! Reference subsys from the first ordered force_eval
-          IF (.NOT.multiple_subsys) THEN
-             subsys_section => section_vals_get_subs_vals(force_env_sections,"SUBSYS",&
-                  i_rep_section=i_force_eval(1),error=error)
-          END IF
-          ! Handling para_env in case of multiple force_eval
-          IF (use_multiple_para_env) THEN
-             ! Check that the order of the force_eval is the correct one
-             CALL section_vals_val_get(force_env_sections, "METHOD", i_val=method_name_id, &
-                  i_rep_section=i_force_eval(1), error=error)
-             CALL cp_assert(method_name_id==do_mixed,cp_failure_level,cp_assertion_failed,routineP,&
+       ! Handling para_env in case of multiple force_eval
+       IF (use_multiple_para_env) THEN
+          ! Check that the order of the force_eval is the correct one
+          CALL section_vals_val_get(force_env_sections, "METHOD", i_val=method_name_id, &
+               i_rep_section=i_force_eval(1))
+          IF(method_name_id/=do_mixed)&
+             CALL cp_abort(__LOCATION__,&
                   "In case of multiple force_eval the MAIN force_eval (the first in the list of FORCE_EVAL_ORDER or "//&
                   "the one omitted from that order list) must be a MIXED_ENV type calculation. Please check your "//&
-                  "input file and possibly correct the MULTIPLE_FORCE_EVAL%FORCE_EVAL_ORDER. "//&
-CPSourceFileRef,&
-                  only_ionode=.TRUE.)
-             check = ASSOCIATED(force_env%mixed_env%sub_para_env)
-             CPPrecondition(check,cp_failure_level,routineP,error,failure)
-             ngroups = force_env%mixed_env%ngroups
-             my_group= lgroup_distribution(para_env%mepos)
-             isubforce_eval = iforce_eval-1
-             ! If task not allocated on this procs skip setup..
-             IF (MODULO(isubforce_eval-1,ngroups)/=my_group) CYCLE
-             my_para_env => force_env%mixed_env%sub_para_env(my_group+1)%para_env
-             my_error = force_env%mixed_env%sub_error(my_group+1)
-          ELSE
-             my_para_env => para_env
-             my_error = error
-          END IF
+                  "input file and possibly correct the MULTIPLE_FORCE_EVAL%FORCE_EVAL_ORDER. ")
+          check = ASSOCIATED(force_env%mixed_env%sub_para_env)
+          CPASSERT(check)
+          ngroups = force_env%mixed_env%ngroups
+          my_group= lgroup_distribution(para_env%mepos)
+          isubforce_eval = iforce_eval-1
+          ! If task not allocated on this procs skip setup..
+          IF (MODULO(isubforce_eval-1,ngroups)/=my_group) CYCLE
+          my_para_env => force_env%mixed_env%sub_para_env(my_group+1)%para_env
+          my_logger => force_env%mixed_env%sub_logger(my_group+1)%p
+          CALL cp_rm_default_logger()
+          CALL cp_add_default_logger(my_logger)
+       ELSE
+          my_para_env => para_env
+       END IF
 
-          ! Initialize force_env_section
-          ! No need to allocate one more force_env_section if only 1 force_eval
-          ! is provided.. this is in order to save memory..
-          IF (nforce_eval>1) THEN
-             CALL section_vals_duplicate(force_env_sections,force_env_section,&
-                  i_force_eval(iforce_eval),i_force_eval(iforce_eval),my_error)
-             IF (iforce_eval/=1) use_motion_section = .FALSE.
-          ELSE
-             force_env_section => force_env_sections
-             use_motion_section = .TRUE.
-          END IF
-          CALL section_vals_val_get(force_env_section,"METHOD",i_val=method_name_id,error=my_error)
+       ! Initialize force_env_section
+       ! No need to allocate one more force_env_section if only 1 force_eval
+       ! is provided.. this is in order to save memory..
+       IF (nforce_eval>1) THEN
+          CALL section_vals_duplicate(force_env_sections,force_env_section,&
+               i_force_eval(iforce_eval),i_force_eval(iforce_eval))
+          IF (iforce_eval/=1) use_motion_section = .FALSE.
+       ELSE
+          force_env_section => force_env_sections
+          use_motion_section = .TRUE.
+       END IF
+       CALL section_vals_val_get(force_env_section,"METHOD",i_val=method_name_id)
 
-          SELECT CASE (method_name_id)
-          CASE (do_fist)
-             CALL fist_create_force_env ( my_force_env, root_section, my_para_env, globenv,&
-                  force_env_section=force_env_section, subsys_section=subsys_section,&
-                  use_motion_section=use_motion_section, error=my_error )
-          CASE (do_qs)
-             CALL qs_env_create(qs_env,globenv,error=my_error)
-             CALL qs_init(qs_env, my_para_env, globenv, root_section, force_env_section=force_env_section,&
-                  subsys_section=subsys_section, use_motion_section=use_motion_section, error=my_error)
-             CALL force_env_create(my_force_env, root_section, qs_env=qs_env, para_env=my_para_env, globenv=globenv,&
-                  force_env_section=force_env_section,error=my_error)
-             CALL qs_env_release(qs_env,error=my_error)
+       IF(method_name_id==do_qmmm) THEN
+          qmmmx_section => section_vals_get_subs_vals(force_env_section,"QMMM%FORCE_MIXING")
+          CALL section_vals_get(qmmmx_section,explicit=do_qmmm_force_mixing)
+          IF(do_qmmm_force_mixing)&
+             method_name_id = do_qmmmx ! QMMM Force-Mixing has its own (hidden) method_id
+       ENDIF
 
-          CASE (do_qmmm)
-             CALL qmmm_create_force_env( my_force_env, root_section, my_para_env, globenv,&
-                  force_env_section=force_env_section, subsys_section=subsys_section,&
-                  use_motion_section=use_motion_section, error=my_error)
+       SELECT CASE (method_name_id)
+       CASE (do_fist)
+          CALL fist_create_force_env ( my_force_env, root_section, my_para_env, globenv,&
+               force_env_section=force_env_section, subsys_section=subsys_section,&
+               use_motion_section=use_motion_section)
 
-          CASE (do_eip)
-             CALL eip_env_create(eip_env, error=my_error)
-             CALL eip_init(eip_env, root_section, my_para_env, force_env_section=force_env_section,&
-                  subsys_section=subsys_section, use_motion_section=use_motion_section, error=my_error)
-             CALL force_env_create(my_force_env, root_section, eip_env=eip_env, para_env=my_para_env,&
-                  globenv=globenv, force_env_section=force_env_section, error=my_error)
-             CALL eip_env_release(eip_env, error=my_error)
+       CASE (do_qs)
+          CALL qs_env_create(qs_env,globenv)
+          CALL qs_init(qs_env, my_para_env, globenv, root_section, force_env_section=force_env_section,&
+               subsys_section=subsys_section, use_motion_section=use_motion_section)
+          CALL force_env_create(my_force_env, root_section, qs_env=qs_env, para_env=my_para_env, globenv=globenv,&
+               force_env_section=force_env_section)
+          CALL qs_env_release(qs_env)
 
-          CASE (do_mixed)
-             CALL mixed_create_force_env(mixed_env, root_section, my_para_env,&
-                  force_env_section=force_env_section, n_subforce_eval=nsubforce_size,&
-                  use_motion_section=use_motion_section, error=my_error)
-             CALL force_env_create(my_force_env, root_section, mixed_env=mixed_env, para_env=my_para_env,&
-                  globenv=globenv, force_env_section=force_env_section, error=my_error)
-             CALL mixed_env_release(mixed_env, error=my_error)
-             use_multiple_para_env = .TRUE.
-             lgroup_distribution => my_force_env%mixed_env%group_distribution
+       CASE (do_qmmm)
+          qmmm_section => section_vals_get_subs_vals(force_env_section,"QMMM")
+          CALL qmmm_env_create(qmmm_env, root_section, para_env, globenv,&
+               force_env_section, qmmm_section, subsys_section, use_motion_section)
+          CALL force_env_create(my_force_env,root_section, qmmm_env=qmmm_env, para_env=para_env,&
+               globenv=globenv, force_env_section=force_env_section)
+          CALL qmmm_env_release(qmmm_env)
 
-          CASE default
-             CALL create_force_eval_section(section,error)
-             keyword => section_get_keyword(section,"METHOD",error=error)
-             CALL keyword_get(keyword,enum=enum,error=error)
-             CALL cp_assert(.FALSE.,cp_failure_level,cp_assertion_failed,routineP,&
-                  "Invalid METHOD <"//TRIM(enum_i2c(enum,method_name_id,error=error))//&
-               "> was specified, "//&
-CPSourceFileRef,&
-               my_error,failure)
-             CALL section_release(section,error=error)
-          END SELECT
+       CASE (do_qmmmx)
+          CALL qmmmx_env_create(qmmmx_env, root_section, para_env, globenv,&
+               force_env_section, subsys_section, use_motion_section)
+          CALL force_env_create(my_force_env,root_section, qmmmx_env=qmmmx_env, para_env=para_env,&
+               globenv=globenv, force_env_section=force_env_section)
+          CALL qmmmx_env_release(qmmmx_env)
 
-          NULLIFY(meta_env, fp_env)
-          IF (use_motion_section) THEN
-             ! Metadynamics Setup
-             fe_section => section_vals_get_subs_vals(root_section,"MOTION%FREE_ENERGY",error=my_error)
-             CALL metadyn_read(meta_env, my_force_env, root_section, my_para_env, fe_section,&
-                               error=my_error)
-             CALL force_env_set(my_force_env,meta_env=meta_env,error=my_error)
-             CALL meta_env_release(meta_env,error=my_error)
-             ! Flexible Partition Setup
-             fp_section => section_vals_get_subs_vals(root_section,"MOTION%FLEXIBLE_PARTITIONING",error=my_error)
-             CALL fp_env_create(fp_env,error=my_error)
-             CALL fp_env_read(fp_env,fp_section,error=my_error)
-             CALL fp_env_write(fp_env,fp_section,error=my_error)
-             CALL force_env_set(my_force_env,fp_env=fp_env,error=my_error)
-             CALL fp_env_release(fp_env,error=my_error)
-          END IF
-          ! Handle multiple force_eval
-          IF (nforce_eval>1.AND.iforce_eval==1) THEN
-             ALLOCATE(my_force_env%sub_force_env(nsubforce_size),stat=stat)
-             CPPrecondition(stat==0,cp_failure_level,routineP,my_error,failure)
-             ! Nullify subforce_env
-             DO k = 1,nsubforce_size
-                NULLIFY(my_force_env%sub_force_env(k)%force_env)
-             END DO
-          END IF
-          ! Reference the right force_env
-          IF (iforce_eval==1) THEN
-             force_env => my_force_env
-          ELSE
-             force_env%sub_force_env(iforce_eval-1)%force_env => my_force_env
-          END IF
-          ! Multiple para env for sub_force_eval
-          IF (.NOT.use_multiple_para_env) THEN
-             lgroup_distribution = iforce_eval
-          END IF
-          ! Release force_env_section
-          IF (nforce_eval>1) CALL section_vals_release(force_env_section,my_error)
-       END DO
-       DEALLOCATE(group_distribution,stat=stat)
-       CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
-       DEALLOCATE(i_force_eval,stat=stat)
-       CPPostcondition(stat==0,cp_fatal_level,routineP,error,failure)
-    END IF
+       CASE (do_eip)
+          CALL eip_env_create(eip_env)
+          CALL eip_init(eip_env, root_section, my_para_env, force_env_section=force_env_section,&
+               subsys_section=subsys_section)
+          CALL force_env_create(my_force_env, root_section, eip_env=eip_env, para_env=my_para_env,&
+               globenv=globenv, force_env_section=force_env_section)
+          CALL eip_env_release(eip_env)
+
+       CASE (do_mixed)
+          CALL mixed_create_force_env(mixed_env, root_section, my_para_env,&
+               force_env_section=force_env_section, n_subforce_eval=nsubforce_size,&
+               use_motion_section=use_motion_section)
+          CALL force_env_create(my_force_env, root_section, mixed_env=mixed_env, para_env=my_para_env,&
+               globenv=globenv, force_env_section=force_env_section)
+          CALL mixed_env_release(mixed_env)
+          !TODO: the sub_force_envs should really be created via recursion
+          use_multiple_para_env = .TRUE.
+          CALL cp_add_default_logger(logger) ! just to get the logger swapping started
+          lgroup_distribution => my_force_env%mixed_env%group_distribution
+
+       CASE default
+          CALL create_force_eval_section(section)
+          keyword => section_get_keyword(section,"METHOD")
+          CALL keyword_get(keyword,enum=enum)
+          CALL cp_abort(__LOCATION__,&
+               "Invalid METHOD <"//TRIM(enum_i2c(enum,method_name_id))//&
+               "> was specified, ")
+          CALL section_release(section)
+       END SELECT
+
+       NULLIFY(meta_env, fp_env)
+       IF (use_motion_section) THEN
+          ! Metadynamics Setup
+          fe_section => section_vals_get_subs_vals(root_section,"MOTION%FREE_ENERGY")
+          CALL metadyn_read(meta_env, my_force_env, root_section, my_para_env, fe_section)
+          CALL force_env_set(my_force_env,meta_env=meta_env)
+          CALL meta_env_release(meta_env)
+          ! Flexible Partition Setup
+          fp_section => section_vals_get_subs_vals(root_section,"MOTION%FLEXIBLE_PARTITIONING")
+          CALL fp_env_create(fp_env)
+          CALL fp_env_read(fp_env,fp_section)
+          CALL fp_env_write(fp_env,fp_section)
+          CALL force_env_set(my_force_env,fp_env=fp_env)
+          CALL fp_env_release(fp_env)
+       END IF
+       ! Handle multiple force_eval
+       IF (nforce_eval>1.AND.iforce_eval==1) THEN
+          ALLOCATE(my_force_env%sub_force_env(nsubforce_size))
+          ! Nullify subforce_env
+          DO k = 1,nsubforce_size
+             NULLIFY(my_force_env%sub_force_env(k)%force_env)
+          END DO
+       END IF
+       ! Reference the right force_env
+       IF (iforce_eval==1) THEN
+          force_env => my_force_env
+       ELSE
+          force_env%sub_force_env(iforce_eval-1)%force_env => my_force_env
+       END IF
+       ! Multiple para env for sub_force_eval
+       IF (.NOT.use_multiple_para_env) THEN
+          lgroup_distribution = iforce_eval
+       END IF
+       ! Release force_env_section
+       IF (nforce_eval>1) CALL section_vals_release(force_env_section)
+    END DO
+    IF (use_multiple_para_env)&
+       CALL cp_rm_default_logger()
+    DEALLOCATE(group_distribution)
+    DEALLOCATE(i_force_eval)
     timer_env => get_timer_env()
     mp_perf_env => get_mp_perf_env()
     CALL mp_max(last_f_env_id,para_env%group)
     last_f_env_id=last_f_env_id+1
     new_env_id=last_f_env_id
     n_f_envs=n_f_envs+1
-    CALL f_env_create(f_envs(n_f_envs)%f_env,template_error=error,&
+    CALL f_env_create(f_envs(n_f_envs)%f_env,logger=logger,&
          timer_env=timer_env,mp_perf_env=mp_perf_env,force_env=force_env,&
-         id_nr=last_f_env_id,error=error,old_dir=old_dir)
-    CALL force_env_release(force_env,error=error)
-    CALL globenv_release(globenv,error=error)
-    CALL section_vals_release(root_section,error)
-    CALL cp_para_env_release(para_env,error=error)
-    CALL f_env_rm_defaults(f_envs(n_f_envs)%f_env,error=error,ierr=ierr)
+         id_nr=last_f_env_id,old_dir=old_dir)
+    CALL force_env_release(force_env)
+    CALL globenv_release(globenv)
+    CALL section_vals_release(root_section)
+    CALL cp_para_env_release(para_env)
+    CALL f_env_rm_defaults(f_envs(n_f_envs)%f_env,ierr=ierr)
     CALL timestop(handle)
 
   END SUBROUTINE create_force_env
@@ -967,17 +894,16 @@ CPSourceFileRef,&
     CHARACTER(len=*), PARAMETER :: routineN = 'destroy_force_env', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: env_pos, i, stat
+    INTEGER                                  :: env_pos, i
     LOGICAL                                  :: failure
-    TYPE(cp_error_type)                      :: error
     TYPE(cp_para_env_type), POINTER          :: para_env
     TYPE(f_env_type), POINTER                :: f_env
     TYPE(global_environment_type), POINTER   :: globenv
     TYPE(section_vals_type), POINTER         :: root_section
 
-    failure=.FALSE.
+    failure = .FALSE.
     NULLIFY(f_env)
-    CALL f_env_add_defaults(env_id,f_env,error,failure)
+    CALL f_env_add_defaults(env_id,f_env,failure)
     env_pos=get_pos_of_env(env_id)
     n_f_envs=n_f_envs-1
     DO i=env_pos,n_f_envs
@@ -986,18 +912,16 @@ CPSourceFileRef,&
     NULLIFY(f_envs(n_f_envs+1)%f_env)
 
     CALL force_env_get(f_env%force_env,globenv=globenv,&
-         root_section=root_section,para_env=para_env,error=error)
-    CPPrecondition(ASSOCIATED(globenv),cp_failure_level,routineP,error,failure)
-    CALL globenv_retain(globenv,error=error)
-    CALL f_env_dealloc(f_env,error=error)
-    CALL cp2k_finalize(root_section,para_env,globenv,f_env%old_path,error)
-    CALL section_vals_release(root_section,error=error)
-    CALL globenv_release(globenv,error=error)
+         root_section=root_section,para_env=para_env)
 
-    DEALLOCATE(f_env,stat=stat)
-    CPPostcondition(stat==0,cp_warning_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(globenv))
+    CALL globenv_retain(globenv)
+    CALL f_env_dealloc(f_env)
+    CALL cp2k_finalize(root_section,para_env,globenv,f_env%old_path)
+    CALL section_vals_release(root_section)
+    CALL globenv_release(globenv)
+    DEALLOCATE(f_env)
     ierr=0
-    CALL cp_error_dealloc_ref(error)
   END SUBROUTINE destroy_force_env
 
 ! *****************************************************************************
@@ -1017,17 +941,14 @@ CPSourceFileRef,&
       routineP = moduleN//':'//routineN
 
     LOGICAL                                  :: failure
-    TYPE(cp_error_type)                      :: error
     TYPE(f_env_type), POINTER                :: f_env
 
     failure = .FALSE.
     n_atom = 0
     NULLIFY (f_env)
-    CALL f_env_add_defaults(env_id,f_env,error,failure)
-    IF (.NOT.failure) THEN
-       n_atom = force_env_get_natom(f_env%force_env,error=error)
-    END IF
-    CALL f_env_rm_defaults(f_env,error,ierr)
+    CALL f_env_add_defaults(env_id,f_env,failure)
+    n_atom = force_env_get_natom(f_env%force_env)
+    CALL f_env_rm_defaults(f_env,ierr)
 
   END SUBROUTINE get_natom
 
@@ -1048,17 +969,14 @@ CPSourceFileRef,&
       routineP = moduleN//':'//routineN
 
     LOGICAL                                  :: failure
-    TYPE(cp_error_type)                      :: error
     TYPE(f_env_type), POINTER                :: f_env
 
     failure = .FALSE.
     n_particle = 0
     NULLIFY (f_env)
-    CALL f_env_add_defaults(env_id,f_env,error,failure)
-    IF (.NOT.failure) THEN
-       n_particle = force_env_get_nparticle(f_env%force_env,error=error)
-    END IF
-    CALL f_env_rm_defaults(f_env,error,ierr)
+    CALL f_env_add_defaults(env_id,f_env,failure)
+    n_particle = force_env_get_nparticle(f_env%force_env)
+    CALL f_env_rm_defaults(f_env,ierr)
 
   END SUBROUTINE get_nparticle
 
@@ -1082,18 +1000,17 @@ CPSourceFileRef,&
 
     LOGICAL                                  :: failure
     TYPE(cell_type), POINTER                 :: cell_full
-    TYPE(cp_error_type)                      :: error
     TYPE(f_env_type), POINTER                :: f_env
 
     failure = .FALSE.
     NULLIFY (f_env)
-    CALL f_env_add_defaults(env_id,f_env,error,failure)
+    CALL f_env_add_defaults(env_id,f_env,failure)
     NULLIFY (cell_full)
-    CALL force_env_get(f_env%force_env,cell=cell_full,error=error)
-    CPPrecondition(ASSOCIATED(cell_full),cp_failure_level,routineP,error,failure)
+    CALL force_env_get(f_env%force_env,cell=cell_full)
+    CPASSERT(ASSOCIATED(cell_full))
     cell = cell_full%hmat
     IF(PRESENT(per)) per(:) = cell_full%perd(:)
-    CALL f_env_rm_defaults(f_env,error,ierr)
+    CALL f_env_rm_defaults(f_env,ierr)
 
   END SUBROUTINE get_cell
 
@@ -1118,33 +1035,30 @@ CPSourceFileRef,&
 
     INTEGER                                  :: nres
     LOGICAL                                  :: exist_res, failure
-    TYPE(cp_error_type)                      :: error
     TYPE(cp_result_type), POINTER            :: results
     TYPE(cp_subsys_type), POINTER            :: subsys
     TYPE(f_env_type), POINTER                :: f_env
 
     failure = .FALSE.
     NULLIFY (f_env, subsys, results)
-    CALL f_env_add_defaults(env_id,f_env,error,failure)
+    CALL f_env_add_defaults(env_id,f_env,failure)
 
-    IF (.NOT. failure) THEN
-      CALL force_env_get(f_env%force_env, subsys=subsys, error=error)
-      CALL cp_subsys_get(subsys, results=results, error=error)
-      ! first test for the result
-      IF(PRESENT(res_exist)) THEN
-        res_exist = test_for_result(results, description=description, error=error)
-        exist_res = res_exist
-      ELSE
-        exist_res = .TRUE.
-      END IF
-      ! if existing (or assuming the existance) read the results
-      IF(res_exist) THEN
-        CALL get_results(results, description=description, n_rep=nres,error=error)
-        CALL get_results(results, description=description, values=RESULT, nval=nres,error=error)
-      END IF
-    ENDIF
+    CALL force_env_get(f_env%force_env, subsys=subsys)
+    CALL cp_subsys_get(subsys, results=results)
+    ! first test for the result
+    IF(PRESENT(res_exist)) THEN
+      res_exist = test_for_result(results, description=description)
+      exist_res = res_exist
+    ELSE
+      exist_res = .TRUE.
+    END IF
+    ! if existing (or assuming the existance) read the results
+    IF(res_exist) THEN
+      CALL get_results(results, description=description, n_rep=nres)
+      CALL get_results(results, description=description, values=RESULT, nval=nres)
+    END IF
 
-    CALL f_env_rm_defaults(f_env,error,ierr)
+    CALL f_env_rm_defaults(f_env,ierr)
 
   END SUBROUTINE get_result_r1
 
@@ -1167,16 +1081,13 @@ CPSourceFileRef,&
       routineP = moduleN//':'//routineN
 
     LOGICAL                                  :: failure
-    TYPE(cp_error_type)                      :: error
     TYPE(f_env_type), POINTER                :: f_env
 
     failure = .FALSE.
     NULLIFY (f_env)
-    CALL f_env_add_defaults(env_id,f_env,error,failure)
-    IF (.NOT.failure) THEN
-       CALL force_env_get_frc(f_env%force_env,frc,n_el,error)
-    END IF
-    CALL f_env_rm_defaults(f_env,error,ierr)
+    CALL f_env_add_defaults(env_id,f_env,failure)
+    CALL force_env_get_frc(f_env%force_env,frc,n_el)
+    CALL f_env_rm_defaults(f_env,ierr)
 
   END SUBROUTINE get_force
 
@@ -1199,7 +1110,6 @@ CPSourceFileRef,&
 
     LOGICAL                                  :: failure
     TYPE(cell_type), POINTER                 :: cell
-    TYPE(cp_error_type)                      :: error
     TYPE(cp_subsys_type), POINTER            :: subsys
     TYPE(f_env_type), POINTER                :: f_env
     TYPE(virial_type), POINTER               :: virial
@@ -1208,15 +1118,13 @@ CPSourceFileRef,&
     NULLIFY (f_env, subsys, virial, cell)
     stress_tensor(:,:) = 0.0_dp
 
-    CALL f_env_add_defaults(env_id,f_env,error,failure)
-    IF (.NOT.failure) THEN
-       CALL force_env_get(f_env%force_env, subsys=subsys, cell=cell, error=error)
-       CALL cp_subsys_get(subsys, virial=virial, error=error)
-       IF(virial%pv_availability) THEN
-          stress_tensor(:,:) = virial%pv_virial(:,:)/cell%deth
-       ENDIF
-    END IF
-    CALL f_env_rm_defaults(f_env,error,ierr)
+    CALL f_env_add_defaults(env_id,f_env,failure)
+    CALL force_env_get(f_env%force_env, subsys=subsys, cell=cell)
+    CALL cp_subsys_get(subsys, virial=virial)
+    IF(virial%pv_availability) THEN
+       stress_tensor(:,:) = virial%pv_virial(:,:)/cell%deth
+    ENDIF
+    CALL f_env_rm_defaults(f_env,ierr)
 
   END SUBROUTINE get_stress_tensor
 
@@ -1239,16 +1147,13 @@ CPSourceFileRef,&
       routineP = moduleN//':'//routineN
 
     LOGICAL                                  :: failure
-    TYPE(cp_error_type)                      :: error
     TYPE(f_env_type), POINTER                :: f_env
 
     failure = .FALSE.
     NULLIFY (f_env)
-    CALL f_env_add_defaults(env_id,f_env,error,failure)
-    IF (.NOT.failure) THEN
-       CALL force_env_get_pos(f_env%force_env,pos,n_el,error)
-    END IF
-    CALL f_env_rm_defaults(f_env,error,ierr)
+    CALL f_env_add_defaults(env_id,f_env,failure)
+    CALL force_env_get_pos(f_env%force_env,pos,n_el)
+    CALL f_env_rm_defaults(f_env,ierr)
 
   END SUBROUTINE get_pos
 
@@ -1271,16 +1176,13 @@ CPSourceFileRef,&
       routineP = moduleN//':'//routineN
 
     LOGICAL                                  :: failure
-    TYPE(cp_error_type)                      :: error
     TYPE(f_env_type), POINTER                :: f_env
 
     failure = .FALSE.
     NULLIFY (f_env)
-    CALL f_env_add_defaults(env_id,f_env,error,failure)
-    IF (.NOT.failure) THEN
-       CALL force_env_get_vel(f_env%force_env,vel,n_el,error)
-    END IF
-    CALL f_env_rm_defaults(f_env,error,ierr)
+    CALL f_env_add_defaults(env_id,f_env,failure)
+    CALL force_env_get_vel(f_env%force_env,vel,n_el)
+    CALL f_env_rm_defaults(f_env,ierr)
 
   END SUBROUTINE get_vel
 
@@ -1302,21 +1204,20 @@ CPSourceFileRef,&
 
     LOGICAL                                  :: failure
     TYPE(cell_type), POINTER                 :: cell
-    TYPE(cp_error_type)                      :: error
     TYPE(cp_subsys_type), POINTER            :: subsys
     TYPE(f_env_type), POINTER                :: f_env
 
     failure = .FALSE.
     NULLIFY (f_env, cell, subsys)
-    CALL f_env_add_defaults(env_id,f_env,error,failure)
+    CALL f_env_add_defaults(env_id,f_env,failure)
     NULLIFY (cell)
-    CALL force_env_get(f_env%force_env,cell=cell,error=error)
-    CPPrecondition(ASSOCIATED(cell),cp_failure_level,routineP,error,failure)
+    CALL force_env_get(f_env%force_env,cell=cell)
+    CPASSERT(ASSOCIATED(cell))
     cell%hmat = new_cell
     CALL init_cell(cell)
-    CALL force_env_get(f_env%force_env, subsys=subsys, error=error)
-    CALL cp_subsys_set(subsys, cell=cell, error=error)
-    CALL f_env_rm_defaults(f_env,error,ierr)
+    CALL force_env_get(f_env%force_env, subsys=subsys)
+    CALL cp_subsys_set(subsys, cell=cell)
+    CALL f_env_rm_defaults(f_env,ierr)
 
   END SUBROUTINE set_cell
 
@@ -1339,17 +1240,16 @@ CPSourceFileRef,&
       routineP = moduleN//':'//routineN
 
     LOGICAL                                  :: failure
-    TYPE(cp_error_type)                      :: error
     TYPE(cp_subsys_type), POINTER            :: subsys
     TYPE(f_env_type), POINTER                :: f_env
 
     failure = .FALSE.
     NULLIFY (f_env)
-    CALL f_env_add_defaults(env_id,f_env,error,failure)
+    CALL f_env_add_defaults(env_id,f_env,failure)
     NULLIFY (subsys)
-    CALL force_env_get(f_env%force_env,subsys=subsys,error=error)
-    CALL unpack_subsys_particles(subsys=subsys,r=new_pos,error=error)
-    CALL f_env_rm_defaults(f_env,error,ierr)
+    CALL force_env_get(f_env%force_env,subsys=subsys)
+    CALL unpack_subsys_particles(subsys=subsys,r=new_pos)
+    CALL f_env_rm_defaults(f_env,ierr)
 
   END SUBROUTINE set_pos
 
@@ -1372,17 +1272,16 @@ CPSourceFileRef,&
       routineP = moduleN//':'//routineN
 
     LOGICAL                                  :: failure
-    TYPE(cp_error_type)                      :: error
     TYPE(cp_subsys_type), POINTER            :: subsys
     TYPE(f_env_type), POINTER                :: f_env
 
     failure = .FALSE.
     NULLIFY (f_env)
-    CALL f_env_add_defaults(env_id,f_env,error,failure)
+    CALL f_env_add_defaults(env_id,f_env,failure)
     NULLIFY (subsys)
-    CALL force_env_get(f_env%force_env,subsys=subsys,error=error)
-    CALL unpack_subsys_particles(subsys=subsys,v=new_vel,error=error)
-    CALL f_env_rm_defaults(f_env,error,ierr)
+    CALL force_env_get(f_env%force_env,subsys=subsys)
+    CALL unpack_subsys_particles(subsys=subsys,v=new_vel)
+    CALL f_env_rm_defaults(f_env,ierr)
 
   END SUBROUTINE set_vel
 
@@ -1404,19 +1303,16 @@ CPSourceFileRef,&
       routineP = moduleN//':'//routineN
 
     LOGICAL                                  :: failure
-    TYPE(cp_error_type)                      :: error
     TYPE(cp_logger_type), POINTER            :: logger
     TYPE(f_env_type), POINTER                :: f_env
 
     failure = .FALSE.
     NULLIFY (f_env)
-    CALL f_env_add_defaults(env_id,f_env,error,failure)
-    IF (.NOT.failure) THEN
-       logger => cp_error_get_logger(error)
-       CALL cp_iterate(logger%iter_info,error=error) ! add one to the iteration count
-       CALL force_env_calc_energy_force(f_env%force_env,calc_force=calc_force,error=error)
-    END IF
-    CALL f_env_rm_defaults(f_env,error,ierr)
+    CALL f_env_add_defaults(env_id,f_env,failure)
+    logger => cp_get_default_logger()
+    CALL cp_iterate(logger%iter_info) ! add one to the iteration count
+    CALL force_env_calc_energy_force(f_env%force_env,calc_force=calc_force)
+    CALL f_env_rm_defaults(f_env,ierr)
 
   END SUBROUTINE calc_energy_force
 
@@ -1437,16 +1333,13 @@ CPSourceFileRef,&
       routineP = moduleN//':'//routineN
 
     LOGICAL                                  :: failure
-    TYPE(cp_error_type)                      :: error
     TYPE(f_env_type), POINTER                :: f_env
 
     failure = .FALSE.
     NULLIFY (f_env)
-    CALL f_env_add_defaults(env_id,f_env,error,failure)
-    IF (.NOT.failure) THEN
-       CALL force_env_get(f_env%force_env,potential_energy=e_pot,error=error)
-    END IF
-    CALL f_env_rm_defaults(f_env,error,ierr)
+    CALL f_env_add_defaults(env_id,f_env,failure)
+    CALL force_env_get(f_env%force_env,potential_energy=e_pot)
+    CALL f_env_rm_defaults(f_env,ierr)
 
   END SUBROUTINE get_energy
 
@@ -1540,22 +1433,20 @@ CPSourceFileRef,&
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: unit_nr
-    LOGICAL                                  :: failure, my_echo_input
-    TYPE(cp_error_type)                      :: error
+    LOGICAL                                  :: my_echo_input
     TYPE(cp_logger_type), POINTER            :: logger
     TYPE(cp_para_env_type), POINTER          :: para_env
     TYPE(section_vals_type), POINTER         :: input_file
 
-    failure=.FALSE.
     my_echo_input=.FALSE.
     IF (PRESENT(echo_input)) my_echo_input=echo_input
 
     IF (PRESENT(mpi_comm)) THEN
        NULLIFY(para_env)
-       CALL cp_para_env_create(para_env, group=mpi_comm,error=error)
+       CALL cp_para_env_create(para_env, group=mpi_comm)
     ELSE
        para_env => default_para_env
-       CALL cp_para_env_retain(para_env,error=error)
+       CALL cp_para_env_retain(para_env)
     END IF
     IF (para_env%mepos==para_env%source) THEN
        IF (output_file_path=="__STD_OUT__") THEN
@@ -1575,22 +1466,20 @@ CPSourceFileRef,&
          close_global_unit_on_dealloc=.FALSE.)
     CALL cp_add_default_logger(logger)
     CALL cp_logger_release(logger)
-    CALL cp_error_init(error,logger=logger)
 
     input_file => read_input(input_declaration, input_file_path,initial_variables=empty_initial_variables, &
-                                            para_env=para_env,error=error)
-    CALL check_cp2k_input(input_declaration,input_file,para_env=para_env,output_unit=unit_nr,error=error)
+                                            para_env=para_env)
+    CALL check_cp2k_input(input_declaration,input_file,para_env=para_env,output_unit=unit_nr)
     IF (my_echo_input.AND.para_env%mepos==para_env%source) THEN
        CALL section_vals_write(input_file,&
             unit_nr=cp_logger_get_default_unit_nr(logger,local=.FALSE.),hide_root=.TRUE.,&
-            hide_defaults=.FALSE.,error=error)
+            hide_defaults=.FALSE.)
     END IF
-    CALL section_vals_release(input_file,error=error)
+    CALL section_vals_release(input_file)
 
     CALL cp_logger_release(logger)
-    CALL cp_para_env_release(para_env,error=error)
+    CALL cp_para_env_release(para_env)
     ierr = 0
-    CALL cp_error_dealloc_ref(error)
     CALL cp_rm_default_logger()
   END SUBROUTINE check_input
 
@@ -1611,18 +1500,14 @@ CPSourceFileRef,&
       routineP = moduleN//':'//routineN
 
     LOGICAL                                  :: failure
-    TYPE(cp_error_type)                      :: error
     TYPE(f_env_type), POINTER                :: f_env
 
-    failure=.FALSE.
-
+    failure = .FALSE.
     NULLIFY(f_env)
-    CALL f_env_add_defaults(f_env_id,f_env,error,failure)
-    IF (.NOT.failure) THEN
-       CALL force_env_shake(f_env%force_env,&
-            dt=dt,shake_tol=shake_tol, error=error)
-    END IF
-    CALL f_env_rm_defaults(f_env,error,ierr)
+    CALL f_env_add_defaults(f_env_id,f_env,failure)
+    CALL force_env_shake(f_env%force_env,&
+         dt=dt,shake_tol=shake_tol)
+    CALL f_env_rm_defaults(f_env,ierr)
   END SUBROUTINE do_shake
 
 END MODULE f77_interface

@@ -38,10 +38,8 @@ MODULE molecule_kind_types
   USE kinds,                           ONLY: default_string_length,&
                                              dp
   USE shell_potential_types,           ONLY: shell_kind_type
-  USE termination,                     ONLY: stop_program
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -233,21 +231,17 @@ CONTAINS
 !> \brief ...
 !> \param colv_list ...
 !> \param ncolv ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE setup_colvar_counters(colv_list, ncolv,error)
+  SUBROUTINE setup_colvar_counters(colv_list, ncolv)
     TYPE(colvar_constraint_type), &
       DIMENSION(:), POINTER                  :: colv_list
     TYPE(colvar_counters)                    :: ncolv
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'setup_colvar_counters', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: k
-    LOGICAL                                  :: failure
 
-    failure=.FALSE.
     ncolv%ndist          = 0
     ncolv%nangle         = 0
     ncolv%ndfunct        = 0
@@ -303,7 +297,7 @@ CONTAINS
           CASE(combine_colvar_id)
              ncolv%ncombinecvs = ncolv%ncombinecvs + 1
           CASE DEFAULT
-             CPPrecondition(.FALSE.,cp_failure_level,routineP,error,failure)
+             CPABORT("")
           END SELECT
        END DO
     END IF
@@ -331,30 +325,25 @@ CONTAINS
 !> \brief   Allocate and initialize a molecule kind set.
 !> \param molecule_kind_set ...
 !> \param nmolecule_kind ...
-!> \param error ...
 !> \date    22.08.2003
 !> \author  MK
 !> \version 1.0
 ! *****************************************************************************
-  SUBROUTINE allocate_molecule_kind_set(molecule_kind_set,nmolecule_kind,error)
+  SUBROUTINE allocate_molecule_kind_set(molecule_kind_set,nmolecule_kind)
     TYPE(molecule_kind_type), DIMENSION(:), &
       POINTER                                :: molecule_kind_set
     INTEGER, INTENT(IN)                      :: nmolecule_kind
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'allocate_molecule_kind_set', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: imolecule_kind, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: imolecule_kind
 
-    failure = .FALSE.
     IF (ASSOCIATED(molecule_kind_set)) THEN
-      CALL deallocate_molecule_kind_set(molecule_kind_set,error=error)
+      CALL deallocate_molecule_kind_set(molecule_kind_set)
     END IF
 
-    ALLOCATE (molecule_kind_set(nmolecule_kind),STAT=stat)
-    CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (molecule_kind_set(nmolecule_kind))
 
     DO imolecule_kind=1,nmolecule_kind
       NULLIFY (molecule_kind_set(imolecule_kind)%atom_list)
@@ -388,7 +377,7 @@ CONTAINS
       molecule_kind_set(imolecule_kind)%nopbend = 0
       molecule_kind_set(imolecule_kind)%nub = 0
       CALL setup_colvar_counters(molecule_kind_set(imolecule_kind)%colv_list,&
-        molecule_kind_set(imolecule_kind)%ncolv,error)
+        molecule_kind_set(imolecule_kind)%ncolv)
       molecule_kind_set(imolecule_kind)%ng3x3 = 0
       molecule_kind_set(imolecule_kind)%ng4x6 = 0
       molecule_kind_set(imolecule_kind)%nvsite = 0
@@ -408,25 +397,21 @@ CONTAINS
 ! *****************************************************************************
 !> \brief   Deallocate a molecule kind set.
 !> \param molecule_kind_set ...
-!> \param error ...
 !> \date    22.08.2003
 !> \author  MK
 !> \version 1.0
 ! *****************************************************************************
-  SUBROUTINE deallocate_molecule_kind_set(molecule_kind_set,error)
+  SUBROUTINE deallocate_molecule_kind_set(molecule_kind_set)
 
     TYPE(molecule_kind_type), DIMENSION(:), &
       POINTER                                :: molecule_kind_set
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'deallocate_molecule_kind_set', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: i, imolecule_kind, j, &
-                                                nmolecule_kind, stat
-    LOGICAL                                  :: failure
+                                                nmolecule_kind
 
-    failure = .FALSE.
     IF (ASSOCIATED(molecule_kind_set)) THEN
 
       nmolecule_kind = SIZE(molecule_kind_set)
@@ -434,101 +419,79 @@ CONTAINS
       DO imolecule_kind=1,nmolecule_kind
 
         IF (ASSOCIATED(molecule_kind_set(imolecule_kind)%atom_list)) THEN
-           DEALLOCATE (molecule_kind_set(imolecule_kind)%atom_list,STAT=stat)
-           CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+           DEALLOCATE (molecule_kind_set(imolecule_kind)%atom_list)
         END IF
         IF (ASSOCIATED(molecule_kind_set(imolecule_kind)%bend_kind_set)) THEN
-           DEALLOCATE (molecule_kind_set(imolecule_kind)%bend_kind_set,STAT=stat)
-           CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+           DEALLOCATE (molecule_kind_set(imolecule_kind)%bend_kind_set)
         END IF
         IF (ASSOCIATED(molecule_kind_set(imolecule_kind)%bend_list)) THEN
-           DEALLOCATE (molecule_kind_set(imolecule_kind)%bend_list,STAT=stat)
-           CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+           DEALLOCATE (molecule_kind_set(imolecule_kind)%bend_list)
         END IF
         IF (ASSOCIATED(molecule_kind_set(imolecule_kind)%ub_list)) THEN
-           DEALLOCATE (molecule_kind_set(imolecule_kind)%ub_list,STAT=stat)
-           CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+           DEALLOCATE (molecule_kind_set(imolecule_kind)%ub_list)
         END IF
         IF (ASSOCIATED(molecule_kind_set(imolecule_kind)%ub_kind_set)) THEN
-           CALL ub_kind_dealloc_ref(molecule_kind_set(imolecule_kind)%ub_kind_set,error=error)
+           CALL ub_kind_dealloc_ref(molecule_kind_set(imolecule_kind)%ub_kind_set)
         END IF
         IF (ASSOCIATED(molecule_kind_set(imolecule_kind)%impr_list)) THEN
-           DEALLOCATE (molecule_kind_set(imolecule_kind)%impr_list,STAT=stat)
-           CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+           DEALLOCATE (molecule_kind_set(imolecule_kind)%impr_list)
         END IF
         IF (ASSOCIATED(molecule_kind_set(imolecule_kind)%impr_kind_set)) THEN
            DO i = 1, SIZE(molecule_kind_set(imolecule_kind)%impr_kind_set)
-              CALL impr_kind_dealloc_ref(error=error)  !This Subroutine doesn't deallocate anything, maybe needs to be implemented
+              CALL impr_kind_dealloc_ref()  !This Subroutine doesn't deallocate anything, maybe needs to be implemented
            END DO
-           DEALLOCATE (molecule_kind_set(imolecule_kind)%impr_kind_set,STAT=stat)
-           CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+           DEALLOCATE (molecule_kind_set(imolecule_kind)%impr_kind_set)
         END IF
         IF (ASSOCIATED(molecule_kind_set(imolecule_kind)%opbend_list)) THEN
-           DEALLOCATE (molecule_kind_set(imolecule_kind)%opbend_list,STAT=stat)
-           CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+           DEALLOCATE (molecule_kind_set(imolecule_kind)%opbend_list)
         END IF
         IF (ASSOCIATED(molecule_kind_set(imolecule_kind)%opbend_kind_set)) THEN
-           DEALLOCATE (molecule_kind_set(imolecule_kind)%opbend_kind_set,STAT=stat)
-           CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+           DEALLOCATE (molecule_kind_set(imolecule_kind)%opbend_kind_set)
         END IF
         IF (ASSOCIATED(molecule_kind_set(imolecule_kind)%bond_kind_set)) THEN
-           DEALLOCATE (molecule_kind_set(imolecule_kind)%bond_kind_set,STAT=stat)
-           CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+           DEALLOCATE (molecule_kind_set(imolecule_kind)%bond_kind_set)
         END IF
         IF (ASSOCIATED(molecule_kind_set(imolecule_kind)%bond_list)) THEN
-           DEALLOCATE (molecule_kind_set(imolecule_kind)%bond_list,STAT=stat)
-           CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+           DEALLOCATE (molecule_kind_set(imolecule_kind)%bond_list)
         END IF
         IF (ASSOCIATED(molecule_kind_set(imolecule_kind)%colv_list)) THEN
            DO j = 1, SIZE(molecule_kind_set(imolecule_kind)%colv_list)
-              DEALLOCATE (molecule_kind_set(imolecule_kind)%colv_list(j)%i_atoms,STAT=stat)
-              CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+              DEALLOCATE (molecule_kind_set(imolecule_kind)%colv_list(j)%i_atoms)
            END DO
-           DEALLOCATE (molecule_kind_set(imolecule_kind)%colv_list,STAT=stat)
-           CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+           DEALLOCATE (molecule_kind_set(imolecule_kind)%colv_list)
         END IF
         IF (ASSOCIATED(molecule_kind_set(imolecule_kind)%g3x3_list)) THEN
-           DEALLOCATE (molecule_kind_set(imolecule_kind)%g3x3_list,STAT=stat)
-           CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+           DEALLOCATE (molecule_kind_set(imolecule_kind)%g3x3_list)
         END IF
         IF (ASSOCIATED(molecule_kind_set(imolecule_kind)%g4x6_list)) THEN
-           DEALLOCATE (molecule_kind_set(imolecule_kind)%g4x6_list,STAT=stat)
-           CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+           DEALLOCATE (molecule_kind_set(imolecule_kind)%g4x6_list)
         END IF
         IF (ASSOCIATED(molecule_kind_set(imolecule_kind)%vsite_list)) THEN
-           DEALLOCATE (molecule_kind_set(imolecule_kind)%vsite_list,STAT=stat)
-           CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+           DEALLOCATE (molecule_kind_set(imolecule_kind)%vsite_list)
         END IF
         IF (ASSOCIATED(molecule_kind_set(imolecule_kind)%fixd_list)) THEN
-           DEALLOCATE (molecule_kind_set(imolecule_kind)%fixd_list,STAT=stat)
-           CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+           DEALLOCATE (molecule_kind_set(imolecule_kind)%fixd_list)
         END IF
         IF (ASSOCIATED(molecule_kind_set(imolecule_kind)%torsion_kind_set)) THEN
            DO i = 1, SIZE(molecule_kind_set(imolecule_kind)%torsion_kind_set)
-              CALL torsion_kind_dealloc_ref(molecule_kind_set(imolecule_kind)%torsion_kind_set(i),error=error)
+              CALL torsion_kind_dealloc_ref(molecule_kind_set(imolecule_kind)%torsion_kind_set(i))
            END DO
-           DEALLOCATE (molecule_kind_set(imolecule_kind)%torsion_kind_set,STAT=stat)
-           CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+           DEALLOCATE (molecule_kind_set(imolecule_kind)%torsion_kind_set)
         END IF
         IF (ASSOCIATED(molecule_kind_set(imolecule_kind)%shell_list)) THEN
-           DEALLOCATE (molecule_kind_set(imolecule_kind)%shell_list,STAT=stat)
-           CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+           DEALLOCATE (molecule_kind_set(imolecule_kind)%shell_list)
         END IF
         IF (ASSOCIATED(molecule_kind_set(imolecule_kind)%torsion_list)) THEN
-           DEALLOCATE (molecule_kind_set(imolecule_kind)%torsion_list,STAT=stat)
-           CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+           DEALLOCATE (molecule_kind_set(imolecule_kind)%torsion_list)
         END IF
         IF (ASSOCIATED(molecule_kind_set(imolecule_kind)%molecule_list)) THEN
-           DEALLOCATE (molecule_kind_set(imolecule_kind)%molecule_list,STAT=stat)
-           CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+           DEALLOCATE (molecule_kind_set(imolecule_kind)%molecule_list)
         ENDIF
       END DO
 
-      DEALLOCATE (molecule_kind_set,STAT=stat)
-      CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+      DEALLOCATE (molecule_kind_set)
     ELSE
-      CALL stop_program(routineN,moduleN,__LINE__,&
-           "The pointer molecule_kind_set is not associated and cannot be deallocated")
+      CPABORT("The pointer molecule_kind_set is not associated and cannot be deallocated")
     END IF
 
   END SUBROUTINE deallocate_molecule_kind_set
@@ -741,8 +704,7 @@ CONTAINS
 
     ELSE
 
-      CALL stop_program(routineN,moduleN,__LINE__,&
-                        "The pointer molecule_kind is not associated")
+      CPABORT("The pointer molecule_kind is not associated")
 
     END IF
 
@@ -836,8 +798,7 @@ CONTAINS
 
     ELSE
 
-      CALL stop_program(routineN,moduleN,__LINE__,&
-                        "The pointer molecule_kind_set is not associated")
+      CPABORT("The pointer molecule_kind_set is not associated")
 
     END IF
 
@@ -1028,8 +989,7 @@ CONTAINS
 
     ELSE
 
-      CALL stop_program(routineN,moduleN,__LINE__,&
-                        "The pointer molecule_kind is not associated")
+      CPABORT("The pointer molecule_kind is not associated")
 
     END IF
 
@@ -1039,15 +999,13 @@ CONTAINS
 !> \brief   Write a molecule kind data set to the output unit.
 !> \param molecule_kind ...
 !> \param output_unit ...
-!> \param error ...
 !> \date    24.09.2003
 !> \author  MK
 !> \version 1.0
 ! *****************************************************************************
-  SUBROUTINE write_molecule_kind(molecule_kind,output_unit,error)
+  SUBROUTINE write_molecule_kind(molecule_kind,output_unit)
     TYPE(molecule_kind_type), POINTER        :: molecule_kind
     INTEGER, INTENT(in)                      :: output_unit
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'write_molecule_kind', &
       routineP = moduleN//':'//routineN
@@ -1055,10 +1013,8 @@ CONTAINS
     CHARACTER(LEN=default_string_length)     :: name
     INTEGER                                  :: iatom, imolecule, natom, &
                                                 nmolecule
-    LOGICAL                                  :: failure
     TYPE(atomic_kind_type), POINTER          :: atomic_kind
 
-    failure = .FALSE.
     IF (output_unit>0) THEN
       IF (ASSOCIATED(molecule_kind)) THEN
         natom = SIZE(molecule_kind%atom_list)
@@ -1113,7 +1069,7 @@ CONTAINS
         END IF
 
       ELSE
-          CPPrecondition(.FALSE.,cp_failure_level,routineP,error,failure)
+          CPABORT("")
       END IF
 
     END IF
@@ -1123,33 +1079,30 @@ CONTAINS
 !> \brief   Write a moleculeatomic kind set data set to the output unit.
 !> \param molecule_kind_set ...
 !> \param subsys_section ...
-!> \param error ...
 !> \date    24.09.2003
 !> \author  MK
 !> \version 1.0
 ! *****************************************************************************
-  SUBROUTINE write_molecule_kind_set(molecule_kind_set,subsys_section,error)
+  SUBROUTINE write_molecule_kind_set(molecule_kind_set,subsys_section)
     TYPE(molecule_kind_type), DIMENSION(:), &
       POINTER                                :: molecule_kind_set
     TYPE(section_vals_type), POINTER         :: subsys_section
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'write_molecule_kind_set', &
       routineP = moduleN//':'//routineN
 
     INTEGER :: handle, imolecule_kind, natom, nbend, nbond, nimpr, nmolecule, &
       nmolecule_kind, nopbend, ntors, ntotal, nub, output_unit
-    LOGICAL                                  :: all_single_atoms, failure
+    LOGICAL                                  :: all_single_atoms
     TYPE(cp_logger_type), POINTER            :: logger
     TYPE(molecule_kind_type), POINTER        :: molecule_kind
 
     CALL timeset(routineN,handle)
 
-    failure = .FALSE.
     NULLIFY(logger)
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
     output_unit = cp_print_key_unit_nr(logger,subsys_section,&
-         "PRINT%MOLECULES",extension=".Log",error=error)
+         "PRINT%MOLECULES",extension=".Log")
     IF (output_unit>0) THEN
       IF (ASSOCIATED(molecule_kind_set)) THEN
         WRITE (UNIT=output_unit,FMT="(/,/,T2,A)") "MOLECULE KIND INFORMATION"
@@ -1169,7 +1122,7 @@ CONTAINS
         ELSE
            DO imolecule_kind=1,nmolecule_kind
              molecule_kind => molecule_kind_set(imolecule_kind)
-             CALL write_molecule_kind(molecule_kind,output_unit,error)
+             CALL write_molecule_kind(molecule_kind,output_unit)
            END DO
         ENDIF
 
@@ -1197,12 +1150,12 @@ CONTAINS
              "Total Number of opbends:    ",nopbend
         END IF
       ELSE
-         CPPrecondition(.FALSE.,cp_failure_level,routineP,error,failure)
+         CPABORT("")
       END IF
 
     END IF
     CALL cp_print_key_finished_output(output_unit,logger,subsys_section,&
-         "PRINT%MOLECULES",error=error)
+         "PRINT%MOLECULES")
 
     CALL timestop(handle)
 

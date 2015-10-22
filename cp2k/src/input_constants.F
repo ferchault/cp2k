@@ -43,10 +43,11 @@ MODULE input_constants
                                               do_et_ddapc=1,&
                                               do_et_becke=2
   ! Method Names
-  INTEGER, PARAMETER, PUBLIC               :: do_qs=1,&
-                                              do_fist=2,&
-                                              do_qmmm=4,&
-                                              do_eip=5,&
+  INTEGER, PARAMETER, PUBLIC               :: do_qs   =1,&
+                                              do_fist =2,&
+                                              do_qmmm =3,&
+                                              do_qmmmx=4,&
+                                              do_eip  =5,&
                                               do_mixed=6
 
   ! QMMM
@@ -185,13 +186,12 @@ MODULE input_constants
                                               restart_guess=2,&
                                               random_guess=3,&
                                               core_guess=4,&
-                                              densities_guess=5,&
-                                              history_guess=6,&
-                                              no_guess=7,&
-                                              mopac_guess=8,&
-                                              sparse_guess=9,&
-                                              almo_scf_guess=10,&
-                                              molecular_guess=11
+                                              history_guess=5,&
+                                              no_guess=6,&
+                                              mopac_guess=7,&
+                                              sparse_guess=8,&
+                                              almo_scf_guess=9,&
+                                              molecular_guess=10
                                              
   INTEGER, PARAMETER, PUBLIC               :: almo_frz_none=0,&
                                               almo_frz_isolated=1,&
@@ -314,7 +314,9 @@ MODULE input_constants
                                               do_qmmm_wall_reflective=1,&
                                               do_qmmm_wall_quadratic=2,&
                                               do_qmmm_image_calcmatrix=0,&
-                                              do_qmmm_image_iter=1
+                                              do_qmmm_image_iter=1,&
+                                              do_qmmm_image_gpw=0,&
+                                              do_qmmm_image_mme=1
 
   INTEGER, PARAMETER, PUBLIC               :: calc_always=0,&
                                               calc_once=1,&
@@ -742,7 +744,8 @@ MODULE input_constants
                                               ls_s_preconditioner_molecular=17
 
   INTEGER, PARAMETER, PUBLIC               :: ls_cluster_atomic=111, &
-                                              ls_cluster_molecular=112
+                                              ls_cluster_molecular=112,&
+                                              ls_cluster_pao=113
 
   INTEGER, PARAMETER, PUBLIC               :: ls_s_inversion_hotelling=3,&
                                               ls_s_inversion_sign_sqrt=5,&

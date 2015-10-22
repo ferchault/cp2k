@@ -5,8 +5,9 @@
 
 MODULE acc_device
 #if defined (__ACC)
-  USE ISO_C_BINDING
+  USE ISO_C_BINDING,                  ONLY: C_INT
 #endif
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -20,17 +21,17 @@ MODULE acc_device
   INTERFACE
     FUNCTION acc_get_ndevices_cu (n_devices) RESULT (istat) &
           BIND(C, name="acc_get_ndevices")
-       USE ISO_C_BINDING
-    INTEGER(KIND=C_INT), INTENT(OUT)         :: n_devices
-    INTEGER(KIND=C_INT)                      :: istat
+      IMPORT
+      INTEGER(KIND=C_INT), INTENT(OUT)         :: n_devices
+      INTEGER(KIND=C_INT)                      :: istat
 
     END FUNCTION acc_get_ndevices_cu
 
     FUNCTION acc_set_active_device_cu (dev_id) RESULT (istat) &
           BIND(C, name="acc_set_active_device")
-       USE ISO_C_BINDING
-    INTEGER(KIND=C_INT), INTENT(IN), VALUE   :: dev_id
-    INTEGER(KIND=C_INT)                      :: istat
+      IMPORT
+      INTEGER(KIND=C_INT), INTENT(IN), VALUE   :: dev_id
+      INTEGER(KIND=C_INT)                      :: istat
 
     END FUNCTION acc_set_active_device_cu
   END INTERFACE
@@ -53,7 +54,8 @@ CONTAINS
      n = 0
 #if defined (__ACC)
     istat = acc_get_ndevices_cu(n)
-    IF (istat /= 0) STOP 'acc_get_ndevices: failed'
+    IF (istat /= 0)&
+       CPABORT("acc_get_ndevices: failed")
 #endif
   END FUNCTION acc_get_ndevices
 
@@ -70,11 +72,13 @@ CONTAINS
 
 !$omp parallel default(none) private(istat) shared(dev_id)
     istat = acc_set_active_device_cu (dev_id)
-    IF (istat /= 0) STOP 'acc_set_active_device: failed'
+    IF (istat /= 0)&
+       CPABORT("acc_set_active_device: failed")
 !$omp end parallel
 
 #else
-    STOP "__ACC not compiled in"
+    MARK_USED(dev_id)
+    CPABORT("__ACC not compiled in")
 #endif
   END SUBROUTINE acc_set_active_device
 

@@ -21,6 +21,7 @@ MODULE qs_local_rho_types
                                              rho_atom_type
   USE termination,                     ONLY: stop_memory
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -159,25 +160,17 @@ MODULE qs_local_rho_types
     CHARACTER(len=*), PARAMETER :: routineN = 'deallocate_rhoz', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: ikind, istat, nkind
+    INTEGER                                  :: ikind, nkind
 
     nkind = SIZE(rhoz_set)
 
     DO ikind = 1,nkind
-      DEALLOCATE(rhoz_set(ikind)%r_coef,STAT=istat)
-      IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-                                       "rhoz_set%r_coef")
-      DEALLOCATE(rhoz_set(ikind)%dr_coef,STAT=istat)
-      IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-                                       "rhoz_set%dr_coef")
-      DEALLOCATE(rhoz_set(ikind)%vr_coef,STAT=istat)
-      IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-                                       "rhoz_set%vr_coef")
+      DEALLOCATE(rhoz_set(ikind)%r_coef)
+      DEALLOCATE(rhoz_set(ikind)%dr_coef)
+      DEALLOCATE(rhoz_set(ikind)%vr_coef)
     END DO
 
-    DEALLOCATE(rhoz_set,STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-                                     "rhoz_set")
+    DEALLOCATE(rhoz_set)
 
   END SUBROUTINE  deallocate_rhoz
 
@@ -213,23 +206,15 @@ MODULE qs_local_rho_types
 ! *****************************************************************************
 !> \brief ...
 !> \param local_rho_set ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE local_rho_set_create(local_rho_set, error)
+  SUBROUTINE local_rho_set_create(local_rho_set)
 
     TYPE(local_rho_type), POINTER            :: local_rho_set
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'local_rho_set_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
-
-    ALLOCATE(local_rho_set, stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(local_rho_set)
 
     NULLIFY (local_rho_set%rho_atom_set)
     NULLIFY (local_rho_set%rho0_atom_set)
@@ -241,17 +226,13 @@ MODULE qs_local_rho_types
 ! *****************************************************************************
 !> \brief ...
 !> \param local_rho_set ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE local_rho_set_release(local_rho_set,error)
+  SUBROUTINE local_rho_set_release(local_rho_set)
 
     TYPE(local_rho_type), POINTER            :: local_rho_set
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'local_rho_set_release', &
       routineP = moduleN//':'//routineN
-
-    INTEGER                                  :: stat
 
     IF (ASSOCIATED(local_rho_set)) THEN
       IF (ASSOCIATED(local_rho_set%rho_atom_set)) THEN
@@ -263,15 +244,14 @@ MODULE qs_local_rho_types
       END IF
 
       IF (ASSOCIATED(local_rho_set%rho0_mpole)) THEN
-        CALL deallocate_rho0_mpole(local_rho_set%rho0_mpole,error=error)
+        CALL deallocate_rho0_mpole(local_rho_set%rho0_mpole)
       END IF
 
       IF(ASSOCIATED(local_rho_set%rhoz_set)) THEN
         CALL deallocate_rhoz(local_rho_set%rhoz_set)
       ENDIF
 
-      DEALLOCATE(local_rho_set,stat=stat)
-      CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+      DEALLOCATE(local_rho_set)
     END IF
 
   END SUBROUTINE local_rho_set_release
@@ -283,10 +263,9 @@ MODULE qs_local_rho_types
 !> \param rho0_atom_set ...
 !> \param rho0_mpole ...
 !> \param rhoz_set ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE set_local_rho(local_rho_set,rho_atom_set,rho0_atom_set,rho0_mpole,&
-       rhoz_set, error)
+       rhoz_set)
 
     TYPE(local_rho_type), POINTER            :: local_rho_set
     TYPE(rho_atom_type), DIMENSION(:), &
@@ -296,7 +275,6 @@ MODULE qs_local_rho_types
     TYPE(rho0_mpole_type), OPTIONAL, POINTER :: rho0_mpole
     TYPE(rhoz_type), DIMENSION(:), &
       OPTIONAL, POINTER                      :: rhoz_set
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'set_local_rho', &
       routineP = moduleN//':'//routineN
@@ -317,7 +295,7 @@ MODULE qs_local_rho_types
 
     IF (PRESENT(rho0_mpole)) THEN
        IF(ASSOCIATED(local_rho_set%rho0_mpole)) THEN
-         CALL deallocate_rho0_mpole(local_rho_set%rho0_mpole,error=error)
+         CALL deallocate_rho0_mpole(local_rho_set%rho0_mpole)
        ENDIF
        local_rho_set%rho0_mpole => rho0_mpole
     END IF

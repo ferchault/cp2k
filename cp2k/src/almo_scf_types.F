@@ -21,6 +21,7 @@ MODULE almo_scf_types
        optimizer_diis, optimizer_pcg, prec_default, prec_zero
   USE kinds,                           ONLY: dp
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -362,16 +363,14 @@ MODULE almo_scf_types
 !> \brief Prints out the options of an optimizer
 !> \param optimizer - options to print
 !> \param unit_nr - output stream
-!> \param error - error
 !> \par History
 !>       2014.10 created [Rustam Z Khaliullin]
 !> \author Rustam Z Khaliullin
 ! *****************************************************************************
-  SUBROUTINE print_optimizer_options(optimizer, unit_nr, error) 
+  SUBROUTINE print_optimizer_options(optimizer, unit_nr) 
 
     TYPE(optimizer_options_type), INTENT(IN) :: optimizer
     INTEGER, INTENT(IN)                      :: unit_nr
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'print_optimizer_options', &
       routineP = moduleN//':'//routineN

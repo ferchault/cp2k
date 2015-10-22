@@ -41,14 +41,13 @@ MODULE core_ppnl
                                              release_sap_int,&
                                              sap_int_type,&
                                              sap_sort
-  USE timings,                         ONLY: timeset,&
-                                             timestop
   USE virial_methods,                  ONLY: virial_pair_force
   USE virial_types,                    ONLY: virial_type
 
-  !$ USE OMP_LIB
+  !$ USE OMP_LIB, ONLY: omp_get_max_threads, omp_get_thread_num, omp_get_num_threads
 
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -79,11 +78,10 @@ CONTAINS
 !> \param eps_ppnl ...
 !> \param nimages ...
 !> \param cell_to_index ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE build_core_ppnl(matrix_h, matrix_p, force, virial, calculate_forces, use_virial, nder,&
              qs_kind_set, atomic_kind_set, particle_set, sab_orb, sap_ppnl, eps_ppnl, &
-             nimages, cell_to_index, error)
+             nimages, cell_to_index)
 
     TYPE(cp_dbcsr_p_type), DIMENSION(:, :), &
       POINTER                                :: matrix_h, matrix_p
@@ -104,7 +102,6 @@ CONTAINS
     REAL(KIND=dp), INTENT(IN)                :: eps_ppnl
     INTEGER, INTENT(IN)                      :: nimages
     INTEGER, DIMENSION(:, :, :), POINTER     :: cell_to_index
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'build_core_ppnl', &
       routineP = moduleN//':'//routineN
@@ -114,14 +111,13 @@ CONTAINS
       jneighbor, kac, katom, kbc, kkind, l, lc_max, lc_min, ldai, ldsab, &
       lppnl, maxco, maxder, maxl, maxlgto, maxlppnl, maxppnl, maxsgf, mepos, &
       na, natom, nb, ncoa, ncoc, nkind, nlist, nneighbor, nnode, np, nppnl, &
-      nprjc, nseta, nsgfa, nthread, prjc, sgfa, stat
+      nprjc, nseta, nsgfa, nthread, prjc, sgfa
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: atom_of_kind
     INTEGER, DIMENSION(3)                    :: cell_b, cell_c
     INTEGER, DIMENSION(:), POINTER           :: la_max, la_min, npgfa, &
                                                 nprj_ppnl, nsgf_seta
     INTEGER, DIMENSION(:, :), POINTER        :: first_sgfa
-    LOGICAL                                  :: dokp, failure, found, &
-                                                ppnl_present
+    LOGICAL                                  :: dokp, found, ppnl_present
     REAL(KIND=dp)                            :: dac, f0, ppnl_radius
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :)                        :: sab, work
@@ -147,7 +143,6 @@ CONTAINS
     TYPE(sap_int_type), DIMENSION(:), &
       POINTER                                :: sap_int
 
-    failure = .FALSE.
     IF (calculate_forces) THEN
       CALL timeset(routineN//"_forces",handle)
     ELSE
@@ -163,17 +158,16 @@ CONTAINS
 
       dokp = (nimages > 1)
 
-      ALLOCATE (atom_of_kind(natom),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE (atom_of_kind(natom))
       CALL get_atomic_kind_set(atomic_kind_set,atom_of_kind=atom_of_kind)
 
       IF (calculate_forces) THEN
          IF (SIZE(matrix_p,1) == 2) THEN
             DO img=1,nimages
                CALL cp_dbcsr_add(matrix_p(1,img)%matrix, matrix_p(2,img)%matrix, &
-                           alpha_scalar= 1.0_dp, beta_scalar=1.0_dp,error=error)
+                           alpha_scalar= 1.0_dp, beta_scalar=1.0_dp)
                CALL cp_dbcsr_add(matrix_p(2,img)%matrix, matrix_p(1,img)%matrix, &
-                           alpha_scalar=-2.0_dp, beta_scalar=1.0_dp,error=error)
+                           alpha_scalar=-2.0_dp, beta_scalar=1.0_dp)
             END DO
          END IF
       END IF
@@ -194,18 +188,16 @@ CONTAINS
       ldai = ncoset(maxl+nder+1)
 
       !sap_int needs to be shared as multiple threads need to access this
-      ALLOCATE(sap_int(nkind*nkind),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(sap_int(nkind*nkind))
       DO i=1,nkind*nkind
         NULLIFY(sap_int(i)%alist,sap_int(i)%asort,sap_int(i)%aindex)
         sap_int(i)%nalist=0
       END DO
 
       !set up direct access to basis and potential
-      ALLOCATE(basis_set(nkind),potential(nkind),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(basis_set(nkind),potential(nkind))
       DO ikind=1,nkind
-         CALL get_qs_kind(qs_kind_set(ikind),orb_basis_set=orb_basis_set)
+         CALL get_qs_kind(qs_kind_set(ikind),basis_set=orb_basis_set)
          IF (ASSOCIATED(orb_basis_set)) THEN
            basis_set(ikind)%gto_basis_set => orb_basis_set
          ELSE
@@ -232,16 +224,14 @@ CONTAINS
 !$OMP          cell_c, rac, iac, first_sgfa, la_max, la_min, npgfa, nseta, nsgfa, nsgf_seta, &
 !$OMP          sphi_a, zeta, cprj, lppnl, nppnl, nprj_ppnl, & 
 !$OMP          clist, iset, ncoa, sgfa, prjc, work, sab, ai_work, nprjc,  ppnl_radius, &
-!$OMP          ncoc, rpgfa, first_col, vprj_ppnl, failure, i, l, &
-!$OMP          set_radius_a, rprjc, dac, lc_max, lc_min, zetc, alpha_ppnl, error, stat)
+!$OMP          ncoc, rpgfa, first_col, vprj_ppnl, i, l, &
+!$OMP          set_radius_a, rprjc, dac, lc_max, lc_min, zetc, alpha_ppnl)
       mepos=0
 !$    mepos=omp_get_thread_num()
 
-      ALLOCATE(sab(ldsab,ldsab*maxder),work(ldsab,ldsab*maxder),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(sab(ldsab,ldsab*maxder),work(ldsab,ldsab*maxder))
       sab=0.0_dp
-      ALLOCATE (ai_work(ldai,ldai,ncoset(nder+1)),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE (ai_work(ldai,ldai,ncoset(nder+1)))
       ai_work=0.0_dp
 
       DO WHILE (neighbor_list_iterate(nl_iterator, mepos=mepos)==0)
@@ -275,8 +265,7 @@ CONTAINS
             sap_int(iac)%a_kind = ikind
             sap_int(iac)%p_kind = kkind
             sap_int(iac)%nalist = nlist
-            ALLOCATE(sap_int(iac)%alist(nlist),STAT=stat)
-            CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+            ALLOCATE(sap_int(iac)%alist(nlist))
             DO i=1,nlist
                NULLIFY(sap_int(iac)%alist(i)%clist)
                sap_int(iac)%alist(i)%aatom = 0
@@ -286,8 +275,7 @@ CONTAINS
          IF (.NOT.ASSOCIATED(sap_int(iac)%alist(ilist)%clist)) THEN
             sap_int(iac)%alist(ilist)%aatom  = iatom
             sap_int(iac)%alist(ilist)%nclist = nneighbor
-            ALLOCATE(sap_int(iac)%alist(ilist)%clist(nneighbor),STAT=stat)
-            CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+            ALLOCATE(sap_int(iac)%alist(ilist)%clist(nneighbor))
             DO i=1,nneighbor
                sap_int(iac)%alist(ilist)%clist(i)%catom = 0
             END DO
@@ -299,8 +287,7 @@ CONTAINS
          clist%cell  = cell_c
          clist%rac   = rac
          ALLOCATE(clist%acint(nsgfa,nppnl,maxder),&
-                  clist%achint(nsgfa,nppnl,maxder),STAT=stat)
-         CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+                  clist%achint(nsgfa,nppnl,maxder))
          clist%acint=0._dp
          clist%achint=0._dp
          clist%nsgf_cnt = 0
@@ -346,13 +333,12 @@ CONTAINS
          clist%maxach=MAXVAL(ABS(clist%achint(:,:,1)))
       END DO
 
-      DEALLOCATE(sab,ai_work,work,STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      DEALLOCATE(sab,ai_work,work)
 !$OMP END PARALLEL
       CALL neighbor_list_iterator_release(nl_iterator)
 
       ! *** Set up a sorting index
-      CALL sap_sort(sap_int,error)
+      CALL sap_sort(sap_int)
       ! *** All integrals needed have been calculated and stored in sap_int
       ! *** We now calculate the Hamiltonian matrix elements
       CALL neighbor_list_iterator_create(nl_iterator,sab_orb,nthread=nthread)
@@ -363,7 +349,7 @@ CONTAINS
 !$OMP          matrix_p, sap_int, nkind, eps_ppnl, force, virial, use_virial, calculate_forces) &
 !$OMP PRIVATE (mepos, ikind, jkind, iatom, jatom, nlist, ilist, nnode, inode, cell_b, rab, &
 !$OMP          iab, atom_a, atom_b, f0, irow, icol, h_block, &
-!$OMP          found, error, p_block, iac, ibc, alist_ac, alist_bc, acint, bcint, &
+!$OMP          found,p_block, iac, ibc, alist_ac, alist_bc, acint, bcint, &
 !$OMP          achint, bchint, na, np, nb, katom, atom_c, j, fa, fb, rbc, rac, &
 !$OMP          kkind, kac, kbc, i, img)
 
@@ -414,8 +400,8 @@ CONTAINS
                ibc= jkind + nkind*(kkind - 1)
                IF (.NOT.ASSOCIATED(sap_int(iac)%alist)) CYCLE
                IF (.NOT.ASSOCIATED(sap_int(ibc)%alist)) CYCLE
-               CALL get_alist(sap_int(iac), alist_ac, iatom, error)
-               CALL get_alist(sap_int(ibc), alist_bc, jatom, error)
+               CALL get_alist(sap_int(iac), alist_ac, iatom)
+               CALL get_alist(sap_int(ibc), alist_bc, jatom)
                IF (.NOT.ASSOCIATED(alist_ac)) CYCLE
                IF (.NOT.ASSOCIATED(alist_bc)) CYCLE
                DO kac=1,alist_ac%nclist
@@ -468,8 +454,8 @@ CONTAINS
                                  rac = alist_ac%clist(kac)%rac
                                  rbc = alist_bc%clist(kbc)%rac
 !$OMP CRITICAL(virial_critical)
-                                 CALL virial_pair_force ( virial%pv_virial, f0, fa, rac, error)
-                                 CALL virial_pair_force ( virial%pv_virial, f0, fb, rbc, error)
+                                 CALL virial_pair_force ( virial%pv_virial, f0, fa, rac)
+                                 CALL virial_pair_force ( virial%pv_virial, f0, fb, rbc)
 !$OMP END CRITICAL(virial_critical)
                               END IF
                            ENDIF
@@ -484,12 +470,10 @@ CONTAINS
 !$OMP END PARALLEL
       CALL neighbor_list_iterator_release(nl_iterator)
 
-      CALL release_sap_int(sap_int, error)
+      CALL release_sap_int(sap_int)
 
-      DEALLOCATE (atom_of_kind,STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-      DEALLOCATE(basis_set,potential,STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      DEALLOCATE (atom_of_kind)
+      DEALLOCATE(basis_set,potential)
 
       IF (calculate_forces) THEN
          ! *** If LSD, then recover alpha density and beta density     ***
@@ -497,9 +481,9 @@ CONTAINS
          IF (SIZE(matrix_p,1) == 2) THEN
             DO img=1,nimages
                CALL cp_dbcsr_add(matrix_p(1,img)%matrix, matrix_p(2,img)%matrix, &
-                           alpha_scalar= 0.5_dp, beta_scalar=0.5_dp,error=error)
+                           alpha_scalar= 0.5_dp, beta_scalar=0.5_dp)
                CALL cp_dbcsr_add(matrix_p(2,img)%matrix, matrix_p(1,img)%matrix, &
-                           alpha_scalar=-1.0_dp, beta_scalar=1.0_dp,error=error)
+                           alpha_scalar=-1.0_dp, beta_scalar=1.0_dp)
             END DO
          END IF
       END IF

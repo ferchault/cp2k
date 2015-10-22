@@ -38,9 +38,8 @@ MODULE qs_scf_types
                                              fb_env_release
   USE qs_ot_types,                     ONLY: qs_ot_destroy,&
                                              qs_ot_type
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -134,73 +133,65 @@ CONTAINS
 ! *****************************************************************************
 !> \brief allocates and initialize an scf_env
 !> \param scf_env the scf env to initialize
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      02.2003 created [fawzi]
 !> \author fawzi
 ! *****************************************************************************
-  SUBROUTINE scf_env_create(scf_env,  error)
+  SUBROUTINE scf_env_create(scf_env)
     TYPE(qs_scf_env_type), POINTER           :: scf_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'scf_env_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: handle, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: handle
 
     CALL timeset(routineN,handle)
 
-    failure = .FALSE.
 
-    ALLOCATE (scf_env,STAT=stat)
-    CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
-    IF (.NOT.failure) THEN
-       scf_env%ref_count = 1
-       scf_env%print_count = 0
-       last_scf_env_id = last_scf_env_id + 1
-       scf_env%id_nr = last_scf_env_id
-       scf_env%print_count = 0
-       scf_env%iter_count = 0
-       scf_env%nelectron = 0
-       scf_env%iter_param = 0.0_dp
-       scf_env%iter_delta = 0.0_dp
-       scf_env%iter_method = ""
-       scf_env%print_iter_line = .TRUE.
-       scf_env%skip_mixing = .FALSE.
-       scf_env%skip_diis = .FALSE.
-       scf_env%needs_ortho = .FALSE.
-       scf_env%method = -1
-       scf_env%mixing_method = -1
-       scf_env%p_mix_alpha=1.0_dp
-       scf_env%cholesky_method = -1
-       scf_env%outer_scf%iter_count = 0
-       NULLIFY (scf_env%outer_scf%variables)
-       NULLIFY (scf_env%outer_scf%gradient)
-       NULLIFY (scf_env%outer_scf%energy)
-       NULLIFY (scf_env%outer_scf%count)
-       NULLIFY (scf_env%scf_work1)
-       NULLIFY (scf_env%scf_work2)
-       NULLIFY (scf_env%ortho)
-       NULLIFY (scf_env%ortho_dbcsr)
-       NULLIFY (scf_env%ortho_m1)
-       NULLIFY (scf_env%p_mix_new)
-       NULLIFY (scf_env%ot_preconditioner)
-       NULLIFY (scf_env%qs_ot_env)
-       NULLIFY (scf_env%scf_diis_buffer)
-       NULLIFY (scf_env%buf1_dbcsr)
-       NULLIFY (scf_env%buf2_dbcsr)
-       NULLIFY (scf_env%s_half)
-       NULLIFY (scf_env%p_delta)
-       NULLIFY (scf_env%s_minus_one)
-       NULLIFY (scf_env%cc_buffer)
-       NULLIFY (scf_env%mixing_store)
-       NULLIFY (scf_env%krylov_space)
-       NULLIFY (scf_env%subspace_env)
-       NULLIFY (scf_env%block_davidson_env)
-       CALL fb_env_nullify(scf_env%filter_matrix_env)
-    END IF
+    ALLOCATE (scf_env)
+    scf_env%ref_count = 1
+    scf_env%print_count = 0
+    last_scf_env_id = last_scf_env_id + 1
+    scf_env%id_nr = last_scf_env_id
+    scf_env%print_count = 0
+    scf_env%iter_count = 0
+    scf_env%nelectron = 0
+    scf_env%iter_param = 0.0_dp
+    scf_env%iter_delta = 0.0_dp
+    scf_env%iter_method = ""
+    scf_env%print_iter_line = .TRUE.
+    scf_env%skip_mixing = .FALSE.
+    scf_env%skip_diis = .FALSE.
+    scf_env%needs_ortho = .FALSE.
+    scf_env%method = -1
+    scf_env%mixing_method = -1
+    scf_env%p_mix_alpha=1.0_dp
+    scf_env%cholesky_method = -1
+    scf_env%outer_scf%iter_count = 0
+    NULLIFY (scf_env%outer_scf%variables)
+    NULLIFY (scf_env%outer_scf%gradient)
+    NULLIFY (scf_env%outer_scf%energy)
+    NULLIFY (scf_env%outer_scf%count)
+    NULLIFY (scf_env%scf_work1)
+    NULLIFY (scf_env%scf_work2)
+    NULLIFY (scf_env%ortho)
+    NULLIFY (scf_env%ortho_dbcsr)
+    NULLIFY (scf_env%ortho_m1)
+    NULLIFY (scf_env%p_mix_new)
+    NULLIFY (scf_env%ot_preconditioner)
+    NULLIFY (scf_env%qs_ot_env)
+    NULLIFY (scf_env%scf_diis_buffer)
+    NULLIFY (scf_env%buf1_dbcsr)
+    NULLIFY (scf_env%buf2_dbcsr)
+    NULLIFY (scf_env%s_half)
+    NULLIFY (scf_env%p_delta)
+    NULLIFY (scf_env%s_minus_one)
+    NULLIFY (scf_env%cc_buffer)
+    NULLIFY (scf_env%mixing_store)
+    NULLIFY (scf_env%krylov_space)
+    NULLIFY (scf_env%subspace_env)
+    NULLIFY (scf_env%block_davidson_env)
+    CALL fb_env_nullify(scf_env%filter_matrix_env)
 
     CALL timestop(handle)
 
@@ -209,32 +200,25 @@ CONTAINS
 ! *****************************************************************************
 !> \brief retains an scf_env (see doc/ReferenceCounting.html)
 !> \param scf_env the environment to retain
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      02.2003 created [fawzi]
 !> \author fawzi
 ! *****************************************************************************
-  SUBROUTINE scf_env_retain(scf_env,error)
+  SUBROUTINE scf_env_retain(scf_env)
 
     TYPE(qs_scf_env_type), POINTER           :: scf_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'scf_env_retain', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle
-    LOGICAL                                  :: failure
 
     CALL timeset(routineN,handle)
 
-    failure = .FALSE.
 
-    CPPrecondition(ASSOCIATED(scf_env),cp_failure_level,routineP,error,failure)
-    IF (.NOT.failure) THEN
-       CPPrecondition(scf_env%ref_count>0,cp_failure_level,routineP,error,failure)
-       scf_env%ref_count = scf_env%ref_count + 1
-    END IF
+    CPASSERT(ASSOCIATED(scf_env))
+    CPASSERT(scf_env%ref_count>0)
+    scf_env%ref_count = scf_env%ref_count + 1
 
     CALL timestop(handle)
 
@@ -243,36 +227,29 @@ CONTAINS
 ! *****************************************************************************
 !> \brief function to be called to inform the scf_env about changes
 !> \param scf_env the scf env to inform
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      03.2003 created [fawzi]
 !> \author fawzi
 ! *****************************************************************************
-  SUBROUTINE scf_env_did_change(scf_env,error)
+  SUBROUTINE scf_env_did_change(scf_env)
     TYPE(qs_scf_env_type), POINTER           :: scf_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'scf_env_did_change', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle
-    LOGICAL                                  :: failure
 
     CALL timeset(routineN,handle)
 
-    failure = .FALSE.
 
-    CPPrecondition(ASSOCIATED(scf_env),cp_failure_level,routineP,error,failure)
-    CPPrecondition(scf_env%ref_count>0,cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(scf_env))
+    CPASSERT(scf_env%ref_count>0)
 
-    IF (.NOT.failure) THEN
-       IF (ASSOCIATED(scf_env%p_mix_new)) THEN
-          CALL cp_dbcsr_deallocate_matrix_set(scf_env%p_mix_new,error=error)
-       END IF
-       IF (ASSOCIATED(scf_env%p_delta)) THEN
-          CALL cp_dbcsr_deallocate_matrix_set(scf_env%p_delta,error=error)
-       END IF
+    IF (ASSOCIATED(scf_env%p_mix_new)) THEN
+       CALL cp_dbcsr_deallocate_matrix_set(scf_env%p_mix_new)
+    END IF
+    IF (ASSOCIATED(scf_env%p_delta)) THEN
+       CALL cp_dbcsr_deallocate_matrix_set(scf_env%p_delta)
     END IF
 
     CALL timestop(handle)
@@ -282,115 +259,102 @@ CONTAINS
 ! *****************************************************************************
 !> \brief releases an scf_env (see doc/ReferenceCounting.html)
 !> \param scf_env the environment to release
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      02.2003 created [fawzi]
 !> \author fawzi
 ! *****************************************************************************
-  SUBROUTINE scf_env_release(scf_env,error)
+  SUBROUTINE scf_env_release(scf_env)
 
     TYPE(qs_scf_env_type), POINTER           :: scf_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'scf_env_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: handle, i, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: handle, i
 
     CALL timeset(routineN,handle)
 
-    failure = .FALSE.
 
     IF (ASSOCIATED(scf_env)) THEN
-       CPPreconditionNoFail(scf_env%ref_count>0,cp_failure_level,routineP,error)
+       CPASSERT(scf_env%ref_count>0)
        scf_env%ref_count = scf_env%ref_count - 1
        IF (scf_env%ref_count < 1) THEN
-          CALL cp_fm_vect_dealloc(scf_env%scf_work1,error=error)
-          CALL cp_fm_release(scf_env%scf_work2,error=error)
-          CALL cp_fm_release(scf_env%ortho,error=error)
-          CALL cp_fm_release(scf_env%ortho_m1,error=error)
+          CALL cp_fm_vect_dealloc(scf_env%scf_work1)
+          CALL cp_fm_release(scf_env%scf_work2)
+          CALL cp_fm_release(scf_env%ortho)
+          CALL cp_fm_release(scf_env%ortho_m1)
           IF (ASSOCIATED(scf_env%ortho_dbcsr)) THEN
              ! we should not end up here, and give back using the pools
-             CPPreconditionNoFail(.TRUE.,cp_failure_level,routineP,error)
-             CALL cp_dbcsr_deallocate_matrix(scf_env%ortho_dbcsr,error=error)
+             CPASSERT(.TRUE.)
+             CALL cp_dbcsr_deallocate_matrix(scf_env%ortho_dbcsr)
           END IF
           IF (ASSOCIATED(scf_env%buf1_dbcsr)) THEN
              ! we should not end up here, and give back using the pools
-             CPPreconditionNoFail(.TRUE.,cp_failure_level,routineP,error)
-             CALL cp_dbcsr_deallocate_matrix(scf_env%buf1_dbcsr,error=error)
+             CPASSERT(.TRUE.)
+             CALL cp_dbcsr_deallocate_matrix(scf_env%buf1_dbcsr)
           END IF
           IF (ASSOCIATED(scf_env%buf2_dbcsr)) THEN
              ! we should not end up here, and give back using the pools
-             CPPreconditionNoFail(.TRUE.,cp_failure_level,routineP,error)
-             CALL cp_dbcsr_deallocate_matrix(scf_env%buf2_dbcsr,error=error)
+             CPASSERT(.TRUE.)
+             CALL cp_dbcsr_deallocate_matrix(scf_env%buf2_dbcsr)
           END IF
-          CALL cp_fm_release(scf_env%s_half,error=error)
-          CALL cp_fm_release(scf_env%s_minus_one,error=error)
+          CALL cp_fm_release(scf_env%s_half)
+          CALL cp_fm_release(scf_env%s_minus_one)
           IF (ASSOCIATED(scf_env%p_mix_new)) THEN
              ! we should not end up here, and give back using the pools
-             CPPreconditionNoFail(.TRUE.,cp_failure_level,routineP,error)
-             CALL cp_dbcsr_deallocate_matrix_set(scf_env%p_mix_new,error=error)
+             CPASSERT(.TRUE.)
+             CALL cp_dbcsr_deallocate_matrix_set(scf_env%p_mix_new)
           END IF
           IF (ASSOCIATED(scf_env%p_delta)) THEN
              ! we should not end up here, and give back using the pools
-             CPPreconditionNoFail(.TRUE.,cp_failure_level,routineP,error)
-             CALL cp_dbcsr_deallocate_matrix_set(scf_env%p_delta,error=error)
+             CPASSERT(.TRUE.)
+             CALL cp_dbcsr_deallocate_matrix_set(scf_env%p_delta)
           END IF
           IF (ASSOCIATED(scf_env%ot_preconditioner)) THEN
              DO i=1,SIZE(scf_env%ot_preconditioner)
-                CALL destroy_preconditioner(scf_env%ot_preconditioner(i)%preconditioner,error=error)
+                CALL destroy_preconditioner(scf_env%ot_preconditioner(i)%preconditioner)
                 DEALLOCATE (scf_env%ot_preconditioner(i)%preconditioner)
              END DO
-             DEALLOCATE (scf_env%ot_preconditioner,stat=stat)
-             CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+             DEALLOCATE (scf_env%ot_preconditioner)
           END IF
           IF (ASSOCIATED(scf_env%qs_ot_env)) THEN
              DO i=1,SIZE(scf_env%qs_ot_env)
-                CALL qs_ot_destroy(scf_env%qs_ot_env(i),error=error)
+                CALL qs_ot_destroy(scf_env%qs_ot_env(i))
              END DO
-             DEALLOCATE(scf_env%qs_ot_env, stat=stat)
-             CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+             DEALLOCATE(scf_env%qs_ot_env)
           END IF
-          CALL qs_diis_b_release(scf_env%scf_diis_buffer,error=error)
+          CALL qs_diis_b_release(scf_env%scf_diis_buffer)
           IF (ASSOCIATED(scf_env%outer_scf%variables)) THEN
-             DEALLOCATE(scf_env%outer_scf%variables,stat=stat)
-             CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+             DEALLOCATE(scf_env%outer_scf%variables)
           END IF
           IF (ASSOCIATED(scf_env%outer_scf%count)) THEN
-             DEALLOCATE(scf_env%outer_scf%count,stat=stat)
-             CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+             DEALLOCATE(scf_env%outer_scf%count)
           END IF
           IF (ASSOCIATED(scf_env%outer_scf%gradient)) THEN
-             DEALLOCATE(scf_env%outer_scf%gradient,stat=stat)
-             CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+             DEALLOCATE(scf_env%outer_scf%gradient)
           END IF
           IF (ASSOCIATED(scf_env%outer_scf%energy)) THEN
-             DEALLOCATE(scf_env%outer_scf%energy,stat=stat)
-             CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+             DEALLOCATE(scf_env%outer_scf%energy)
           END IF
           IF (ASSOCIATED(scf_env%cc_buffer)) THEN
-             DEALLOCATE(scf_env%cc_buffer,stat=stat)
-             CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+             DEALLOCATE(scf_env%cc_buffer)
           END IF
           IF (ASSOCIATED(scf_env%mixing_store)) THEN
-             CALL mixing_storage_release(scf_env%mixing_store,error=error)
+             CALL mixing_storage_release(scf_env%mixing_store)
           END IF
           IF (ASSOCIATED(scf_env%krylov_space)) THEN
-             CALL krylov_space_release(scf_env%krylov_space,error=error)
+             CALL krylov_space_release(scf_env%krylov_space)
           END IF
           IF (ASSOCIATED(scf_env%subspace_env)) THEN
-             CALL diag_subspace_env_release(scf_env%subspace_env,error=error)
+             CALL diag_subspace_env_release(scf_env%subspace_env)
           END IF
           IF (ASSOCIATED(scf_env%block_davidson_env)) THEN
-             CALL block_davidson_release(scf_env%block_davidson_env,error=error)
+             CALL block_davidson_release(scf_env%block_davidson_env)
           END IF
           IF (fb_env_has_data(scf_env%filter_matrix_env)) THEN
-             CALL fb_env_release(scf_env%filter_matrix_env, error=error)
+             CALL fb_env_release(scf_env%filter_matrix_env)
           END IF
-          DEALLOCATE(scf_env, stat=stat)
-          CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+          DEALLOCATE(scf_env)
        END IF
     END IF
 
@@ -404,121 +368,98 @@ CONTAINS
 !> \brief  creates krylov space
 !> \param krylov_space ...
 !> \param scf_section ...
-!> \param error ...
 !> \par History
 !>      05.2009 created [MI]
 !> \author [MI]
 ! *****************************************************************************
- SUBROUTINE krylov_space_create(krylov_space,scf_section, error)
+ SUBROUTINE krylov_space_create(krylov_space,scf_section)
 
     TYPE(krylov_space_type), POINTER         :: krylov_space
     TYPE(section_vals_type), POINTER         :: scf_section
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'krylov_space_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
-
-    CPPrecondition(.NOT.ASSOCIATED(krylov_space),cp_failure_level,routineP,error,failure)
-    IF(.NOT. failure) THEN
-      ALLOCATE(krylov_space, stat=stat)
-      CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
-      IF (.NOT.failure) THEN
+    CPASSERT(.NOT.ASSOCIATED(krylov_space))
+    ALLOCATE(krylov_space)
 
 
-        NULLIFY(krylov_space%c_eval,krylov_space%t_eval)
-        NULLIFY(krylov_space%v_mat)
-        NULLIFY(krylov_space%mo_conv, krylov_space%mo_refine)
-        NULLIFY(krylov_space%chc_mat, krylov_space%c_vec)
-        NULLIFY(krylov_space%tmp_mat)
-        NULLIFY(krylov_space%block1_mat, krylov_space%block2_mat)
-        NULLIFY(krylov_space%block3_mat, krylov_space%block4_mat, krylov_space%block5_mat)
+    NULLIFY(krylov_space%c_eval,krylov_space%t_eval)
+    NULLIFY(krylov_space%v_mat)
+    NULLIFY(krylov_space%mo_conv, krylov_space%mo_refine)
+    NULLIFY(krylov_space%chc_mat, krylov_space%c_vec)
+    NULLIFY(krylov_space%tmp_mat)
+    NULLIFY(krylov_space%block1_mat, krylov_space%block2_mat)
+    NULLIFY(krylov_space%block3_mat, krylov_space%block4_mat, krylov_space%block5_mat)
 
-        CALL section_vals_val_get(scf_section,"DIAGONALIZATION%MAX_ITER",&
-             i_val=krylov_space%max_iter,error=error)
-        CALL section_vals_val_get(scf_section,"DIAGONALIZATION%KRYLOV%NKRYLOV",&
-             i_val=krylov_space%nkrylov,error=error)
-        CALL section_vals_val_get(scf_section,"DIAGONALIZATION%KRYLOV%NBLOCK",&
-             i_val=krylov_space%nblock,error=error)
-        CALL section_vals_val_get(scf_section,"DIAGONALIZATION%KRYLOV%EPS_KRYLOV",&
-             r_val=krylov_space%eps_conv,error=error)
-        CALL section_vals_val_get(scf_section,"DIAGONALIZATION%KRYLOV%EPS_STD_DIAG",&
-             r_val=krylov_space%eps_std_diag,error=error)
-        CALL section_vals_val_get(scf_section,"DIAGONALIZATION%EPS_ADAPT",&
-             r_val=krylov_space%eps_adapt,error=error)
-        CALL section_vals_val_get(scf_section,"DIAGONALIZATION%KRYLOV%CHECK_MOS_CONV",&
-             l_val=krylov_space%always_check_conv,error=error)
-      END IF
-    END IF
+    CALL section_vals_val_get(scf_section,"DIAGONALIZATION%MAX_ITER",&
+         i_val=krylov_space%max_iter)
+    CALL section_vals_val_get(scf_section,"DIAGONALIZATION%KRYLOV%NKRYLOV",&
+         i_val=krylov_space%nkrylov)
+    CALL section_vals_val_get(scf_section,"DIAGONALIZATION%KRYLOV%NBLOCK",&
+         i_val=krylov_space%nblock)
+    CALL section_vals_val_get(scf_section,"DIAGONALIZATION%KRYLOV%EPS_KRYLOV",&
+         r_val=krylov_space%eps_conv)
+    CALL section_vals_val_get(scf_section,"DIAGONALIZATION%KRYLOV%EPS_STD_DIAG",&
+         r_val=krylov_space%eps_std_diag)
+    CALL section_vals_val_get(scf_section,"DIAGONALIZATION%EPS_ADAPT",&
+         r_val=krylov_space%eps_adapt)
+    CALL section_vals_val_get(scf_section,"DIAGONALIZATION%KRYLOV%CHECK_MOS_CONV",&
+         l_val=krylov_space%always_check_conv)
 
  END SUBROUTINE krylov_space_create
 
 ! *****************************************************************************
 !> \brief releases krylov space
 !> \param krylov_space ...
-!> \param error ...
 !> \par History
 !>      05.2009 created [MI]
 !> \author [MI]
 ! *****************************************************************************
- SUBROUTINE krylov_space_release(krylov_space,error)
+ SUBROUTINE krylov_space_release(krylov_space)
     TYPE(krylov_space_type), POINTER         :: krylov_space
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'krylov_space_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
+    INTEGER                                  :: i
 
     IF(ASSOCIATED(krylov_space)) THEN
 
-        DEALLOCATE(krylov_space%c_eval,STAT=stat)
-      CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
-        DEALLOCATE(krylov_space%t_eval,STAT=stat)
-      CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+        DEALLOCATE(krylov_space%c_eval)
+        DEALLOCATE(krylov_space%t_eval)
 
         DO i = 1,SIZE(krylov_space%v_mat)
-          CALL cp_fm_release(krylov_space%v_mat(i)%matrix,error=error)
+          CALL cp_fm_release(krylov_space%v_mat(i)%matrix)
         END DO
-        DEALLOCATE(krylov_space%v_mat,STAT=stat)
-      CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+        DEALLOCATE(krylov_space%v_mat)
 
         DO i = 1,SIZE(krylov_space%mo_conv)
-          CALL cp_fm_release(krylov_space%mo_conv(i)%matrix,error=error)
+          CALL cp_fm_release(krylov_space%mo_conv(i)%matrix)
         END DO
-        DEALLOCATE(krylov_space%mo_conv,STAT=stat)
-      CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+        DEALLOCATE(krylov_space%mo_conv)
 
         DO i = 1,SIZE(krylov_space%mo_refine)
-          CALL cp_fm_release(krylov_space%mo_refine(i)%matrix,error=error)
+          CALL cp_fm_release(krylov_space%mo_refine(i)%matrix)
         END DO
-        DEALLOCATE(krylov_space%mo_refine,STAT=stat)
-      CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+        DEALLOCATE(krylov_space%mo_refine)
 
         DO i = 1,SIZE(krylov_space%chc_mat)
-          CALL cp_fm_release(krylov_space%chc_mat(i)%matrix,error=error)
+          CALL cp_fm_release(krylov_space%chc_mat(i)%matrix)
         END DO
-        DEALLOCATE(krylov_space%chc_mat,STAT=stat)
+        DEALLOCATE(krylov_space%chc_mat)
         DO i = 1,SIZE(krylov_space%c_vec)
-          CALL cp_fm_release(krylov_space%c_vec(i)%matrix,error=error)
+          CALL cp_fm_release(krylov_space%c_vec(i)%matrix)
         END DO
-        DEALLOCATE(krylov_space%c_vec,STAT=stat)
-        CALL cp_fm_release(krylov_space%tmp_mat,error=error)
-        CALL cp_fm_release(krylov_space%block1_mat,error=error)
-        CALL cp_fm_release(krylov_space%block2_mat,error=error)
-        CALL cp_fm_release(krylov_space%block3_mat,error=error)
-        CALL cp_fm_release(krylov_space%block4_mat,error=error)
-        CALL cp_fm_release(krylov_space%block5_mat,error=error)
+        DEALLOCATE(krylov_space%c_vec)
+        CALL cp_fm_release(krylov_space%tmp_mat)
+        CALL cp_fm_release(krylov_space%block1_mat)
+        CALL cp_fm_release(krylov_space%block2_mat)
+        CALL cp_fm_release(krylov_space%block3_mat)
+        CALL cp_fm_release(krylov_space%block4_mat)
+        CALL cp_fm_release(krylov_space%block5_mat)
 
-        DEALLOCATE(krylov_space,STAT=stat)
-        CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+        DEALLOCATE(krylov_space)
 
       NULLIFY(krylov_space)
     END IF
@@ -530,116 +471,98 @@ CONTAINS
 !> \param subspace_env ...
 !> \param scf_section ...
 !> \param ecut ...
-!> \param error ...
 !> \par History
 !>      09.2009 created [MI]
 !> \author [MI]
 ! *****************************************************************************
- SUBROUTINE diag_subspace_env_create(subspace_env,scf_section,ecut,error)
+ SUBROUTINE diag_subspace_env_create(subspace_env,scf_section,ecut)
 
     TYPE(subspace_env_type), POINTER         :: subspace_env
     TYPE(section_vals_type), POINTER         :: scf_section
     REAL(dp), INTENT(IN)                     :: ecut
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'diag_subspace_env_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: do_mixing, failure
+    LOGICAL                                  :: do_mixing
     TYPE(section_vals_type), POINTER         :: mixing_section
 
-    failure = .FALSE.
-
-    CPPrecondition(.NOT.ASSOCIATED(subspace_env),cp_failure_level,routineP,error,failure)
-    IF(.NOT. failure) THEN
-      ALLOCATE(subspace_env, stat=stat)
-      CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
-      IF (.NOT.failure) THEN
+    CPASSERT(.NOT.ASSOCIATED(subspace_env))
+    ALLOCATE(subspace_env)
 
 
-        NULLIFY(subspace_env%p_matrix_store)
-        NULLIFY(subspace_env%p_matrix_mix)
-        NULLIFY(subspace_env%chc_mat)
-        NULLIFY(subspace_env%c_vec)
-        NULLIFY(subspace_env%c0)
-        NULLIFY(subspace_env%mixing_store)
-        NULLIFY(mixing_section)
+    NULLIFY(subspace_env%p_matrix_store)
+    NULLIFY(subspace_env%p_matrix_mix)
+    NULLIFY(subspace_env%chc_mat)
+    NULLIFY(subspace_env%c_vec)
+    NULLIFY(subspace_env%c0)
+    NULLIFY(subspace_env%mixing_store)
+    NULLIFY(mixing_section)
 
-        CALL section_vals_val_get(scf_section,"DIAGONALIZATION%DIAG_SUB_SCF%MAX_ITER",&
-             i_val=subspace_env%max_iter,error=error)
-        CALL section_vals_val_get(scf_section,"DIAGONALIZATION%DIAG_SUB_SCF%EPS_ENE",&
-             r_val=subspace_env%eps_ene,error=error)
-        CALL section_vals_val_get(scf_section,"DIAGONALIZATION%DIAG_SUB_SCF%EPS_SKIP_SUB_DIAG",&
-             r_val=subspace_env%eps_diag_sub,error=error)
-        CALL section_vals_val_get(scf_section,"DIAGONALIZATION%DIAG_SUB_SCF%EPS_ADAPT_SCF",&
-             r_val=subspace_env%eps_adapt,error=error)
-        subspace_env%mixing_method = 0
-        do_mixing = .FALSE.
-        mixing_section => section_vals_get_subs_vals(scf_section,"DIAGONALIZATION%DIAG_SUB_SCF%MIXING",error=error)
-        CALL section_vals_val_get(mixing_section,"_SECTION_PARAMETERS_",&
-                                 l_val=do_mixing,&
-                                 error=error)
-        IF (do_mixing) THEN
-          CALL section_vals_val_get(mixing_section,"METHOD",&
-                                    i_val=subspace_env%mixing_method,&
-                                    error=error)
-          IF(subspace_env%mixing_method>=direct_mixing_nr)&
-             CALL mixing_storage_create(subspace_env%mixing_store, mixing_section, &
-                  subspace_env%mixing_method, ecut=ecut, error=error)
-        END IF
-
-      END IF
+    CALL section_vals_val_get(scf_section,"DIAGONALIZATION%DIAG_SUB_SCF%MAX_ITER",&
+         i_val=subspace_env%max_iter)
+    CALL section_vals_val_get(scf_section,"DIAGONALIZATION%DIAG_SUB_SCF%EPS_ENE",&
+         r_val=subspace_env%eps_ene)
+    CALL section_vals_val_get(scf_section,"DIAGONALIZATION%DIAG_SUB_SCF%EPS_SKIP_SUB_DIAG",&
+         r_val=subspace_env%eps_diag_sub)
+    CALL section_vals_val_get(scf_section,"DIAGONALIZATION%DIAG_SUB_SCF%EPS_ADAPT_SCF",&
+         r_val=subspace_env%eps_adapt)
+    subspace_env%mixing_method = 0
+    do_mixing = .FALSE.
+    mixing_section => section_vals_get_subs_vals(scf_section,"DIAGONALIZATION%DIAG_SUB_SCF%MIXING")
+    CALL section_vals_val_get(mixing_section,"_SECTION_PARAMETERS_",&
+                             l_val=do_mixing)
+    IF (do_mixing) THEN
+      CALL section_vals_val_get(mixing_section,"METHOD",&
+                                i_val=subspace_env%mixing_method)
+      IF(subspace_env%mixing_method>=direct_mixing_nr)&
+         CALL mixing_storage_create(subspace_env%mixing_store, mixing_section, &
+              subspace_env%mixing_method, ecut=ecut)
     END IF
+
 
  END SUBROUTINE diag_subspace_env_create
 
 ! *****************************************************************************
 !> \brief releases subspace-rotation environment
 !> \param subspace_env ...
-!> \param error ...
 !> \par History
 !>      09.2009 created [MI]
 !> \author [MI]
 ! *****************************************************************************
- SUBROUTINE diag_subspace_env_release(subspace_env,error)
+ SUBROUTINE diag_subspace_env_release(subspace_env)
     TYPE(subspace_env_type), POINTER         :: subspace_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'diag_subspace_env_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
+    INTEGER                                  :: i
 
     IF(ASSOCIATED(subspace_env)) THEN
 
        IF (ASSOCIATED(subspace_env%p_matrix_store)) THEN
 
-           CPPreconditionNoFail(.TRUE.,cp_failure_level,routineP,error) ! should be given back using the pools
-           CALL cp_dbcsr_deallocate_matrix_set(subspace_env%p_matrix_store,error=error)
+           CPASSERT(.TRUE.)
+           CALL cp_dbcsr_deallocate_matrix_set(subspace_env%p_matrix_store)
        ENDIF
        DO i = 1,SIZE(subspace_env%chc_mat)
-         CALL cp_fm_release(subspace_env%chc_mat(i)%matrix,error=error)
+         CALL cp_fm_release(subspace_env%chc_mat(i)%matrix)
        END DO
-       DEALLOCATE(subspace_env%chc_mat,STAT=stat)
+       DEALLOCATE(subspace_env%chc_mat)
        DO i = 1,SIZE(subspace_env%c_vec)
-         CALL cp_fm_release(subspace_env%c_vec(i)%matrix,error=error)
+         CALL cp_fm_release(subspace_env%c_vec(i)%matrix)
        END DO
-       DEALLOCATE(subspace_env%c_vec,STAT=stat)
+       DEALLOCATE(subspace_env%c_vec)
        DO i = 1,SIZE(subspace_env%c0)
-         CALL cp_fm_release(subspace_env%c0(i)%matrix,error=error)
+         CALL cp_fm_release(subspace_env%c0(i)%matrix)
        END DO
-       DEALLOCATE(subspace_env%c0,STAT=stat)
+       DEALLOCATE(subspace_env%c0)
 
         IF (ASSOCIATED(subspace_env%mixing_store)) THEN
-           CALL mixing_storage_release(subspace_env%mixing_store,error=error)
+           CALL mixing_storage_release(subspace_env%mixing_store)
         END IF
 
-       DEALLOCATE(subspace_env, stat=stat)
-       CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+       DEALLOCATE(subspace_env)
     END IF
 
  END SUBROUTINE diag_subspace_env_release

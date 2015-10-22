@@ -19,20 +19,45 @@
 !> \author JGH
 ! *****************************************************************************
 MODULE message_passing
+  USE ISO_C_BINDING,                   ONLY: C_F_POINTER,&
+                                             C_PTR
   USE kinds,                           ONLY: &
-       default_string_length, dp, int_4, int_4_size, int_8, int_8_size, &
-       real_4, real_4_size, real_8, real_8_size
+       dp, int_4, int_4_size, int_8, int_8_size, real_4, real_4_size, real_8, &
+       real_8_size
   USE machine,                         ONLY: default_output_unit,&
                                              m_abort,&
                                              m_flush,&
                                              m_walltime
-  USE ISO_C_BINDING,                   ONLY: C_PTR,C_LOC,C_F_POINTER
+
+!$ USE OMP_LIB,                        ONLY: omp_get_thread_num
+
 #if defined(__parallel) && ! defined(__HAS_NO_MPI_MOD)
-  USE mpi  ! errors mean mpi installation and fortran compiler mismatch: see INSTALL (-D__HAS_NO_MPI_MOD)
+  USE mpi  ! compiler *errors* mean mpi installation and fortran compiler mismatch: see INSTALL (-D__HAS_NO_MPI_MOD)
+! subroutines: unfortunately, mpi implementations do not provide interfaces for all subroutines (problems with types and ranks explosion),
+!              we do not quite know what is in the module, so we can not include any....
+!              to nevertheless get checking for what is included, we use the mpi module without use clause, getting all there is
+! USE mpi, ONLY: mpi_allgather, mpi_allgatherv, mpi_alloc_mem, mpi_allreduce, mpi_alltoall, mpi_alltoallv, mpi_bcast,&
+!                mpi_cart_coords, mpi_cart_create, mpi_cart_get, mpi_cart_rank, mpi_cart_sub, mpi_dims_create, mpi_file_close,&
+!                mpi_file_get_size, mpi_file_open, mpi_file_read_at_all, mpi_file_read_at, mpi_file_write_at_all,&
+!                mpi_file_write_at, mpi_free_mem, mpi_gather, mpi_gatherv, mpi_get_address, mpi_group_translate_ranks, mpi_irecv,&
+!                mpi_isend, mpi_recv, mpi_reduce, mpi_reduce_scatter, mpi_rget, mpi_scatter, mpi_send,&
+!                mpi_sendrecv, mpi_sendrecv_replace, mpi_testany, mpi_waitall, mpi_waitany, mpi_win_create
+! functions
+! USE mpi, ONLY: mpi_wtime
+! constants
+! USE mpi, ONLY: MPI_DOUBLE_PRECISION, MPI_DOUBLE_COMPLEX, MPI_REAL, MPI_COMPLEX, MPI_ANY_TAG,&
+!                MPI_ANY_SOURCE, MPI_COMM_NULL, MPI_REQUEST_NULL, MPI_WIN_NULL, MPI_STATUS_SIZE,&
+!                MPI_ADDRESS_KIND, MPI_OFFSET_KIND, MPI_MODE_CREATE, MPI_MODE_RDONLY, MPI_MODE_WRONLY,&
+!                MPI_MODE_RDWR, MPI_MODE_EXCL, MPI_COMM_SELF, MPI_COMM_WORLD, MPI_COMM_NULL, MPI_THREAD_FUNNELED,&
+!                MPI_ERRORS_RETURN, MPI_SUCCESS, MPI_MAX_PROCESSOR_NAME, MPI_STATUS_SIZE, MPI_MAX_ERROR_STRING, MPI_IDENT,&
+!                MPI_UNEQUAL, MPI_MAX, MPI_SUM, MPI_INFO_NULL, MPI_IN_PLACE, MPI_CONGRUENT, MPI_SIMILAR, MPI_MIN, MPI_SOURCE,&
+!                MPI_TAG, MPI_INTEGER8, MPI_INTEGER, MPI_MAXLOC, MPI_2INTEGER, MPI_MINLOC, MPI_LOGICAL, MPI_2DOUBLE_PRECISION,&
+!                MPI_LOR, MPI_CHARACTER, MPI_BOTTOM, MPI_MODE_NOCHECK, MPI_2REAL
 #endif
 
   IMPLICIT NONE
   PRIVATE
+
 
   ! parameters that might be needed
 #if defined(__parallel)
@@ -53,7 +78,6 @@ MODULE message_passing
   INTEGER, PARAMETER, PUBLIC :: mp_request_null=MPI_REQUEST_NULL
   INTEGER, PARAMETER, PUBLIC :: mp_win_null=MPI_WIN_NULL
   INTEGER, PARAMETER, PUBLIC :: mp_status_size=MPI_STATUS_SIZE
-  INTEGER, PARAMETER, PUBLIC :: mp_address_kind= MPI_ADDRESS_KIND
 
   INTEGER, PARAMETER, PUBLIC :: file_offset=MPI_OFFSET_KIND
   INTEGER, PARAMETER, PUBLIC :: file_amode_create=MPI_MODE_CREATE
@@ -76,7 +100,6 @@ MODULE message_passing
   INTEGER, PARAMETER, PUBLIC :: file_amode_wronly=4
   INTEGER, PARAMETER, PUBLIC :: file_amode_rdwr=8
   INTEGER, PARAMETER, PUBLIC :: file_amode_excl=64
-  INTEGER, PARAMETER, PUBLIC :: mp_address_kind=int_8
 #endif
 
   ! we need to fix this to a given number (crossing fingers)
@@ -105,7 +128,6 @@ MODULE message_passing
   PUBLIC :: mp_cart_create, mp_dims_create, mp_cart_rank, mp_cart_sub, mp_comm_free
   PUBLIC :: mp_comm_dup, mp_comm_split, mp_comm_split_direct
   PUBLIC :: cp2k_is_parallel
-  PUBLIC :: mp_proc_name
   PUBLIC :: mp_probe
 
   ! message passing
@@ -202,12 +224,12 @@ MODULE message_passing
   END INTERFACE
 
   INTERFACE mp_sum
-     MODULE PROCEDURE mp_sum_i, mp_sum_iv, mp_sum_im, mp_sum_im3,mp_sum_im4,mp_sum_im5,mp_sum_im6,&
-                      mp_sum_l, mp_sum_lv, mp_sum_lm, mp_sum_lm3,mp_sum_lm4,mp_sum_lm5,mp_sum_lm6,&
-                      mp_sum_r, mp_sum_rv, mp_sum_rm, mp_sum_rm3,mp_sum_rm4,mp_sum_rm5,mp_sum_rm6,&
-                      mp_sum_d, mp_sum_dv, mp_sum_dm, mp_sum_dm3,mp_sum_dm4,mp_sum_dm5,mp_sum_dm6,&
-                      mp_sum_c, mp_sum_cv, mp_sum_cm, mp_sum_cm3,mp_sum_cm4,mp_sum_cm5,mp_sum_cm6,&
-                      mp_sum_z, mp_sum_zv, mp_sum_zm, mp_sum_zm3,mp_sum_zm4,mp_sum_zm5,mp_sum_zm6,&
+     MODULE PROCEDURE mp_sum_i, mp_sum_iv, mp_sum_im, mp_sum_im3,mp_sum_im4,&
+                      mp_sum_l, mp_sum_lv, mp_sum_lm, mp_sum_lm3,mp_sum_lm4,&
+                      mp_sum_r, mp_sum_rv, mp_sum_rm, mp_sum_rm3,mp_sum_rm4,&
+                      mp_sum_d, mp_sum_dv, mp_sum_dm, mp_sum_dm3,mp_sum_dm4,&
+                      mp_sum_c, mp_sum_cv, mp_sum_cm, mp_sum_cm3,mp_sum_cm4,&
+                      mp_sum_z, mp_sum_zv, mp_sum_zm, mp_sum_zm3,mp_sum_zm4,&
                       mp_sum_root_iv, mp_sum_root_im,&
                       mp_sum_root_lv, mp_sum_root_lm,&
                       mp_sum_root_rv, mp_sum_root_rm,&
@@ -344,12 +366,12 @@ MODULE message_passing
   END INTERFACE
 
   INTERFACE mp_isendrecv
-     MODULE PROCEDURE mp_isendrecv_i, mp_isendrecv_im2, mp_isendrecv_iv,&
-                      mp_isendrecv_l, mp_isendrecv_lm2, mp_isendrecv_lv,&
-                      mp_isendrecv_r, mp_isendrecv_rm2, mp_isendrecv_rv,&
-                      mp_isendrecv_d, mp_isendrecv_dm2, mp_isendrecv_dv,&
-                      mp_isendrecv_c, mp_isendrecv_cm2, mp_isendrecv_cv,&
-                      mp_isendrecv_z, mp_isendrecv_zm2, mp_isendrecv_zv
+     MODULE PROCEDURE mp_isendrecv_i, mp_isendrecv_iv,&
+                      mp_isendrecv_l, mp_isendrecv_lv,&
+                      mp_isendrecv_r, mp_isendrecv_rv,&
+                      mp_isendrecv_d, mp_isendrecv_dv,&
+                      mp_isendrecv_c, mp_isendrecv_cv,&
+                      mp_isendrecv_z, mp_isendrecv_zv
   END INTERFACE
 
   INTERFACE mp_isend
@@ -761,8 +783,6 @@ CONTAINS
   SUBROUTINE mp_perf_env_release(perf_env)
     TYPE(mp_perf_env_type), POINTER          :: perf_env
 
-    INTEGER                                  :: stat
-
     IF (ASSOCIATED(perf_env)) THEN
        IF (perf_env%ref_count<1) THEN
           CALL mp_abort(&
@@ -770,10 +790,7 @@ CONTAINS
        END IF
        perf_env%ref_count=perf_env%ref_count-1
        IF (perf_env%ref_count==0) THEN
-          DEALLOCATE(perf_env,stat=stat)
-          IF (stat/=0) THEN
-             CALL mp_abort("deallocation error: message_passing @ mp_perf_env_release")
-          END IF
+          DEALLOCATE(perf_env)
        END IF
     END IF
     NULLIFY(perf_env)
@@ -927,27 +944,51 @@ CONTAINS
   SUBROUTINE mp_abort (message)
     CHARACTER(LEN=*), INTENT(IN), OPTIONAL   :: message
 
-    INTEGER                                  :: ierr, numtask, taskid
+    INTEGER                                  :: ierr, ithread, numtask, taskid
+    REAL(KIND=dp)                            :: t1, wait_time
 
     ierr = 0
+
+    ithread = 0
+!$  ithread = omp_get_thread_num()
+
 #if defined(__parallel)
     CALL mp_environ ( numtask, taskid, MPI_COMM_WORLD )
 #else
     numtask=1
     taskid=0
 #endif
+
+   ! delayed abort on non-master ranks/threads, for cleaner output if all ranks call this subroutine at the same time.
+    wait_time = 0.0_dp
+    IF (taskid /= 0) &
+       wait_time = wait_time + 1.0_dp ! rank-0 gets a head start of one second.
+    IF (ithread /= 0) &
+       wait_time = wait_time + 1.0_dp ! master threads gets another second
+
+    IF (wait_time > 0.0_dp) THEN
+       t1=m_walltime()
+       DO
+         IF (m_walltime()-t1 > wait_time .OR. t1<0) EXIT
+       ENDDO
+    ENDIF
+
+    WRITE(default_output_unit,*)
     IF (PRESENT(message)) THEN
-       WRITE(default_output_unit,'(A)')         ' CP2K| '//TRIM(message)
+       WRITE(default_output_unit,'(A)')   ' CP2K| Error: '//TRIM(message)
     ENDIF
     WRITE(default_output_unit,'(A,I0)')   ' CP2K| Abnormal program termination, stopped by process number ',taskid
+    WRITE(default_output_unit,*) 
     CALL m_flush(default_output_unit)
 
+#if !defined(__NO_ABORT)
 #if defined(__parallel)
     CALL mpi_abort ( MPI_COMM_WORLD, 1, ierr )
 #else
     CALL m_abort() ! uncomment if you want nice core dumps
 #endif
-    ! this routine never returns
+#endif
+    ! this routine never returns and levels with non-zero exit code
     STOP 1
   END SUBROUTINE mp_abort
 
@@ -1385,8 +1426,7 @@ CONTAINS
     IF ( ierr /= 0 ) CALL mp_abort( "group_free @ mp_rank_compare" )
     CALL mpi_group_free(g2, ierr)
     IF ( ierr /= 0 ) CALL mp_abort( "group_free @ mp_rank_compare" )
-    DEALLOCATE ( rin, STAT = ierr )
-    IF ( ierr /= 0 ) CALL mp_abort( "deallocate @ mp_rank_compare" )
+    DEALLOCATE ( rin)
 #endif
     CALL mp_timestop(handle)
 
@@ -1786,6 +1826,7 @@ CONTAINS
 !> \param n_subgroups the number of subgroups wanted
 !> \param group_partition n_subgroups sized array containing the number of cpus wanted per group.
 !>                         should match the total number of cpus (only used if present and associated) (0..ngroups-1)
+!> \param stride create groups using a stride (default=1) through the ranks of the comm to be split.
 !> \par History
 !>      10.2003 created [fawzi]
 !>      02.2004 modified [Joost VandeVondele]
@@ -1797,12 +1838,13 @@ CONTAINS
 !>      just one comm is created that contains all cpus
 ! *****************************************************************************
   SUBROUTINE mp_comm_split(comm,sub_comm,ngroups, group_distribution, &
-       subgroup_min_size, n_subgroups, group_partition)
+       subgroup_min_size, n_subgroups, group_partition, stride)
     INTEGER, INTENT(in)                      :: comm
     INTEGER, INTENT(out)                     :: sub_comm, ngroups
     INTEGER, DIMENSION(:), POINTER           :: group_distribution
     INTEGER, INTENT(in), OPTIONAL            :: subgroup_min_size, n_subgroups
     INTEGER, DIMENSION(:), OPTIONAL, POINTER :: group_partition
+    INTEGER, OPTIONAL                        :: stride
 
     CHARACTER(len=*), PARAMETER :: routineN = 'mp_comm_split', &
       routineP = moduleN//':'//routineN
@@ -1810,7 +1852,9 @@ CONTAINS
     INTEGER                                  :: handle, ierr, mepos, nnodes
 #if defined(__parallel)
     INTEGER                                  :: color, i, j, k, &
-                                                my_subgroup_min_size
+                                                my_subgroup_min_size,&
+                                                istride, local_stride, irank
+    INTEGER, DIMENSION(:), ALLOCATABLE       :: rank_permutation
 #endif
 
     ierr = 0
@@ -1854,10 +1898,23 @@ CONTAINS
        ENDIF
        my_subgroup_min_size = nnodes / ngroups
     ENDIF
+
+    ! rank_permutation: is a permutation of ranks, so that groups are not necessarily continuous in rank of the master group
+    ! while the order is not critical (we only color ranks), it can e.g. be used to make groups that have just 1 rank per node
+    ! (by setting stride equal to the number of mpi ranks per node), or by sharing  a node between two groups (stride 2).
+    ALLOCATE(rank_permutation(0:nnodes-1))
+    local_stride=1
+    IF (PRESENT(stride)) local_stride=stride
+    k=0
+    DO istride=1,local_stride
+       DO irank=istride-1,nnodes-1,local_stride
+          rank_permutation(k)=irank
+          k=k+1
+       ENDDO
+    ENDDO
+    
     DO i=0,nnodes-1
-       group_distribution(i)=i / my_subgroup_min_size
-       ! if part of the rest, join the last group
-       IF ( group_distribution(i) >= ngroups ) group_distribution(i)=ngroups-1
+       group_distribution(rank_permutation(i))=MIN(i / my_subgroup_min_size,ngroups-1)
     ENDDO
     ! even the user gave a partition, see if we can use it to overwrite this choice
     IF (PRESENT(group_partition)) THEN
@@ -1866,7 +1923,7 @@ CONTAINS
              k=0
              DO i=0,SIZE(group_partition)-1
                 DO j=1,group_partition(i)
-                   group_distribution(k)=i
+                   group_distribution(rank_permutation(k))=i
                    k=k+1
                 ENDDO
              ENDDO
@@ -1890,31 +1947,6 @@ CONTAINS
     CALL mp_timestop(handle)
 
   END SUBROUTINE mp_comm_split
-
-! *****************************************************************************
-!> \brief Extract the processor name of a MPI process
-!> \param host_name The MPI process host name
-!> \author Christiane Ribeiro Pousa
-!> \note
-!> - 2011-11-23 [UB] Copied from old ma_message_passing and correctly set 
-!>                   string length.
-! *****************************************************************************
-  SUBROUTINE mp_proc_name(host_name)
-    CHARACTER(len=*), PARAMETER :: routineN = 'mp_proc_name', &
-         routineP = moduleN//':'//routineN
-    CHARACTER(LEN=default_string_length)     :: host_name
-
-#if defined(__parallel)
-    INTEGER                                  :: ierr, len_name
-    CHARACTER(LEN=MPI_MAX_PROCESSOR_NAME)    :: hname
-    CALL mpi_get_processor_name(hname,len_name,ierr)
-    IF ( ierr /= 0 ) CALL mp_stop( ierr, "mpi_get_processor_name @ "//routineN )
-    len_name = MIN (default_string_length, MPI_MAX_PROCESSOR_NAME)
-    host_name(1:len_name) = hname(1:len_name)
-#else
-    host_name = "localhost"
-#endif
-  END SUBROUTINE mp_proc_name
 
 ! *****************************************************************************
 !> \brief probes for an incomming message with any tag
@@ -2223,8 +2255,7 @@ CONTAINS
 #if defined(__parallel)
     t_start = m_walltime ( )
     msglen = SIZE(msg)
-    ALLOCATE (res(1:msglen),STAT=ierr)
-    IF ( ierr /= 0 ) CALL mp_abort( "allocate @ "//routineN )
+    ALLOCATE (res(1:msglen))
     CALL mpi_allreduce(msg,res,1,MPI_2INTEGER,MPI_MINLOC,gid, ierr)
     IF ( ierr /= 0 ) CALL mp_stop( ierr, "mpi_allreduce @ "//routineN )
     msg = res
@@ -2268,8 +2299,7 @@ CONTAINS
 #if defined(__parallel)
     t_start = m_walltime ( )
     msglen = SIZE(msg)
-    ALLOCATE (res(1:msglen),STAT=ierr)
-    IF ( ierr /= 0 ) CALL mp_abort( "allocate @ "//routineN )
+    ALLOCATE (res(1:msglen))
     CALL mpi_allreduce(msg,res,1,MPI_INTEGER8,MPI_MINLOC,gid, ierr)
     IF ( ierr /= 0 ) CALL mp_stop( ierr, "mpi_allreduce @ "//routineN )
     msg = res
@@ -2313,8 +2343,7 @@ CONTAINS
 #if defined(__parallel)
     t_start = m_walltime ( )
     msglen = SIZE(msg)
-    ALLOCATE (res(1:msglen),STAT=ierr)
-    IF ( ierr /= 0 ) CALL mp_abort( "allocate @ "//routineN )
+    ALLOCATE (res(1:msglen))
     CALL mpi_allreduce(msg,res,1,MPI_2REAL,MPI_MINLOC,gid, ierr)
     IF ( ierr /= 0 ) CALL mp_stop( ierr, "mpi_allreduce @ "//routineN )
     msg = res
@@ -2358,12 +2387,11 @@ CONTAINS
 #if defined(__parallel)
     t_start = m_walltime ( )
     msglen = SIZE(msg)
-    ALLOCATE (res(1:msglen),STAT=ierr)
-    IF ( ierr /= 0 ) CALL mp_abort( "allocate @ "//routineN )
+    ALLOCATE (res(1:msglen))
     CALL mpi_allreduce(msg,res,1,MPI_2DOUBLE_PRECISION,MPI_MAXLOC,gid, ierr)
     IF ( ierr /= 0 ) CALL mp_stop( ierr, "mpi_allreduce @ "//routineN )
     msg = res
-    DEALLOCATE (res,STAT=ierr)
+    DEALLOCATE (res)
     t_end = m_walltime ( )
     CALL add_perf(perf_id=3,count=1,time=t_end-t_start,msg_size=msglen*real_8_size)
 #endif
@@ -2403,12 +2431,11 @@ CONTAINS
 #if defined(__parallel)
     t_start = m_walltime ( )
     msglen = SIZE(msg)
-    ALLOCATE (res(1:msglen),STAT=ierr)
-    IF ( ierr /= 0 ) CALL mp_abort( "allocate @ "//routineN )
+    ALLOCATE (res(1:msglen))
     CALL mpi_allreduce(msg,res,1,MPI_2INTEGER,MPI_MAXLOC,gid, ierr)
     IF ( ierr /= 0 ) CALL mp_stop( ierr, "mpi_allreduce @ "//routineN )
     msg = res
-    DEALLOCATE (res,STAT=ierr)
+    DEALLOCATE (res)
     t_end = m_walltime ( )
     CALL add_perf(perf_id=3,count=1,time=t_end-t_start,msg_size=msglen*int_4_size)
 #endif
@@ -2448,12 +2475,11 @@ CONTAINS
 #if defined(__parallel)
     t_start = m_walltime ( )
     msglen = SIZE(msg)
-    ALLOCATE (res(1:msglen),STAT=ierr)
-    IF ( ierr /= 0 ) CALL mp_abort( "allocate @ "//routineN )
+    ALLOCATE (res(1:msglen))
     CALL mpi_allreduce(msg,res,1,MPI_INTEGER8,MPI_MAXLOC,gid, ierr)
     IF ( ierr /= 0 ) CALL mp_stop( ierr, "mpi_allreduce @ "//routineN )
     msg = res
-    DEALLOCATE (res,STAT=ierr)
+    DEALLOCATE (res)
     t_end = m_walltime ( )
     CALL add_perf(perf_id=3,count=1,time=t_end-t_start,msg_size=msglen*int_8_size)
 #endif
@@ -2493,12 +2519,11 @@ CONTAINS
 #if defined(__parallel)
     t_start = m_walltime ( )
     msglen = SIZE(msg)
-    ALLOCATE (res(1:msglen),STAT=ierr)
-    IF ( ierr /= 0 ) CALL mp_abort( "allocate @ "//routineN )
+    ALLOCATE (res(1:msglen))
     CALL mpi_allreduce(msg,res,1,MPI_2REAL,MPI_MAXLOC,gid, ierr)
     IF ( ierr /= 0 ) CALL mp_stop( ierr, "mpi_allreduce @ "//routineN )
     msg = res
-    DEALLOCATE (res,STAT=ierr)
+    DEALLOCATE (res)
     t_end = m_walltime ( )
     CALL add_perf(perf_id=3,count=1,time=t_end-t_start,msg_size=msglen*real_4_size)
 #endif
@@ -3188,18 +3213,18 @@ CONTAINS
 
 ! *****************************************************************************
 !> \brief Tests the MPI library
-!> \param comm ...
-!> \param npow ...
+!> \param comm the relevant, initialized communicator
+!> \param npow number of sizes to test, 10**1 .. 10**npow
+!> \param output_unit where to direct output
 !> \par History
 !>      JGH  6-Feb-2001 : Test and performance code
 !> \author JGH  1-JAN-2001
 !> \note
 !>      quickly adapted benchmark code, will only work on an even number of CPUs.
-!>      comm is the relevant, initialized communicator
 ! *****************************************************************************
-  SUBROUTINE mpi_perf_test(comm,npow)
+  SUBROUTINE mpi_perf_test(comm,npow,output_unit)
 
-    INTEGER                                  :: comm, npow
+    INTEGER, INTENT(IN)                      :: comm, npow,output_unit
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'mpi_perf_test', &
       routineP = moduleN//':'//routineN
@@ -3220,20 +3245,20 @@ CONTAINS
                                                 send_timings, send_timings2
     REAL(KIND=dp), PARAMETER :: threshold=1.0E-8_dp
 
-
     ! set system sizes !
     ngrid= 10**npow
 
     CALL mpi_comm_rank(comm,taskid,ierror)
     CALL mpi_comm_size(comm,Nprocs,ierror)
     ionode=(taskid==0)
-    IF (ionode) WRITE(*,*) "Running with ",nprocs
-    IF (ionode) WRITE(*,*) "running messages with npow = ",npow
-    IF (ionode) WRITE(*,*) "use MPI X in the input for larger (e.g. 6) of smaller (e.g. 3) messages"
-    IF (MODULO(nprocs,2).NE.0) THEN
-       WRITE(*,*) "Testing only with an even number of tasks"
-       RETURN
+    IF (ionode .AND. output_unit > 0) THEN
+        WRITE(output_unit,*) "Running with ",nprocs
+        WRITE(output_unit,*) "running messages with npow = ",npow
+        WRITE(output_unit,*) "use MPI X in the input for larger (e.g. 6) of smaller (e.g. 3) messages"
+        IF (MODULO(nprocs,2).NE.0) WRITE(output_unit,*) "Testing only with an even number of tasks"
     ENDIF
+
+    IF (MODULO(nprocs,2).NE.0) RETURN
 
     ! equal loads
     Nloc=Ngrid/nprocs
@@ -3265,12 +3290,14 @@ CONTAINS
     ! ------------------------------ some in memory tests                   ---------------------
     ! -------------------------------------------------------------------------------------------
     CALL MPI_BARRIER(comm,ierror)
-    IF (ionode) WRITE(*,*) "Testing in memory copies just 1 CPU "
-    IF (ionode) WRITE(*,*) "  could tell something about the motherboard / cache / compiler "
+    IF (ionode .AND. output_unit > 0) THEN
+        WRITE(output_unit,*) "Testing in memory copies just 1 CPU "
+        WRITE(output_unit,*) "  could tell something about the motherboard / cache / compiler "
+    END IF
     DO i=1,npow
        ncount=10**i
        t2=0.0E0_dp
-       IF (ncount.GT.nbufmax) STOP
+       IF (ncount.GT.nbufmax) CALL mp_abort()
        DO j=1,3**(npow-i)
           CALL MPI_BARRIER(comm,ierror)
           t1=MPI_WTIME()
@@ -3278,8 +3305,8 @@ CONTAINS
           t2=t2+MPI_WTIME()-t1 +threshold
        ENDDO
        CALL MPI_REDUCE(t2,t1,1, MPI_DOUBLE_PRECISION, MPI_MAX, 0, comm, ierror)
-       IF (ionode) THEN
-          WRITE(*,'(I9,A,F12.4,A)') 8*ncount," Bytes ",(3**(npow-i))*ncount*8.0E-6_dp/t1," Mb/s"
+       IF (ionode .AND. output_unit > 0) THEN
+          WRITE(output_unit,'(I9,A,F12.4,A)') 8*ncount," Bytes ",(3**(npow-i))*ncount*8.0E-6_dp/t1," MB/s"
        ENDIF
     ENDDO
     CALL MPI_BARRIER(comm,ierror)
@@ -3287,12 +3314,14 @@ CONTAINS
     ! ------------------------------ some in memory tests                   ---------------------
     ! -------------------------------------------------------------------------------------------
     CALL MPI_BARRIER(comm,ierror)
-    IF (ionode) WRITE(*,*) "Testing in memory copies all cpus"
-    IF (ionode) WRITE(*,*) "  is the memory bandwidth affected on an SMP machine ?"
+    IF (ionode .AND. output_unit > 0) THEN
+        WRITE(output_unit,*) "Testing in memory copies all cpus"
+        WRITE(output_unit,*) "  is the memory bandwidth affected on an SMP machine ?"
+    ENDIF
     DO i=1,npow
        ncount=10**i
        t2=0.0E0_dp
-       IF (ncount.GT.nbufmax) STOP
+       IF (ncount.GT.nbufmax) CALL mp_abort()
        DO j=1,3**(npow-i)
           CALL MPI_BARRIER(comm,ierror)
           t1=MPI_WTIME()
@@ -3300,8 +3329,8 @@ CONTAINS
           t2=t2+MPI_WTIME()-t1+threshold
        ENDDO
        CALL MPI_REDUCE(t2,t1,1, MPI_DOUBLE_PRECISION, MPI_MAX, 0, comm, ierror)
-       IF (ionode) THEN
-          WRITE(*,'(I9,A,F12.4,A)') 8*ncount," Bytes ",(3**(npow-i))*ncount*8.0E-6_dp/t1," Mb/s"
+       IF (ionode .AND. output_unit > 0) THEN
+          WRITE(output_unit,'(I9,A,F12.4,A)') 8*ncount," Bytes ",(3**(npow-i))*ncount*8.0E-6_dp/t1," MB/s"
        ENDIF
     ENDDO
     CALL MPI_BARRIER(comm,ierror)
@@ -3309,11 +3338,13 @@ CONTAINS
     ! ------------------------------ first test point to point communication ---------------------
     ! -------------------------------------------------------------------------------------------
     CALL MPI_BARRIER(comm,ierror)
-    IF (ionode) WRITE(*,*) "Testing truely point to point communication (i with j only)"
-    IF (ionode) WRITE(*,*) "  is there some different connection between i j (e.g. shared memory comm)"
+    IF (ionode .AND. output_unit > 0) THEN
+        WRITE(output_unit,*) "Testing truely point to point communication (i with j only)"
+        WRITE(output_unit,*) "  is there some different connection between i j (e.g. shared memory comm)"
+    ENDIF
     ncount=10**npow
-    IF (ionode) WRITE(*,*) "For messages of ",ncount*8," bytes"
-    IF (ncount.GT.nbufmax) STOP
+    IF (ionode .AND. output_unit > 0) WRITE(output_unit,*) "For messages of ",ncount*8," bytes"
+    IF (ncount.GT.nbufmax) CALL mp_abort()
     DO itask=0,nprocs-1
        DO jtask=itask+1,nprocs-1
           CALL MPI_BARRIER(comm,ierror)
@@ -3329,10 +3360,10 @@ CONTAINS
     ENDDO
     send_timings2(:,:)=send_timings
     CALL MPI_REDUCE(send_timings2, send_timings, nprocs**2, MPI_DOUBLE_PRECISION, MPI_MAX, 0, comm, ierror)
-    IF (ionode) THEN
+    IF (ionode .AND. output_unit > 0) THEN
        DO itask=0,nprocs-1
           DO jtask=itask+1,nprocs-1
-             WRITE(*,'(I4,I4,F12.4,A)') itask,jtask,ncount*8.0E-6_dp/send_timings(itask,jtask)," Mb/s"
+             WRITE(output_unit,'(I4,I4,F12.4,A)') itask,jtask,ncount*8.0E-6_dp/send_timings(itask,jtask)," MB/s"
           ENDDO
        ENDDO
     ENDIF
@@ -3341,12 +3372,14 @@ CONTAINS
     ! ------------------------------ second test point to point communication -------------------
     ! -------------------------------------------------------------------------------------------
     CALL MPI_BARRIER(comm,ierror)
-    IF (ionode) WRITE(*,*) "Testing all nearby point to point communication (0,1)(2,3)..."
-    IF (ionode) WRITE(*,*) "    these could / should all be on the same shared memory node "
+    IF (ionode .AND. output_unit > 0) THEN
+        WRITE(output_unit,*) "Testing all nearby point to point communication (0,1)(2,3)..."
+        WRITE(output_unit,*) "    these could / should all be on the same shared memory node "
+    ENDIF
     DO i=1,npow
        ncount=10**i
        t2=0.0E0_dp
-       IF (ncount.GT.nbufmax) STOP
+       IF (ncount.GT.nbufmax) CALL mp_abort()
        DO j=1,3**(npow-i)
           CALL MPI_BARRIER(comm,ierror)
           t1=MPI_WTIME()
@@ -3358,8 +3391,8 @@ CONTAINS
           t2=t2+MPI_WTIME()-t1+threshold
        ENDDO
        CALL MPI_REDUCE(t2,t1,1, MPI_DOUBLE_PRECISION, MPI_MAX, 0, comm, ierror)
-       IF (ionode) THEN
-          WRITE(*,'(I9,A,F12.4,A)') 8*ncount," Bytes ",(3**(npow-i))*ncount*8.0E-6_dp/t1," Mb/s"
+       IF (ionode .AND. output_unit > 0) THEN
+          WRITE(output_unit,'(I9,A,F12.4,A)') 8*ncount," Bytes ",(3**(npow-i))*ncount*8.0E-6_dp/t1," MB/s"
        ENDIF
     ENDDO
     CALL MPI_BARRIER(comm,ierror)
@@ -3367,12 +3400,14 @@ CONTAINS
     ! ------------------------------ third test point to point communication -------------------
     ! -------------------------------------------------------------------------------------------
     CALL MPI_BARRIER(comm,ierror)
-    IF (ionode) WRITE(*,*) "Testing all far point to point communication (0,nprocs/2),(1,nprocs/2+1),.."
-    IF (ionode) WRITE(*,*) "    these could all be going over the network, and stress it a lot"
+    IF (ionode .AND. output_unit > 0) THEN
+       WRITE(output_unit,*) "Testing all far point to point communication (0,nprocs/2),(1,nprocs/2+1),.."
+       WRITE(output_unit,*) "    these could all be going over the network, and stress it a lot"
+    ENDIF
     DO i=1,npow
        ncount=10**i
        t2=0.0E0_dp
-       IF (ncount.GT.nbufmax) STOP
+       IF (ncount.GT.nbufmax) CALL mp_abort()
        DO j=1,3**(npow-i)
           CALL MPI_BARRIER(comm,ierror)
           t1=MPI_WTIME()
@@ -3385,20 +3420,22 @@ CONTAINS
           t2=t2+MPI_WTIME()-t1+threshold
        ENDDO
        CALL MPI_REDUCE(t2,t1,1, MPI_DOUBLE_PRECISION, MPI_MAX, 0, comm, ierror)
-       IF (ionode) THEN
-          WRITE(*,'(I9,A,F12.4,A)') 8*ncount," Bytes ",(3**(npow-i))*ncount*8.0E-6_dp/t1," Mb/s"
+       IF (ionode .AND. output_unit > 0) THEN
+          WRITE(output_unit,'(I9,A,F12.4,A)') 8*ncount," Bytes ",(3**(npow-i))*ncount*8.0E-6_dp/t1," MB/s"
        ENDIF
     ENDDO
     ! -------------------------------------------------------------------------------------------
     ! ------------------------------ test root to all broadcast               -------------------
     ! -------------------------------------------------------------------------------------------
     CALL MPI_BARRIER(comm,ierror)
-    IF (ionode) WRITE(*,*) "Testing root to all broadcast "
-    IF (ionode) WRITE(*,*) "    using trees at least ? "
+    IF (ionode .AND. output_unit > 0) THEN
+       WRITE(output_unit,*) "Testing root to all broadcast "
+       WRITE(output_unit,*) "    using trees at least ? "
+    ENDIF
     DO i=1,npow
        ncount=10**i
        t2=0.0E0_dp
-       IF (ncount.GT.nbufmax) STOP
+       IF (ncount.GT.nbufmax) CALL mp_abort()
        DO j=1,3**(npow-i)
           CALL MPI_BARRIER(comm,ierror)
           t1=MPI_WTIME()
@@ -3406,19 +3443,19 @@ CONTAINS
           t2=t2+MPI_WTIME()-t1+threshold
        ENDDO
        CALL MPI_REDUCE(t2,t1,1, MPI_DOUBLE_PRECISION, MPI_MAX, 0, comm, ierror)
-       IF (ionode) THEN
-          WRITE(*,'(I9,A,F12.4,A)') 8*ncount," Bytes ",(3**(npow-i))*ncount*8.0E-6_dp/t1," Mb/s"
+       IF (ionode .AND. output_unit > 0) THEN
+          WRITE(output_unit,'(I9,A,F12.4,A)') 8*ncount," Bytes ",(3**(npow-i))*ncount*8.0E-6_dp/t1," MB/s"
        ENDIF
     ENDDO
     ! -------------------------------------------------------------------------------------------
     ! ------------------------------ test mp_sum like behavior                -------------------
     ! -------------------------------------------------------------------------------------------
     CALL MPI_BARRIER(comm,ierror)
-    IF (ionode) WRITE(*,*) "Test global summation (mp_sum / mpi_allreduce) "
+    IF (ionode .AND. output_unit > 0) WRITE(output_unit,*) "Test global summation (mp_sum / mpi_allreduce) "
     DO i=1,npow
        ncount=10**i
        t2=0.0E0_dp
-       IF (ncount.GT.nbufmax) STOP
+       IF (ncount.GT.nbufmax) CALL mp_abort()
        DO j=1,3**(npow-i)
           CALL MPI_BARRIER(comm,ierror)
           t1=MPI_WTIME()
@@ -3426,20 +3463,22 @@ CONTAINS
           t2=t2+MPI_WTIME()-t1+threshold
        ENDDO
        CALL MPI_REDUCE(t2,t1,1, MPI_DOUBLE_PRECISION, MPI_MAX, 0, comm, ierror)
-       IF (ionode) THEN
-          WRITE(*,'(I9,A,F12.4,A)') 8*ncount," Bytes ",(3**(npow-i))*ncount*8.0E-6_dp/t1," Mb/s"
+       IF (ionode .AND. output_unit > 0) THEN
+          WRITE(output_unit,'(I9,A,F12.4,A)') 8*ncount," Bytes ",(3**(npow-i))*ncount*8.0E-6_dp/t1," MB/s"
        ENDIF
     ENDDO
     ! -------------------------------------------------------------------------------------------
     ! ------------------------------ test all to all communication            -------------------
     ! -------------------------------------------------------------------------------------------
     CALL MPI_BARRIER(comm,ierror)
-    IF (ionode) WRITE(*,*) "Test all to all communication (mpi_alltoallv)"
-    IF (ionode) WRITE(*,*) "    mpi/network getting confused ? "
+    IF (ionode .AND. output_unit > 0) THEN
+        WRITE(output_unit,*) "Test all to all communication (mpi_alltoallv)"
+        WRITE(output_unit,*) "    mpi/network getting confused ? "
+    ENDIF
     DO i=1,npow
        ncount=10**i
        t2=0.0E0_dp
-       IF (ncount.GT.nbufmax) STOP
+       IF (ncount.GT.nbufmax) CALL mp_abort()
        scount=ncount/nprocs
        rcount=ncount/nprocs
        DO j=1,nprocs
@@ -3454,19 +3493,23 @@ CONTAINS
           t2=t2+MPI_WTIME()-t1+threshold
        ENDDO
        CALL MPI_REDUCE(t2,t1,1, MPI_DOUBLE_PRECISION, MPI_MAX, 0, comm, ierror)
-       IF (ionode) THEN
-          WRITE(*,'(I9,A,F12.4,A)') 8*(ncount/nprocs)*nprocs," Bytes ",(3**(npow-i))*(ncount/nprocs)*nprocs*8.0E-6_dp/t1," Mb/s"
+       IF (ionode .AND. output_unit > 0) THEN
+          WRITE(output_unit,'(I9,A,F12.4,A)') 8*(ncount/nprocs)*nprocs," Bytes ", &
+                             (3**(npow-i))*(ncount/nprocs)*nprocs*8.0E-6_dp/t1," MB/s"
        ENDIF
     ENDDO
 
     ! -------------------------------------------------------------------------------------------
     ! ------------------------------ other stuff                            ---------------------
     ! -------------------------------------------------------------------------------------------
-    IF (ionode) WRITE(*,*) " Clean tests completed "
-    IF (ionode) WRITE(*,*) " Testing MPI_REDUCE scatter"
+    IF (ionode .AND. output_unit > 0) THEN
+        WRITE(output_unit,*) " Clean tests completed "
+        WRITE(output_unit,*) " Testing MPI_REDUCE scatter"
+    ENDIF
     rcount=Nloc
     DO itests=1,3
-       IF (ionode) WRITE(*,*) "------------------------------- test ",itests," ------------------------"
+       IF (ionode .AND. output_unit > 0) &
+                WRITE(output_unit,*) "------------------------------- test ",itests," ------------------------"
        ! *** reference ***
        DO j=1,Nprocs
           DO i=1,Nloc
@@ -3477,7 +3520,7 @@ CONTAINS
        CALL MPI_REDUCE_SCATTER(grid, lgrid, rcount, MPI_DOUBLE_PRECISION, MPI_SUM, comm, ierr)
        t2=MPI_WTIME()-t1+threshold
        CALL mpi_allreduce(t2,res,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm, ierr)
-       IF (ionode) WRITE(*,*) "MPI_REDUCE_SCATTER    ",res
+       IF (ionode .AND. output_unit > 0) WRITE(output_unit,*) "MPI_REDUCE_SCATTER    ",res
        ! *** simple shift ***
        DO j=1,Nprocs
           DO i=1,Nloc
@@ -3497,9 +3540,9 @@ CONTAINS
        CALL mpi_allreduce(t4,res,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm, ierr)
        maxdiff=MAXVAL(ABS(lgrid2-lgrid))
        CALL mpi_allreduce(maxdiff,res2,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm, ierr)
-       IF (ionode) WRITE(*,*) "MPI_SENDRECV_REPLACE  ",res,res2
+       IF (ionode .AND. output_unit > 0) WRITE(output_unit,*) "MPI_SENDRECV_REPLACE  ",res,res2
        ! *** involved shift ****
-       IF (MODULO(nprocs,2)/=0) STOP
+       IF (MODULO(nprocs,2)/=0) CALL mp_abort()
        DO j=1,Nprocs
           DO i=1,Nloc
              grid3(i,j)=MODULO(i*j*taskid,itests)
@@ -3542,7 +3585,7 @@ CONTAINS
        CALL mpi_allreduce(t5,res2,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm, ierr)
        maxdiff=MAXVAL(ABS(lgrid3-lgrid))
        CALL mpi_allreduce(maxdiff,res3,1,MPI_DOUBLE_PRECISION,MPI_MAX,comm, ierr)
-       IF (ionode) WRITE(*,*) "INVOLVED SHIFT        ",res+res2,"(",res,",",res2,")",res3
+       IF (ionode .AND. output_unit > 0) WRITE(output_unit,*) "INVOLVED SHIFT        ",res+res2,"(",res,",",res2,")",res3
     ENDDO
     DEALLOCATE(rcount)
     DEALLOCATE(scount)
@@ -3560,7 +3603,7 @@ CONTAINS
     DEALLOCATE(send_timings)
     DEALLOCATE(send_timings2)
 #else
-    WRITE(*,*) "No MPI tests for a serial program"
+    IF (output_unit > 0) WRITE(output_unit,*) "No MPI tests for a serial program"
 #endif
   END SUBROUTINE mpi_perf_test
 

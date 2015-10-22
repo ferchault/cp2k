@@ -27,6 +27,7 @@ MODULE xc_derivative_desc
   
 
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
   IMPLICIT NONE
 
   PRIVATE
@@ -51,15 +52,12 @@ CONTAINS
 !> \param deriv_desc input string which describes the derivative and
 !>                    should be standardized
 !> \param res ...
-!> \param error variable to control error logging, stopping,...
-!>                    see module cp_error_handling
 ! *****************************************************************************
- SUBROUTINE standardize_derivative_desc(deriv_desc,res,error)
+ SUBROUTINE standardize_derivative_desc(deriv_desc,res)
     CHARACTER(len=*), INTENT(in)             :: deriv_desc
     CHARACTER&
       (LEN=MAX_DERIVATIVE_DESC_LENGTH), &
       INTENT(OUT)                            :: res
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'standardize_derivative_desc', &
       routineP = moduleN//':'//routineN
@@ -67,10 +65,10 @@ CONTAINS
     CHARACTER(len=MAX_LABEL_LENGTH)          :: tmp
     CHARACTER(len=MAX_LABEL_LENGTH), &
       DIMENSION(:), POINTER                  :: deriv_array
-    INTEGER                                  :: i, l_label, pos, stat
+    INTEGER                                  :: i, l_label, pos
     LOGICAL                                  :: ordered
 
-    CALL create_split_derivative_desc(deriv_desc,deriv_array,error=error)
+    CALL create_split_derivative_desc(deriv_desc,deriv_array)
 
     ordered=.FALSE.
     DO WHILE(.not.ordered)
@@ -93,8 +91,7 @@ CONTAINS
        pos=pos+l_label+2
     END DO
 
-    DEALLOCATE(deriv_array, stat=stat)
-    CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+    DEALLOCATE(deriv_array)
 
   END SUBROUTINE standardize_derivative_desc
 
@@ -102,20 +99,16 @@ CONTAINS
 !> \brief returns an array of 1st order derivative descriptions
 !> \param deriv_desc input string which describes the derivative
 !> \param res ...
-!> \param error variable to control error logging, stopping,...
-!>                    see module cp_error_handling
 ! *****************************************************************************
-  SUBROUTINE create_split_derivative_desc(deriv_desc,res,error)
+  SUBROUTINE create_split_derivative_desc(deriv_desc,res)
     CHARACTER(len=*), INTENT(in)             :: deriv_desc
     CHARACTER(len=MAX_LABEL_LENGTH), &
       DIMENSION(:), POINTER                  :: res
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'create_split_derivative_desc', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, j, nderiv, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: i, j, nderiv
 
     nderiv=0
     DO i=1,LEN(deriv_desc)
@@ -124,8 +117,7 @@ CONTAINS
        END IF
     END DO
 
-    ALLOCATE(res(nderiv),stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(res(nderiv))
 
     nderiv=0
     DO i=1,LEN(deriv_desc)

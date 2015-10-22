@@ -52,11 +52,9 @@ MODULE mc_ge_moves
                                              particle_list_type
   USE particle_methods,                ONLY: write_particle_coordinates
   USE physcon,                         ONLY: angstrom
-  USE termination,                     ONLY: stop_memory,&
-                                             stop_program
-  USE timings,                         ONLY: timeset,&
-                                             timestop
+  USE termination,                     ONLY: stop_memory
 #include "../../common/cp_common_uses.f90"
+#include "../../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -99,16 +97,13 @@ CONTAINS
 !> \param particles the pointers for the particle sets
 !> \param rng_stream the stream we pull random numbers from
 !> \param unit_conv ...
-!> \param error the cp_error_type in case something goes wrong
-!>
-!>      Designed for parallel use.
 !> \author MJM
 ! *****************************************************************************
   SUBROUTINE mc_Quickstep_move(mc_par,force_env,bias_env,moves,&
                         lreject,move_updates,energy_check,r_old,&
                         nnstep,old_energy,bias_energy_new,last_bias_energy,&
                         nboxes,box_flag,subsys,particles,rng_stream,&
-                        unit_conv,error)
+                        unit_conv)
 
     TYPE(mc_simulation_parameters_p_type), &
       DIMENSION(:), POINTER                  :: mc_par
@@ -135,7 +130,6 @@ CONTAINS
       DIMENSION(:), POINTER                  :: particles
     TYPE(rng_stream_type), POINTER           :: rng_stream
     REAL(KIND=dp), INTENT(IN)                :: unit_conv
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'mc_Quickstep_move', &
       routineP = moduleN//':'//routineN
@@ -190,9 +184,9 @@ CONTAINS
 ! grab the coordinates for the force_env
       DO ibox=1,nboxes
          CALL force_env_get(force_env(ibox)%force_env,&
-            subsys=subsys(ibox)%subsys,error=error)
+            subsys=subsys(ibox)%subsys)
          CALL cp_subsys_get(subsys(ibox)%subsys, &
-            particles=particles(ibox)%list, error=error)
+            particles=particles(ibox)%list)
       ENDDO
 
 ! calculate the new energy of the system...if we're biasing,
@@ -202,9 +196,9 @@ CONTAINS
             IF(lbias) THEN
 ! grab the coords from bias_env and put them into force_env
                CALL force_env_get(bias_env(ibox)%force_env,&
-                  subsys=subsys_bias(ibox)%subsys,error=error)
+                  subsys=subsys_bias(ibox)%subsys)
                CALL cp_subsys_get(subsys_bias(ibox)%subsys, &
-                  particles=particles_bias(ibox)%list, error=error)
+                  particles=particles_bias(ibox)%list)
 
                DO iparticle=1,nunits_tot(ibox)
                   particles(ibox)%list%els(iparticle)%r(1:3)=&
@@ -212,15 +206,15 @@ CONTAINS
                ENDDO
 
                CALL force_env_calc_energy_force(force_env(ibox)%force_env,&
-                  calc_force=.FALSE.,error=error)
+                  calc_force=.FALSE.)
                CALL force_env_get(force_env(ibox)%force_env,&
-                  potential_energy=new_energy(ibox),error=error)
+                  potential_energy=new_energy(ibox))
             ELSE
                IF( .NOT. lreject) THEN
                   CALL force_env_calc_energy_force(force_env(ibox)%force_env,&
-                     calc_force=.FALSE.,error=error)
+                     calc_force=.FALSE.)
                   CALL force_env_get(force_env(ibox)%force_env,&
-                     potential_energy=new_energy(ibox),error=error)
+                     potential_energy=new_energy(ibox))
                ENDIF
             ENDIF
          ELSE
@@ -243,7 +237,7 @@ CONTAINS
                   CALL write_particle_coordinates(&
                      particles(ibox)%list%els,&
                      diff(ibox),dump_xmol,'POS','TRIAL',&
-                     unit_conv=unit_conv,error=error)
+                     unit_conv=unit_conv)
                ENDIF
             ENDDO
          ENDIF
@@ -263,9 +257,8 @@ CONTAINS
                   end_mol=start_mol+SUM(nchains(:,ibox))-1
                   CALL check_for_overlap(bias_env(ibox)%force_env,&
                      nchains(:,ibox),nunits(:),loverlap,mol_type(start_mol:end_mol))
-                  IF(loverlap) CALL stop_program(routineN,&
-                     moduleN,__LINE__,&
-                     'Quickstep move found an overlap in the old config')
+                  IF(loverlap)&
+                     CPABORT('Quickstep move found an overlap in the old config')
                ENDIF
                bias_energy_old(ibox)=last_bias_energy(ibox)
             ENDDO
@@ -307,7 +300,7 @@ CONTAINS
          w=1.0E0_dp
          rand=0.0E0_dp
       ELSE
-         IF(ionode) rand=next_random_number(rng_stream,error=error)
+         IF(ionode) rand=next_random_number(rng_stream)
          CALL mp_bcast(rand,source,group)
       ENDIF
 
@@ -407,19 +400,15 @@ CONTAINS
 ! make sure the coordinates are transferred
       DO ibox=1,nboxes
          CALL cp_subsys_set(subsys(ibox)%subsys,&
-            particles=particles(ibox)%list,error=error)
+            particles=particles(ibox)%list)
          IF(lbias .AND. box_flag(ibox) == 1) &
             CALL cp_subsys_set(subsys_bias(ibox)%subsys,&
-            particles=particles_bias(ibox)%list,error=error)
+            particles=particles_bias(ibox)%list)
       ENDDO
 
  ! deallocate some stuff
-      DEALLOCATE(subsys_bias,STAT=istat)
-      IF (istat /= 0) CALL stop_memory(routineN,moduleN,&
-         __LINE__,"subsys_bias")
-      DEALLOCATE(particles_bias,STAT=istat)
-      IF (istat /= 0) CALL stop_memory(routineN,moduleN,&
-         __LINE__,"particles_bias")
+      DEALLOCATE(subsys_bias)
+      DEALLOCATE(particles_bias)
 
 ! end the timing
       CALL timestop(handle)
@@ -445,15 +434,12 @@ CONTAINS
 !>        potential
 !> \param last_bias_energy the energy for the biased simulations
 !> \param rng_stream the stream we pull random numbers from
-!> \param error the cp_error_type in case something goes wrong
-!>
-!>      Suitable for parallel.
 !> \author MJM
 ! *****************************************************************************
   SUBROUTINE mc_ge_swap_move(mc_par,force_env,bias_env,moves,&
                 energy_check,r_old,old_energy,input_declaration,&
                 para_env,bias_energy_old,last_bias_energy,&
-                rng_stream,error)
+                rng_stream)
 
     TYPE(mc_simulation_parameters_p_type), &
       DIMENSION(:), POINTER                  :: mc_par
@@ -473,7 +459,6 @@ CONTAINS
       INTENT(INOUT)                          :: bias_energy_old, &
                                                 last_bias_energy
     TYPE(rng_stream_type), POINTER           :: rng_stream
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'mc_ge_swap_move', &
       routineP = moduleN//':'//routineN
@@ -558,14 +543,13 @@ CONTAINS
 ! get the old coordinates
       DO ibox=1,2
          CALL force_env_get(force_env(ibox)%force_env,&
-             subsys=oldsys(ibox)%subsys,error=error)
+             subsys=oldsys(ibox)%subsys)
          CALL cp_subsys_get(oldsys(ibox)%subsys, &
-            particles=particles_old(ibox)%list, &
-            error=error)
+            particles=particles_old(ibox)%list)
       ENDDO
 
 !     choose a direction to swap
-      IF(ionode) rand=next_random_number(rng_stream,error=error)
+      IF(ionode) rand=next_random_number(rng_stream)
       CALL mp_bcast(rand,source,group)
 
       IF ( rand .LE. 0.50E0_dp ) THEN
@@ -585,7 +569,7 @@ CONTAINS
 !      insert_box=1
 
 ! now choose a molecule type at random
-      IF(ionode) rand=next_random_number(rng_stream,error=error)
+      IF(ionode) rand=next_random_number(rng_stream)
       CALL mp_bcast(rand,source,group)
       DO itype=1,nmol_types
          IF(rand .LT. pmswap_mol(itype)) THEN
@@ -606,7 +590,7 @@ CONTAINS
             moves(molecule_type,insert_box)%moves%empty+1
       ELSE
 
-         IF(ionode) rand=next_random_number(rng_stream,error=error)
+         IF(ionode) rand=next_random_number(rng_stream)
          CALL mp_bcast(rand,source,group)
          imolecule=CEILING(rand*nchains(molecule_type,remove_box))
 ! figure out the atom number this molecule starts on
@@ -628,7 +612,7 @@ CONTAINS
          end_mol=start_mol+SUM(nchains(:,remove_box))-1
          CALL check_for_overlap(force_env(remove_box)%force_env,&
             nchains(:,remove_box),nunits,loverlap,mol_type(start_mol:end_mol))
-         IF(loverlap) CALL stop_program(routineN,moduleN,__LINE__,&
+         IF(loverlap) CALL cp_abort(__LOCATION__,&
             'CBMC swap move found an overlap in the old remove config')
          start_mol=1
          DO jbox=1,insert_box-1
@@ -637,17 +621,13 @@ CONTAINS
          end_mol=start_mol+SUM(nchains(:,insert_box))-1
          CALL check_for_overlap(force_env(insert_box)%force_env,&
             nchains(:,insert_box),nunits,loverlap,mol_type(start_mol:end_mol))
-         IF(loverlap) CALL stop_program(routineN,moduleN,__LINE__,&
+         IF(loverlap) CALL cp_abort(__LOCATION__,&
             'CBMC swap move found an overlap in the old insert config')
       ENDIF
 
       IF(loverlap) THEN
-         DEALLOCATE(oldsys,STAT=istat)
-         IF (istat /= 0) CALL stop_memory(routineN,moduleN,&
-            __LINE__,"oldsys")
-         DEALLOCATE(particles_old,STAT=istat)
-         IF (istat /= 0) CALL stop_memory(routineN,moduleN,&
-            __LINE__,"particles_old")
+         DEALLOCATE(oldsys)
+         DEALLOCATE(particles_old)
          CALL timestop(handle)
          RETURN
       ENDIF
@@ -682,14 +662,14 @@ CONTAINS
 ! grab the cells for later...acceptance and insertion
       IF(lbias) THEN
          CALL force_env_get(bias_env(insert_box)%force_env,&
-            cell=cell_insert,error=error)
+            cell=cell_insert)
          CALL force_env_get(bias_env(remove_box)%force_env,&
-            cell=cell_remove,error=error)
+            cell=cell_remove)
       ELSE
          CALL force_env_get(force_env(insert_box)%force_env,&
-            cell=cell_insert,error=error)
+            cell=cell_insert)
          CALL force_env_get(force_env(remove_box)%force_env,&
-            cell=cell_remove,error=error)
+            cell=cell_remove)
       ENDIF
       CALL get_cell(cell_remove,abc=abc_remove)
       CALL get_cell(cell_insert,abc=abc_insert)
@@ -697,7 +677,7 @@ CONTAINS
       IF(ionode) THEN
 ! choose an insertion point
          DO idim=1,3
-            rand=next_random_number(rng_stream,error=error)
+            rand=next_random_number(rng_stream)
             pos_insert(idim)=rand*abc_insert(1)
          ENDDO
       ENDIF
@@ -856,9 +836,7 @@ CONTAINS
       ENDIF
 
 ! deallocate r_insert_mol
-      DEALLOCATE(r_insert_mol,STAT=istat)
-      IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-         "r_insert_mol")
+      DEALLOCATE(r_insert_mol)
 
 ! now let's create the two new environments with the different number
 ! of molecules
@@ -866,9 +844,9 @@ CONTAINS
       IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
       "test_env",3*ins_atoms*dp_size)
       CALL mc_create_force_env(test_env(insert_box)%force_env,input_declaration,&
-           para_env, dat_file(insert_box),error=error)
+           para_env, dat_file(insert_box))
       CALL mc_create_force_env(test_env(remove_box)%force_env,input_declaration,&
-           para_env, dat_file(remove_box),error=error)
+           para_env, dat_file(remove_box))
 
 ! allocate an array we'll need
       ALLOCATE(r_cbmc(1:3,1:ins_atoms),STAT=istat)
@@ -883,10 +861,10 @@ CONTAINS
 
 ! compute the new molecule information...we need this for the CBMC part
       IF(rem_atoms == 0) THEN
-         CALL mc_determine_molecule_info(test_env,mc_molecule_info_test,error,&
+         CALL mc_determine_molecule_info(test_env,mc_molecule_info_test,&
               box_number=remove_box)
       ELSE
-         CALL mc_determine_molecule_info(test_env,mc_molecule_info_test,error)
+         CALL mc_determine_molecule_info(test_env,mc_molecule_info_test)
       ENDIF
       CALL get_mc_molecule_info(mc_molecule_info_test,nchains=nchains_test,&
            mol_type=mol_type_test)
@@ -905,7 +883,7 @@ CONTAINS
             exp_min_val,nswapmoves,weight_new,start_atom_ins,ins_atoms,nunits(:),&
             nunits(molecule_type),mass(:,molecule_type),loverlap_ins,bias_energy_new(insert_box),&
             bias_energy_old(insert_box),ionode,.FALSE.,mol_type_test(start_mol:end_mol),&
-            nchains_test(:,insert_box),source,group,rng_stream,error)
+            nchains_test(:,insert_box),source,group,rng_stream)
 
 ! the energy that comes out of the above routine is the difference...we want
 ! the real energy for the acceptance rule...we don't do this for the
@@ -919,13 +897,13 @@ CONTAINS
             exp_min_val,nswapmoves,weight_new,start_atom_ins,ins_atoms,nunits(:),&
             nunits(molecule_type),mass(:,molecule_type),loverlap_ins,new_energy(insert_box),&
             old_energy(insert_box),ionode,.FALSE.,mol_type_test(start_mol:end_mol),&
-            nchains_test(:,insert_box),source,group,rng_stream,error)
+            nchains_test(:,insert_box),source,group,rng_stream)
       ENDIF
 
       CALL force_env_get(test_env(insert_box)%force_env,&
-         subsys=insert_sys,error=error)
+         subsys=insert_sys)
       CALL cp_subsys_get(insert_sys, &
-         particles=particles_insert,error=error)
+         particles=particles_insert)
 
       DO iatom=1,ins_atoms
          r_cbmc(1:3,iatom)=particles_insert%els(iatom)%r(1:3)
@@ -936,29 +914,15 @@ CONTAINS
       IF(loverlap_ins .OR. loverlap_rem) THEN
 ! deallocate some stuff
          CALL mc_molecule_info_destroy(mc_molecule_info_test)
-         CALL force_env_release(test_env(insert_box)%force_env,error=error)
-         CALL force_env_release(test_env(remove_box)%force_env,error=error)
-         DEALLOCATE(insert_coords,STAT=istat)
-         IF (istat /= 0) CALL stop_memory(routineN,moduleN,&
-            __LINE__,"insert_coords")
-         DEALLOCATE(remove_coords,STAT=istat)
-         IF (istat /= 0) CALL stop_memory(routineN,moduleN,&
-            __LINE__,"remove_coords")
-         DEALLOCATE(r_cbmc,STAT=istat)
-         IF (istat /= 0) CALL stop_memory(routineN,moduleN,&
-            __LINE__,"r_cbmc")
-         DEALLOCATE(cbmc_energies,STAT=istat)
-         IF (istat /= 0) CALL stop_memory(routineN,moduleN,&
-            __LINE__,"cbmc_energies")
-         DEALLOCATE(oldsys,STAT=istat)
-         IF (istat /= 0) CALL stop_memory(routineN,moduleN,&
-            __LINE__,"oldsys")
-         DEALLOCATE(particles_old,STAT=istat)
-         IF (istat /= 0) CALL stop_memory(routineN,moduleN,&
-            __LINE__,"particles_old")
-         DEALLOCATE(test_env,STAT=istat)
-         IF (istat /= 0) CALL stop_memory(routineN,moduleN,&
-              __LINE__,"test_env")
+         CALL force_env_release(test_env(insert_box)%force_env)
+         CALL force_env_release(test_env(remove_box)%force_env)
+         DEALLOCATE(insert_coords)
+         DEALLOCATE(remove_coords)
+         DEALLOCATE(r_cbmc)
+         DEALLOCATE(cbmc_energies)
+         DEALLOCATE(oldsys)
+         DEALLOCATE(particles_old)
+         DEALLOCATE(test_env)
          CALL timestop(handle)
          RETURN
       ENDIF
@@ -966,9 +930,9 @@ CONTAINS
 ! broadcast the choosen coordiantes to all processors
 
       CALL force_env_get(test_env(insert_box)%force_env,&
-         subsys=insert_sys,error=error)
+         subsys=insert_sys)
       CALL cp_subsys_get(insert_sys, &
-         particles=particles_insert,error=error)
+         particles=particles_insert)
 
       DO iatom=1,ins_atoms
          particles_insert%els(iatom)%r(1:3)= &
@@ -995,12 +959,12 @@ CONTAINS
          test_env_bias(insert_box)%force_env => test_env(insert_box)%force_env
          NULLIFY(test_env(insert_box)%force_env)
          CALL mc_create_force_env(test_env(insert_box)%force_env, input_declaration, &
-              para_env, dat_file(insert_box),error=error)
+              para_env, dat_file(insert_box))
 
          CALL force_env_calc_energy_force(test_env(insert_box)%force_env,&
-            calc_force=.FALSE.,error=error)
+            calc_force=.FALSE.)
          CALL force_env_get(test_env(insert_box)%force_env,&
-            potential_energy=new_energy(insert_box),error=error)
+            potential_energy=new_energy(insert_box))
 
 ! now the environment that has one less molecule
          IF (SUM(nchains_test(:,remove_box)) == 0) THEN
@@ -1011,7 +975,7 @@ CONTAINS
              test_env_bias(remove_box)%force_env => test_env(remove_box)%force_env
             NULLIFY(test_env(remove_box)%force_env)
             CALL mc_create_force_env(test_env(remove_box)%force_env,input_declaration,&
-                 para_env,dat_file(remove_box),error=error)
+                 para_env,dat_file(remove_box))
             new_energy(remove_box)=0.0E0_dp
             bias_energy_new(remove_box)=0.0E0_dp
          ELSE
@@ -1022,24 +986,24 @@ CONTAINS
             test_env_bias(remove_box)%force_env => test_env(remove_box)%force_env
             NULLIFY(test_env(remove_box)%force_env)
             CALL mc_create_force_env(test_env(remove_box)%force_env,input_declaration,&
-                 para_env,dat_file(remove_box),error=error)
+                 para_env,dat_file(remove_box))
             CALL force_env_calc_energy_force(test_env(remove_box)%force_env,&
-                 calc_force=.FALSE.,error=error)
+                 calc_force=.FALSE.)
             CALL force_env_get(test_env(remove_box)%force_env,&
-               potential_energy=new_energy(remove_box),error=error)
+               potential_energy=new_energy(remove_box))
             CALL force_env_calc_energy_force(test_env_bias(remove_box)%force_env,&
-               calc_force=.FALSE.,error=error)
+               calc_force=.FALSE.)
             CALL force_env_get(test_env_bias(remove_box)%force_env,&
-               potential_energy=bias_energy_new(remove_box),error=error)
+               potential_energy=bias_energy_new(remove_box))
          ENDIF
       ELSE
          IF (SUM(nchains_test(:,remove_box)) == 0) THEN
             new_energy(remove_box)=0.0E0_dp
          ELSE
             CALL force_env_calc_energy_force(test_env(remove_box)%force_env,&
-                 calc_force=.FALSE.,error=error)
+                 calc_force=.FALSE.)
             CALL force_env_get(test_env(remove_box)%force_env,&
-               potential_energy=new_energy(remove_box),error=error)
+               potential_energy=new_energy(remove_box))
          ENDIF
       ENDIF
 
@@ -1059,14 +1023,14 @@ CONTAINS
             exp_min_val,nswapmoves,weight_old,start_atom_rem,nunits_tot(remove_box),&
             nunits(:),nunits(molecule_type),mass(:,molecule_type),loverlap_rem,rdum,&
             bias_energy_new(remove_box),ionode,.TRUE.,mol_type(start_mol:end_mol),&
-            nchains(:,remove_box),source,group,rng_stream,error)
+            nchains(:,remove_box),source,group,rng_stream)
       ELSE
          CALL generate_cbmc_swap_config(force_env(remove_box)%force_env,&
             BETA,max_val, min_val, exp_max_val,&
             exp_min_val,nswapmoves,weight_old,start_atom_rem,nunits_tot(remove_box),&
             nunits(:),nunits(molecule_type),mass(:,molecule_type),loverlap_rem,rdum,&
             new_energy(remove_box),ionode,.TRUE.,mol_type(start_mol:end_mol),&
-            nchains(:,remove_box),source,group,rng_stream,error)
+            nchains(:,remove_box),source,group,rng_stream)
       ENDIF
 
 ! figure out the prefactor to the boltzmann weight in the acceptance
@@ -1104,7 +1068,7 @@ CONTAINS
       IF(w .GE. 1.0E0_dp) THEN
          rand=0.0E0_dp
       ELSE
-         IF(ionode) rand=next_random_number(rng_stream,error=error)
+         IF(ionode) rand=next_random_number(rng_stream)
          CALL mp_bcast(rand,source,group)
       ENDIF
 
@@ -1146,76 +1110,58 @@ CONTAINS
 
 ! update coordinates
          CALL force_env_get(test_env(insert_box)%force_env,&
-            subsys=insert_sys,error=error)
+            subsys=insert_sys)
          CALL cp_subsys_get(insert_sys, &
-            particles=particles_insert,error=error)
+            particles=particles_insert)
          DO ipart=1,ins_atoms
             r_old(1:3,ipart,insert_box)=particles_insert%els(ipart)%r(1:3)
          ENDDO
          CALL force_env_get(test_env(remove_box)%force_env,&
-            subsys=remove_sys,error=error)
+            subsys=remove_sys)
          CALL cp_subsys_get(remove_sys, &
-            particles=particles_remove,error=error)
+            particles=particles_remove)
          DO ipart=1,rem_atoms
             r_old(1:3,ipart,remove_box)=particles_remove%els(ipart)%r(1:3)
          ENDDO
 
          ! insertion box
-         CALL force_env_release(force_env(insert_box)%force_env,error=error)
+         CALL force_env_release(force_env(insert_box)%force_env)
          force_env(insert_box)%force_env => test_env(insert_box)%force_env
 
          ! removal box
-         CALL force_env_release(force_env(remove_box)%force_env,error=error)
+         CALL force_env_release(force_env(remove_box)%force_env)
          force_env(remove_box)%force_env => test_env(remove_box)%force_env
 
 ! if we're biasing, update the bias_env
          IF(lbias) THEN
-            CALL force_env_release(bias_env(insert_box)%force_env,error=error)
+            CALL force_env_release(bias_env(insert_box)%force_env)
             bias_env(insert_box)%force_env =>  test_env_bias(insert_box)%force_env
-            CALL force_env_release(bias_env(remove_box)%force_env,error=error)
+            CALL force_env_release(bias_env(remove_box)%force_env)
             bias_env(remove_box)%force_env => test_env_bias(remove_box)%force_env
-            DEALLOCATE(test_env_bias,STAT=istat)
-            IF (istat /= 0) CALL stop_memory(routineN,moduleN,&
-                 __LINE__,"test_env_bias")
+            DEALLOCATE(test_env_bias)
          ENDIF
 
       ELSE
 
 ! reject the move
          CALL mc_molecule_info_destroy(mc_molecule_info_test)
-         CALL force_env_release(test_env(insert_box)%force_env,error=error)
-         CALL force_env_release(test_env(remove_box)%force_env,error=error)
+         CALL force_env_release(test_env(insert_box)%force_env)
+         CALL force_env_release(test_env(remove_box)%force_env)
          IF(lbias) THEN
-            CALL force_env_release( test_env_bias(insert_box)%force_env,error=error)
-            CALL force_env_release( test_env_bias(remove_box)%force_env,error=error)
-            DEALLOCATE(test_env_bias,STAT=istat)
-            IF (istat /= 0) CALL stop_memory(routineN,moduleN,&
-                 __LINE__,"test_env_bias")
+            CALL force_env_release( test_env_bias(insert_box)%force_env)
+            CALL force_env_release( test_env_bias(remove_box)%force_env)
+            DEALLOCATE(test_env_bias)
          ENDIF
       ENDIF
 
 ! deallocate some stuff
-      DEALLOCATE(insert_coords,STAT=istat)
-      IF (istat /= 0) CALL stop_memory(routineN,moduleN,&
-           __LINE__,"insert_coords")
-      DEALLOCATE(remove_coords,STAT=istat)
-      IF (istat /= 0) CALL stop_memory(routineN,moduleN,&
-           __LINE__,"remove_coords")
-      DEALLOCATE(test_env,STAT=istat)
-      IF (istat /= 0) CALL stop_memory(routineN,moduleN,&
-           __LINE__,"test_env")
-      DEALLOCATE(cbmc_energies,STAT=istat)
-      IF (istat /= 0) CALL stop_memory(routineN,moduleN,&
-         __LINE__,"cbmc_energies")
-      DEALLOCATE(r_cbmc,STAT=istat)
-      IF (istat /= 0) CALL stop_memory(routineN,moduleN,&
-         __LINE__,"r_cbmc")
-      DEALLOCATE(oldsys,STAT=istat)
-      IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-         "oldsys")
-      DEALLOCATE(particles_old,STAT=istat)
-      IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-         "particles_old")
+      DEALLOCATE(insert_coords)
+      DEALLOCATE(remove_coords)
+      DEALLOCATE(test_env)
+      DEALLOCATE(cbmc_energies)
+      DEALLOCATE(r_cbmc)
+      DEALLOCATE(oldsys)
+      DEALLOCATE(particles_old)
 
 ! end the timing
       CALL timestop(handle)
@@ -1240,13 +1186,10 @@ CONTAINS
 !> \param r_old the coordinates of the last accepted move involving a
 !>               Quickstep calculation
 !> \param rng_stream the stream we pull random numbers from
-!> \param error the cp_error_type in case of problems
-!>
-!>      Designed for parallel.
 !> \author MJM
 ! *****************************************************************************
   SUBROUTINE mc_ge_volume_move ( mc_par,force_env, moves,move_updates,&
-      nnstep,old_energy,energy_check,r_old,rng_stream,error)
+      nnstep,old_energy,energy_check,r_old,rng_stream)
 
     TYPE(mc_simulation_parameters_p_type), &
       DIMENSION(:), POINTER                  :: mc_par
@@ -1260,7 +1203,6 @@ CONTAINS
     REAL(KIND=dp), DIMENSION(:, :, :), &
       INTENT(INOUT)                          :: r_old
     TYPE(rng_stream_type), POINTER           :: rng_stream
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'mc_ge_volume_move', &
       routineP = moduleN//':'//routineN
@@ -1357,13 +1299,13 @@ CONTAINS
 ! now let's grab the cell length and particle positions
       DO ibox=1,2
          CALL force_env_get(force_env(ibox)%force_env,&
-            subsys=oldsys(ibox)%subsys,cell=cell(ibox)%cell,error=error)
+            subsys=oldsys(ibox)%subsys,cell=cell(ibox)%cell)
          CALL get_cell(cell(ibox)%cell,abc=abc(:,ibox))
          NULLIFY(cell_old(ibox)%cell)
-         CALL cell_create(cell_old(ibox)%cell,error=error)
-         CALL cell_clone(cell(ibox)%cell,cell_old(ibox)%cell,error=error)
+         CALL cell_create(cell_old(ibox)%cell)
+         CALL cell_clone(cell(ibox)%cell,cell_old(ibox)%cell)
          CALL cp_subsys_get(oldsys(ibox)%subsys, &
-            particles=particles_old(ibox)%list, error=error)
+            particles=particles_old(ibox)%list)
 
 ! find the old cell length
          old_cell_length(1:3,ibox)=abc(1:3,ibox)
@@ -1380,7 +1322,7 @@ CONTAINS
       ENDDO
 
 ! call a random number to figure out how far we're moving
-      IF(ionode) rand=next_random_number(rng_stream,error=error)
+      IF(ionode) rand=next_random_number(rng_stream)
       CALL mp_bcast(rand,source,group)
 
       vol_dis=rmvolume*(rand-0.5E0_dp)*2.0E0_dp
@@ -1388,12 +1330,10 @@ CONTAINS
 ! add to one box, subtract from the other
       IF(old_cell_length(1,1)*old_cell_length(2,1)*&
          old_cell_length(3,1)+vol_dis .LE. (3.0E0_dp/angstrom)**3) &
-         CALL stop_program(routineN,moduleN,__LINE__,&
-         'GE_volume moves are trying to make box 1 smaller than 3')
+         CPABORT('GE_volume moves are trying to make box 1 smaller than 3')
       IF(old_cell_length(1,2)*old_cell_length(2,2)*&
          old_cell_length(3,2)+vol_dis .LE. (3.0E0_dp/angstrom)**3) &
-         CALL stop_program(routineN,moduleN,__LINE__,&
-         'GE_volume moves are trying to make box 2 smaller than 3')
+         CPABORT('GE_volume moves are trying to make box 2 smaller than 3')
 
       DO iside=1,3
          new_cell_length(iside,1)=(old_cell_length(1,1)**3+&
@@ -1410,9 +1350,9 @@ CONTAINS
          hmat_test(3,3,ibox)=new_cell_length(3,ibox)
          NULLIFY (cell_test(ibox)%cell)
          CALL cell_create(cell_test(ibox)%cell,hmat=hmat_test(:,:,ibox),&
-              periodic=cell(ibox)%cell%perd,error=error)
-         CALL force_env_get(force_env(ibox)%force_env, subsys=subsys, error=error)
-         CALL cp_subsys_set(subsys, cell=cell_test(ibox)%cell, error=error)
+              periodic=cell(ibox)%cell%perd)
+         CALL force_env_get(force_env(ibox)%force_env, subsys=subsys)
+         CALL cp_subsys_set(subsys, cell=cell_test(ibox)%cell)
       ENDDO
 
       DO ibox=1,2
@@ -1478,9 +1418,9 @@ CONTAINS
          ELSE
 
             CALL force_env_calc_energy_force(force_env(ibox)%force_env,&
-               calc_force=.FALSE.,error=error)
+               calc_force=.FALSE.)
             CALL force_env_get(force_env(ibox)%force_env,&
-               potential_energy=new_energy(ibox),error=error)
+               potential_energy=new_energy(ibox))
 
          ENDIF
       ENDDO
@@ -1508,7 +1448,7 @@ CONTAINS
          w=1.0E0_dp
          rand=0.0E0_dp
       ELSE
-         IF(ionode) rand=next_random_number(rng_stream,error=error)
+         IF(ionode) rand=next_random_number(rng_stream)
          CALL mp_bcast(rand,source,group)
       ENDIF
 
@@ -1561,8 +1501,8 @@ CONTAINS
 
 ! reset the cell and particle positions
          DO ibox=1,2
-            CALL force_env_get(force_env(ibox)%force_env, subsys=subsys, error=error)
-            CALL cp_subsys_set(subsys, cell=cell_old(ibox)%cell, error=error)
+            CALL force_env_get(force_env(ibox)%force_env, subsys=subsys)
+            CALL cp_subsys_set(subsys, cell=cell_old(ibox)%cell)
             DO iatom=1,nunits_tot(ibox)
                particles_old(ibox)%list%els(iatom)%r(1:3)=r_old(1:3,iatom,ibox)
             ENDDO
@@ -1572,30 +1512,16 @@ CONTAINS
 
 ! free up some memory
       DO ibox=1,2
-         CALL cell_release(cell_test(ibox)%cell,error=error)
-         CALL cell_release(cell_old(ibox)%cell,error=error)
+         CALL cell_release(cell_test(ibox)%cell)
+         CALL cell_release(cell_old(ibox)%cell)
       ENDDO
-      DEALLOCATE(r,STAT=istat)
-      IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-         "r")
-      DEALLOCATE(oldsys,STAT=istat)
-      IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-         "oldsys")
-      DEALLOCATE(particles_old,STAT=istat)
-      IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-         "particles_old")
-      DEALLOCATE(cell,STAT=istat)
-      IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-         "cell")
-      DEALLOCATE(cell_old,STAT=istat)
-      IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-         "cell_old")
-      DEALLOCATE(cell_test,STAT=istat)
-      IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-         "cell_test")
-      DEALLOCATE(loverlap,STAT=istat)
-      IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-         "loverlap")
+      DEALLOCATE(r)
+      DEALLOCATE(oldsys)
+      DEALLOCATE(particles_old)
+      DEALLOCATE(cell)
+      DEALLOCATE(cell_old)
+      DEALLOCATE(cell_test)
+      DEALLOCATE(loverlap)
 
 ! end the timing
       CALL timestop(handle)

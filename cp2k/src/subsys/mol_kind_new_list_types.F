@@ -36,6 +36,7 @@ MODULE mol_kind_new_list_types
   USE molecule_kind_types,             ONLY: deallocate_molecule_kind_set,&
                                              molecule_kind_type
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -92,119 +93,87 @@ CONTAINS
 !>        will deallocate it (defaults to true)
 !> \param n_els number of elements in the list (at least one els_ptr or
 !>        n_els should be given)
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      08.2003 created [fawzi]
 !> \author Fawzi Mohamed
 ! *****************************************************************************
 SUBROUTINE mol_kind_new_list_create(list, els_ptr, &
-     owns_els, n_els, error)
+     owns_els, n_els)
     TYPE(mol_kind_new_list_type), OPTIONAL, &
       POINTER                                :: list
     TYPE(molecule_kind_type), DIMENSION(:), &
       OPTIONAL, POINTER                      :: els_ptr
     LOGICAL, INTENT(in), OPTIONAL            :: owns_els
     INTEGER, INTENT(in), OPTIONAL            :: n_els
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'mol_kind_new_list_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
+  CPASSERT(PRESENT(els_ptr).OR.PRESENT(n_els))
 
-  failure=.FALSE.
-
-  CPPrecondition(PRESENT(els_ptr).OR.PRESENT(n_els),cp_failure_level,routineP,error,failure)
-
-  IF (.NOT. failure) THEN
-     ALLOCATE(list, stat=stat)
-     CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+  ALLOCATE(list)
+  last_mol_kind_new_list_id=last_mol_kind_new_list_id+1
+  list%id_nr=last_mol_kind_new_list_id
+  list%ref_count=1
+  list%owns_els=.TRUE.
+  list%n_els=0
+  IF (PRESENT(owns_els)) list%owns_els=owns_els
+  NULLIFY(list%els)
+  IF (PRESENT(els_ptr)) THEN
+     list%els => els_ptr
+     IF (ASSOCIATED(els_ptr)) THEN
+        list%n_els=SIZE(els_ptr)
+     END IF
   END IF
-  IF (.NOT. failure) THEN
-     last_mol_kind_new_list_id=last_mol_kind_new_list_id+1
-     list%id_nr=last_mol_kind_new_list_id
-     list%ref_count=1
-     list%owns_els=.TRUE.
-     list%n_els=0
-     IF (PRESENT(owns_els)) list%owns_els=owns_els
-     NULLIFY(list%els)
-     IF (PRESENT(els_ptr)) THEN
-        list%els => els_ptr
-        IF (ASSOCIATED(els_ptr)) THEN
-           list%n_els=SIZE(els_ptr)
-        END IF
-     END IF
-     IF (PRESENT(n_els)) list%n_els=n_els
-     IF (.NOT.ASSOCIATED(list%els)) THEN
-        ALLOCATE(list%els(list%n_els),stat=stat)
-        CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
-        CPPreconditionNoFail(list%owns_els,cp_warning_level,routineP,error)
-     END IF
+  IF (PRESENT(n_els)) list%n_els=n_els
+  IF (.NOT.ASSOCIATED(list%els)) THEN
+     ALLOCATE(list%els(list%n_els))
+     CPASSERT(list%owns_els)
   END IF
 END SUBROUTINE mol_kind_new_list_create
 
 ! *****************************************************************************
 !> \brief retains a list (see doc/ReferenceCounting.html)
 !> \param list the list to retain
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      08.2003 created [fawzi]
 !> \author Fawzi Mohamed
 ! *****************************************************************************
-SUBROUTINE mol_kind_new_list_retain(list, error)
+SUBROUTINE mol_kind_new_list_retain(list)
     TYPE(mol_kind_new_list_type), POINTER    :: list
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'mol_kind_new_list_retain', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-  failure=.FALSE.
-
-  CPPrecondition(ASSOCIATED(list),cp_failure_level,routineP,error,failure)
-  IF (.NOT. failure) THEN
-     CPPrecondition(list%ref_count>0,cp_failure_level,routineP,error,failure)
-     list%ref_count=list%ref_count+1
-  END IF
+  CPASSERT(ASSOCIATED(list))
+  CPASSERT(list%ref_count>0)
+  list%ref_count=list%ref_count+1
 END SUBROUTINE mol_kind_new_list_retain
 
 ! *****************************************************************************
 !> \brief releases a  list (see doc/ReferenceCounting.html)
 !> \param list the list to release
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      08.2003 created [fawzi]
 !> \author Fawzi Mohamed
 ! *****************************************************************************
-SUBROUTINE mol_kind_new_list_release(list, error)
+SUBROUTINE mol_kind_new_list_release(list)
     TYPE(mol_kind_new_list_type), POINTER    :: list
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'mol_kind_new_list_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-  failure=.FALSE.
-
   IF (ASSOCIATED(list)) THEN
-     CPPrecondition(list%ref_count>0,cp_failure_level,routineP,error,failure)
+     CPASSERT(list%ref_count>0)
      list%ref_count=list%ref_count-1
      IF (list%ref_count==0) THEN
         IF (list%owns_els) THEN
            IF (ASSOCIATED(list%els)) THEN
-              CALL deallocate_molecule_kind_set(list%els,error=error)
+              CALL deallocate_molecule_kind_set(list%els)
            END IF
         END IF
         NULLIFY(list%els)
-        DEALLOCATE(list,stat=stat)
-        CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+        DEALLOCATE(list)
      END IF
   END IF
   NULLIFY(list)
@@ -215,7 +184,7 @@ END SUBROUTINE mol_kind_new_list_release
 ! [template(el_typename,el_type,USE,deallocate_els_code)]
 ! ARGS:
 !  USE = "use molecule_kind_types, only: molecule_kind_type, deallocate_molecule_kind_set"
-!  deallocate_els_code = "call deallocate_molecule_kind_set(list%els,error=error)"
+!  deallocate_els_code = "call deallocate_molecule_kind_set(list%els)"
 !  el_type = "type(molecule_kind_type)"
 !  el_typename = "mol_kind_new"
 

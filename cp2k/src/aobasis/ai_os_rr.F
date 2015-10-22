@@ -9,6 +9,7 @@ MODULE ai_os_rr
   USE kinds,                           ONLY: dp
   USE orbital_pointers,                ONLY: coset
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
   CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'ai_os_rr'
@@ -109,12 +110,11 @@ CONTAINS
 !> \param ldrr1 ...
 !> \param ldrr2 ...
 !> \param rr ...
-!> \param error ...
 !> \date    02.03.2009
 !> \author  VW
 !> \version 1.0
 ! *****************************************************************************
-  SUBROUTINE os_rr_coul(rap,la_max,rbp,lb_max,rcp,zet,ldrr1,ldrr2,rr,error)
+  SUBROUTINE os_rr_coul(rap,la_max,rbp,lb_max,rcp,zet,ldrr1,ldrr2,rr)
     REAL(dp), DIMENSION(3), INTENT(IN)       :: rap
     INTEGER, INTENT(IN)                      :: la_max
     REAL(dp), DIMENSION(3), INTENT(IN)       :: rbp
@@ -125,7 +125,6 @@ CONTAINS
     REAL(dp), &
       DIMENSION(0:ldrr1-1, ldrr2, *), &
       INTENT(INOUT)                          :: rr
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'os_rr_coul', &
       routineP = moduleN//':'//routineN
@@ -185,7 +184,7 @@ CONTAINS
                 ENDDO
              ENDIF
           ELSE
-             STOP
+             CPABORT("")
           ENDIF
        ENDDO
        ENDDO
@@ -258,7 +257,7 @@ CONTAINS
                       ENDDO
                    ENDIF
                 ELSE
-                   STOP
+                   CPABORT("")
                 ENDIF
              ENDDO
              ENDDO

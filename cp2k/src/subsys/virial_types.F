@@ -12,6 +12,7 @@ MODULE virial_types
   
   USE kinds,                           ONLY: dp
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -71,12 +72,10 @@ CONTAINS
 ! *****************************************************************************
 !> \brief   symmetrize the virial components
 !> \param virial ...
-!> \param error ...
 !> \version 1.0
 ! *****************************************************************************
-  SUBROUTINE sym_virial (virial, error)
+  SUBROUTINE sym_virial (virial)
     TYPE(virial_type), POINTER               :: virial
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'sym_virial', &
       routineP = moduleN//':'//routineN
@@ -185,61 +184,15 @@ CONTAINS
 ! *****************************************************************************
 !> \brief ...
 !> \param virial ...
-!> \param pv_total ...
-!> \param pv_virial ...
-!> \param pv_xc ...
-!> \param pv_fock_4c ...
-!> \param pv_constraint ...
-!> \param pv_kinetic ...
-!> \param pv_availability ...
-!> \param pv_calculate ...
-!> \param pv_numer ...
-!> \param pv_diagonal ...
 ! *****************************************************************************
-  SUBROUTINE virial_get ( virial, pv_total, pv_virial, pv_xc, pv_fock_4c, pv_constraint, &
-       pv_kinetic, pv_availability, pv_calculate, pv_numer, pv_diagonal )
+  SUBROUTINE virial_create ( virial)
 
     TYPE(virial_type), POINTER               :: virial
-    REAL(KIND=dp), DIMENSION(3, 3), OPTIONAL :: pv_total, pv_virial, pv_xc, &
-                                                pv_fock_4c, pv_constraint, &
-                                                pv_kinetic
-    LOGICAL, OPTIONAL                        :: pv_availability, &
-                                                pv_calculate, pv_numer, &
-                                                pv_diagonal
-
-    CHARACTER(LEN=*), PARAMETER :: routineN = 'virial_get', &
-      routineP = moduleN//':'//routineN
-
-    IF ( PRESENT ( pv_total ) ) pv_total = virial % pv_total
-    IF ( PRESENT ( pv_virial ) ) pv_virial = virial % pv_virial
-    IF ( PRESENT ( pv_xc ) ) pv_xc = virial % pv_xc
-    IF ( PRESENT ( pv_fock_4c ) ) pv_fock_4c = virial % pv_fock_4c
-    IF ( PRESENT ( pv_constraint ) ) pv_constraint = virial % pv_constraint
-    IF ( PRESENT ( pv_kinetic ) ) pv_kinetic = virial % pv_kinetic
-    IF ( PRESENT ( pv_availability ) ) pv_availability = virial % pv_availability
-    IF ( PRESENT ( pv_calculate ) ) pv_calculate = virial % pv_calculate
-    IF ( PRESENT ( pv_numer ) ) pv_numer = virial % pv_numer
-    IF ( PRESENT ( pv_diagonal ) ) pv_diagonal = virial % pv_diagonal
-
-  END SUBROUTINE virial_get
-
-! *****************************************************************************
-!> \brief ...
-!> \param virial ...
-!> \param error ...
-! *****************************************************************************
-  SUBROUTINE virial_create ( virial, error )
-
-    TYPE(virial_type), POINTER               :: virial
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'virial_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: istat
-
-    ALLOCATE ( virial, stat=istat )
-    CPPostconditionNoFail(istat==0,cp_warning_level,routineP,error)
+    ALLOCATE ( virial)
 
     CALL zero_virial ( virial )
     last_virial_id_nr=last_virial_id_nr+1
@@ -248,62 +201,25 @@ CONTAINS
   END SUBROUTINE virial_create
 
 ! *****************************************************************************
-!> \brief retains the given virial_type
-!> \param virial the virial_type to retain
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
-!> \par History
-!>      04.2003 created [fawzi]
-!> \author fawzi
-!> \note
-!>      see doc/ReferenceCounting.html
-! *****************************************************************************
-  SUBROUTINE virial_retain ( virial, error)
-    TYPE(virial_type), POINTER               :: virial
-    TYPE(cp_error_type), INTENT(inout)       :: error
-
-    CHARACTER(len=*), PARAMETER :: routineN = 'virial_retain', &
-      routineP = moduleN//':'//routineN
-
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
-
-    CPPrecondition(ASSOCIATED(virial),cp_failure_level,routineP,error,failure)
-    IF (.NOT. failure) THEN
-       CPPreconditionNoFail(virial%ref_count>0,cp_failure_level,routineP,error)
-       virial%ref_count=virial%ref_count+1
-    END IF
-  END SUBROUTINE virial_retain
-
-! *****************************************************************************
 !> \brief releases the given virial_type
 !> \param virial the virial_type to release
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      04.2003 created [fawzi]
 !> \author fawzi
 !> \note
 !>      see doc/ReferenceCounting.html
 ! *****************************************************************************
-  SUBROUTINE virial_release(virial, error)
+  SUBROUTINE virial_release(virial)
     TYPE(virial_type), POINTER               :: virial
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'virial_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: istat
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
     IF (ASSOCIATED(virial)) THEN
-       CPPreconditionNoFail(virial%ref_count>0,cp_failure_level,routineP,error)
+       CPASSERT(virial%ref_count>0)
        virial%ref_count=virial%ref_count-1
        IF (virial%ref_count.EQ.0) THEN
-          DEALLOCATE(virial,STAT=istat)
-          CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+          DEALLOCATE(virial)
        ENDIF
        NULLIFY(virial)
     END IF

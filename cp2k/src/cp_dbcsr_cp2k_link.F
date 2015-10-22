@@ -22,21 +22,20 @@ MODULE cp_dbcsr_cp2k_link
        accdrv_posterior_buffers, accdrv_posterior_streams, &
        accdrv_priority_buffers, accdrv_priority_streams, cp_dbcsr_finalize, &
        cp_dbcsr_get_block_p, cp_dbcsr_get_matrix_type, cp_dbcsr_has_symmetry, &
-       cp_dbcsr_reserve_blocks, cp_dbcsr_set, cp_dbcsr_type, dbcsr_error_set, &
-       dbcsr_error_stop, dbcsr_error_type, &
+       cp_dbcsr_reserve_blocks, cp_dbcsr_set, cp_dbcsr_type, &
        dbcsr_get_conf_avg_elements_images, dbcsr_get_conf_comm_thread_load, &
        dbcsr_get_conf_mm_driver, dbcsr_get_conf_mm_stacksize, &
        dbcsr_get_conf_mpi_mem, dbcsr_get_conf_nstacks, &
-       dbcsr_get_conf_use_comm_thread, dbcsr_get_conf_use_mpi_filtering, &
-       dbcsr_get_conf_use_mpi_rma, dbcsr_set_conf_avg_elements_images, &
-       dbcsr_set_conf_comm_thread_load, dbcsr_set_conf_external_timing, &
+       dbcsr_get_conf_randmat_seed, dbcsr_get_conf_use_comm_thread, &
+       dbcsr_get_conf_use_mpi_filtering, dbcsr_get_conf_use_mpi_rma, &
+       dbcsr_set_conf_avg_elements_images, dbcsr_set_conf_comm_thread_load, &
        dbcsr_set_conf_max_ele_block, dbcsr_set_conf_mm_driver, &
        dbcsr_set_conf_mm_stacksize, dbcsr_set_conf_nstacks, &
-       dbcsr_set_conf_use_comm_thread, dbcsr_set_conf_use_mpi_filtering, &
-       dbcsr_set_conf_use_mpi_rma, dbcsr_type_no_symmetry, has_acc, has_mpi, &
-       mm_driver_acc, mm_driver_blas, mm_driver_matmul, mm_driver_smm, &
-       mm_name_acc, mm_name_blas, mm_name_matmul, mm_name_smm, multrec_limit
-  USE input_constants,                 ONLY: use_orb_basis_set
+       dbcsr_set_conf_randmat_seed, dbcsr_set_conf_use_comm_thread, &
+       dbcsr_set_conf_use_mpi_filtering, dbcsr_set_conf_use_mpi_rma, &
+       dbcsr_type_no_symmetry, has_acc, has_mpi, mm_driver_acc, &
+       mm_driver_blas, mm_driver_matmul, mm_driver_smm, mm_name_acc, &
+       mm_name_blas, mm_name_matmul, mm_name_smm, multrec_limit
   USE input_section_types,             ONLY: section_vals_get_subs_vals,&
                                              section_vals_type,&
                                              section_vals_val_get
@@ -55,9 +54,8 @@ MODULE cp_dbcsr_cp2k_link
                                              neighbor_list_iterator_p_type,&
                                              neighbor_list_iterator_release,&
                                              neighbor_list_set_p_type
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -77,102 +75,93 @@ CONTAINS
 ! *****************************************************************************
 !> \brief Configures options for DBCSR
 !> \param root_section ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE cp_dbcsr_config(root_section, error)
+  SUBROUTINE cp_dbcsr_config(root_section)
     TYPE(section_vals_type), POINTER         :: root_section
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cp_dbcsr_config', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: avg_elements_images, &
-                                                comm_thread_load, &
-                                                error_handle, max_ele_block, &
-                                                mm_driver, mm_ss
+    INTEGER :: avg_elements_images, comm_thread_load, error_handle, &
+      max_ele_block, mm_driver, mm_ss, randmat_seed
     INTEGER, DIMENSION(3)                    :: nstacks
     LOGICAL                                  :: use_comm_thread, &
                                                 use_mpi_filtering, use_mpi_rma
-    TYPE(dbcsr_error_type)                   :: dbcsr_error
     TYPE(section_vals_type), POINTER         :: dbcsr_section
 
-! need to call dbcsr_set_conf_external_timing() before dbcsr_error_set()
-! otherwise this would lead to mismatched calls to timeset/timestop
-
-    CALL dbcsr_set_conf_external_timing(timeset, timestop, error=dbcsr_error)
-
-    CALL dbcsr_error_set (routineN, error_handle, dbcsr_error)
+    CALL timeset(routineN, error_handle)
     dbcsr_section => section_vals_get_subs_vals(root_section,&
-      "GLOBAL%DBCSR",error=error)
+      "GLOBAL%DBCSR")
     CALL section_vals_val_get(dbcsr_section,&
-         "mm_stack_size", i_val=mm_ss, error=error)
+         "mm_stack_size", i_val=mm_ss)
     CALL section_vals_val_get(dbcsr_section,&
-         "mm_driver", i_val=mm_driver, error=error)
+         "mm_driver", i_val=mm_driver)
     CALL section_vals_val_get(dbcsr_section,&
-         "MAX_ELEMENTS_PER_BLOCK", i_val=max_ele_block, error=error)
+         "MAX_ELEMENTS_PER_BLOCK", i_val=max_ele_block)
     CALL section_vals_val_get(dbcsr_section,&
-         "avg_elements_images", i_val=avg_elements_images, error=error)
+         "avg_elements_images", i_val=avg_elements_images)
     CALL section_vals_val_get(dbcsr_section,&
-         "n_size_mnk_stacks", i_val=nstacks(1), error=error)
+         "n_size_mnk_stacks", i_val=nstacks(1))
     nstacks(2:3) = nstacks(1)
     CALL section_vals_val_get(dbcsr_section,&
-         "use_mpi_filtering", l_val=use_mpi_filtering, error=error)
+         "use_mpi_filtering", l_val=use_mpi_filtering)
     CALL section_vals_val_get(dbcsr_section,&
-         "use_mpi_rma", l_val=use_mpi_rma, error=error)
+         "use_mpi_rma", l_val=use_mpi_rma)
     CALL section_vals_val_get(dbcsr_section,&
-         "use_comm_thread", l_val=use_comm_thread, error=error)
+         "use_comm_thread", l_val=use_comm_thread)
     CALL section_vals_val_get(dbcsr_section,&
-         "comm_thread_load", i_val=comm_thread_load, error=error)
+         "comm_thread_load", i_val=comm_thread_load)
     CALL section_vals_val_get(dbcsr_section,&
-         "multrec_limit", i_val=multrec_limit, error=error)
+         "multrec_limit", i_val=multrec_limit)
+    CALL section_vals_val_get(dbcsr_section,&
+         "randmat_seed", i_val=randmat_seed)
 
     CALL section_vals_val_get(dbcsr_section,&
-         "ACC%priority_streams", i_val=accdrv_priority_streams, error=error)
+         "ACC%priority_streams", i_val=accdrv_priority_streams)
     CALL section_vals_val_get(dbcsr_section,&
-         "ACC%priority_buffers", i_val=accdrv_priority_buffers, error=error)
+         "ACC%priority_buffers", i_val=accdrv_priority_buffers)
     CALL section_vals_val_get(dbcsr_section,&
-         "ACC%posterior_streams", i_val=accdrv_posterior_streams, error=error)
+         "ACC%posterior_streams", i_val=accdrv_posterior_streams)
     CALL section_vals_val_get(dbcsr_section,&
-         "ACC%posterior_buffers", i_val=accdrv_posterior_buffers, error=error)
+         "ACC%posterior_buffers", i_val=accdrv_posterior_buffers)
 
     CALL section_vals_val_get(dbcsr_section,&
-         "ACC%min_flop_process", i_val=accdrv_min_flop_process, error=error)
+         "ACC%min_flop_process", i_val=accdrv_min_flop_process)
     CALL section_vals_val_get(dbcsr_section,&
-         "ACC%min_flop_sort", i_val=accdrv_min_flop_sort, error=error)
+         "ACC%min_flop_sort", i_val=accdrv_min_flop_sort)
     CALL section_vals_val_get(dbcsr_section,&
-         "ACC%process_inhomogenous", l_val=accdrv_do_inhomogenous, error=error)
+         "ACC%process_inhomogenous", l_val=accdrv_do_inhomogenous)
     CALL section_vals_val_get(dbcsr_section,&
-         "ACC%avoid_after_busy", l_val=accdrv_avoid_after_busy, error=error)
+         "ACC%avoid_after_busy", l_val=accdrv_avoid_after_busy)
     CALL section_vals_val_get(dbcsr_section,&
-         "ACC%binning_nbins", i_val=accdrv_binning_nbins, error=error)
+         "ACC%binning_nbins", i_val=accdrv_binning_nbins)
     CALL section_vals_val_get(dbcsr_section,&
-         "ACC%binning_binsize", i_val=accdrv_binning_binsize, error=error)
+         "ACC%binning_binsize", i_val=accdrv_binning_binsize)
 
-    CALL dbcsr_set_conf_mm_driver (mm_driver, error=dbcsr_error)
-    CALL dbcsr_set_conf_max_ele_block (max_ele_block, error=dbcsr_error)
+    CALL dbcsr_set_conf_mm_driver (mm_driver)
+    CALL dbcsr_set_conf_max_ele_block (max_ele_block)
     IF(mm_ss > 0) &
-    CALL dbcsr_set_conf_mm_stacksize (mm_ss, error=dbcsr_error)
+    CALL dbcsr_set_conf_mm_stacksize (mm_ss)
     IF(avg_elements_images>0) &
-         CALL dbcsr_set_conf_avg_elements_images(avg_elements_images, error=dbcsr_error)
+         CALL dbcsr_set_conf_avg_elements_images(avg_elements_images)
     IF(nstacks(1) > 0) &
-    CALL dbcsr_set_conf_nstacks(nstacks, error=dbcsr_error)
-    CALL dbcsr_set_conf_use_mpi_filtering(use_mpi_filtering, error=dbcsr_error)
-    CALL dbcsr_set_conf_use_mpi_rma(use_mpi_rma, error=dbcsr_error)
-    CALL dbcsr_set_conf_use_comm_thread(use_comm_thread, error=dbcsr_error)
-    CALL dbcsr_set_conf_comm_thread_load(comm_thread_load, error=dbcsr_error)
+    CALL dbcsr_set_conf_nstacks(nstacks)
+    CALL dbcsr_set_conf_use_mpi_filtering(use_mpi_filtering)
+    CALL dbcsr_set_conf_use_mpi_rma(use_mpi_rma)
+    CALL dbcsr_set_conf_use_comm_thread(use_comm_thread)
+    CALL dbcsr_set_conf_comm_thread_load(comm_thread_load)
+    CALL dbcsr_set_conf_randmat_seed(randmat_seed)
 
-    CALL dbcsr_error_stop (error_handle, dbcsr_error)
+    CALL timestop(error_handle)
   END SUBROUTINE cp_dbcsr_config
 
 
 ! *****************************************************************************
 !> \brief Prints configuration for DBCSR
 !> \param unit_nr ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE cp_dbcsr_print_config(unit_nr, error)
+  SUBROUTINE cp_dbcsr_print_config(unit_nr)
     INTEGER, INTENT(IN), OPTIONAL            :: unit_nr
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cp_dbcsr_print_config', &
       routineP = moduleN//':'//routineN
@@ -181,9 +170,8 @@ CONTAINS
     INTEGER                                  :: unit_num
     INTEGER, DIMENSION(3)                    :: n_mnk_stacks
     TYPE(cp_logger_type), POINTER            :: logger
-    TYPE(dbcsr_error_type)                   :: dbcsr_error
 
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
     unit_num = cp_logger_get_default_io_unit(logger)
     IF (PRESENT (unit_nr)) unit_num=unit_nr
 
@@ -209,8 +197,10 @@ CONTAINS
           WRITE(UNIT=unit_num, FMT='(1X,A,T72,A)')&
                "DBCSR| Maximum elements for images","UNLIMITED"
        ENDIF
+       WRITE(UNIT=unit_num, FMT='(1X,A,T70,I11)')&
+        "DBCSR| Randmat seed", dbcsr_get_conf_randmat_seed()
        
-       CALL dbcsr_get_conf_nstacks (n_mnk_stacks, error=dbcsr_error)
+       CALL dbcsr_get_conf_nstacks (n_mnk_stacks)
        IF (ALL(n_mnk_stacks .EQ. n_mnk_stacks(1))) THEN
            WRITE(UNIT=unit_num, FMT='(1X,A,T70,I11)')&
             "DBCSR| Multiplication size stacks", n_mnk_stacks(1)
@@ -270,7 +260,6 @@ CONTAINS
 !> \brief allocate the blocks of a dbcsr based on the neighbor list
 !> \param matrix        the matrix
 !> \param sab_orb       the corresponding neighbor list
-!> \param error ...
 !> \par History
 !>      11.2009 created vw
 !>      01.2014 moved here from cp_dbcsr_operations (Ole Schuett)
@@ -278,12 +267,11 @@ CONTAINS
 !> \note
 ! *****************************************************************************
 
-  SUBROUTINE cp_dbcsr_alloc_block_from_nbl(matrix,sab_orb,error)
+  SUBROUTINE cp_dbcsr_alloc_block_from_nbl(matrix,sab_orb)
 
     TYPE(cp_dbcsr_type)                      :: matrix
     TYPE(neighbor_list_set_p_type), &
       DIMENSION(:), POINTER                  :: sab_orb
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: &
       routineN = 'cp_dbcsr_alloc_block_from_nbl', &
@@ -293,19 +281,18 @@ CONTAINS
     INTEGER                                  :: blk_cnt, handle, iatom, icol, &
                                                 inode, irow, jatom, last_jatom
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: cols, rows, tmp
-    LOGICAL                                  :: failure, new_atom_b
+    LOGICAL                                  :: new_atom_b
     TYPE(neighbor_list_iterator_p_type), &
       DIMENSION(:), POINTER                  :: nl_iterator
 
     CALL timeset(routineN,handle)
 
-    failure = .FALSE.
 
     symmetry = cp_dbcsr_get_matrix_type(matrix)
 
-    CPPrecondition(ASSOCIATED(sab_orb),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(sab_orb))
 
-    CALL cp_dbcsr_finalize (matrix, error=error)
+    CALL cp_dbcsr_finalize (matrix)
     ALLOCATE (rows(1), cols(1))
     blk_cnt = 0
 
@@ -352,11 +339,10 @@ CONTAINS
     CALL neighbor_list_iterator_release(nl_iterator)
 
     !
-    CALL cp_dbcsr_reserve_blocks (matrix, rows(1:blk_cnt), cols(1:blk_cnt),&
-         error=error)
+    CALL cp_dbcsr_reserve_blocks (matrix, rows(1:blk_cnt), cols(1:blk_cnt))
     DEALLOCATE (rows)
     DEALLOCATE (cols)
-    CALL cp_dbcsr_finalize( matrix, error=error )
+    CALL cp_dbcsr_finalize( matrix)
 
     CALL timestop(handle)
 
@@ -373,15 +359,13 @@ CONTAINS
 !>                              the DBCSR matrix that is used to create the CSR
 !>                              matrix. It must have symmetric DBCSR format and 
 !>                              must not be filtered.
-!> \param error ...
 !> \par History
 !>      02.2015 created [Patrick Seewald]
 !> \author Patrick Seewald
 ! *****************************************************************************
-  SUBROUTINE cp_dbcsr_to_csr_screening(ks_env, csr_sparsity, error)
+  SUBROUTINE cp_dbcsr_to_csr_screening(ks_env, csr_sparsity)
     TYPE(qs_ks_env_type), POINTER            :: ks_env
     TYPE(cp_dbcsr_type), INTENT(INOUT)       :: csr_sparsity
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cp_dbcsr_to_csr_screening', &
       routineP = moduleN//':'//routineN
@@ -393,7 +377,7 @@ CONTAINS
     INTEGER, DIMENSION(:), POINTER           :: npgf_a, npgf_b, nshell_a, &
                                                 nshell_b
     INTEGER, DIMENSION(:, :), POINTER        :: l_a, l_b
-    LOGICAL                                  :: do_symmetric, failure, found
+    LOGICAL                                  :: do_symmetric, found
     REAL(KIND=dp)                            :: dab, eps_pgf_orb, r_a, r_b
     REAL(KIND=dp), DIMENSION(3)              :: rab
     REAL(KIND=dp), DIMENSION(:, :), POINTER  :: rpgfa, rpgfb, zet_a, zet_b
@@ -421,30 +405,29 @@ CONTAINS
 
     CALL timeset(routineN,handle)
 
-    CPPrecondition(cp_dbcsr_has_symmetry(csr_sparsity),cp_failure_level,routineP,error,failure)
+    CPASSERT(cp_dbcsr_has_symmetry(csr_sparsity))
 
     CALL get_ks_env(ks_env,&
                     sab_orb=neighbour_list,&
                     atomic_kind_set=atomic_kind_set,&
                     natom=natom,&
                     qs_kind_set=qs_kind_set,&
-                    dft_control=dft_control,&
-                    error=error)
+                    dft_control=dft_control)
  
     eps_pgf_orb = dft_control%qs_control%eps_pgf_orb
 
     nkind = SIZE(qs_kind_set)
     ALLOCATE (atom_of_kind(natom))
     CALL get_atomic_kind_set(atomic_kind_set,atom_of_kind=atom_of_kind)
-    CPPrecondition(SIZE(neighbour_list) > 0,cp_failure_level,routineP,error,failure)
+    CPASSERT(SIZE(neighbour_list) > 0)
     CALL get_neighbor_list_set_p(neighbor_list_sets=neighbour_list,symmetric=do_symmetric)
-    CPPrecondition(do_symmetric,cp_failure_level,routineP,error,failure)
+    CPASSERT(do_symmetric)
     ALLOCATE (basis_set_list_a(nkind),basis_set_list_b(nkind))
-    CALL basis_set_list_setup(basis_set_list_a,use_orb_basis_set,qs_kind_set)
-    CALL basis_set_list_setup(basis_set_list_b,use_orb_basis_set,qs_kind_set)
+    CALL basis_set_list_setup(basis_set_list_a,"ORB",qs_kind_set)
+    CALL basis_set_list_setup(basis_set_list_b,"ORB",qs_kind_set)
 
     ! csr_sparsity can obtain values 0 (if zero element) or 1 (if non-zero element)
-    CALL cp_dbcsr_set (csr_sparsity, 0.0, error)
+    CALL cp_dbcsr_set (csr_sparsity, 0.0)
 
     CALL neighbor_list_iterator_create(nl_iterator, neighbour_list)
 
@@ -492,7 +475,7 @@ CONTAINS
       CALL cp_dbcsr_get_block_p(matrix=csr_sparsity,row=irow,col=icol, &
                                 block=screen_blk,found=found)
 
-      CPPostcondition(found,cp_failure_level,routineP,error,failure)
+      CPASSERT(found)
 
       ! Distance between atoms a and b
       dab = SQRT(rab(1)**2+rab(2)**2+rab(3)**2)

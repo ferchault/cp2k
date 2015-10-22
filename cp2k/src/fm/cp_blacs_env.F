@@ -23,8 +23,8 @@ MODULE cp_blacs_env
   USE machine,                         ONLY: m_flush
   USE mathlib,                         ONLY: gcd
   USE message_passing,                 ONLY: mp_sum
-  USE termination,                     ONLY: stop_program
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -105,7 +105,7 @@ CONTAINS
       routineP = moduleN//':'//routineN
 
     IF (.NOT.ASSOCIATED(blacs_env)) THEN
-       CALL stop_program(routineN,moduleN,__LINE__,"No BLACS environment")
+       CPABORT("No BLACS environment")
     END IF
 
     IF (PRESENT(my_process_row)) my_process_row = blacs_env%mepos(1)
@@ -128,26 +128,22 @@ CONTAINS
 !> \param blacs_repeatable ...
 !> \param row_major ...
 !> \param grid_2d ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      08.2002 created [fawzi]
 !> \author Fawzi Mohamed
 ! *****************************************************************************
-SUBROUTINE cp_blacs_env_create(blacs_env,para_env,blacs_grid_layout,blacs_repeatable,row_major,grid_2d,error)
+SUBROUTINE cp_blacs_env_create(blacs_env,para_env,blacs_grid_layout,blacs_repeatable,row_major,grid_2d)
     TYPE(cp_blacs_env_type), POINTER         :: blacs_env
     TYPE(cp_para_env_type), POINTER          :: para_env
     INTEGER, INTENT(IN), OPTIONAL            :: blacs_grid_layout
     LOGICAL, INTENT(IN), OPTIONAL            :: blacs_repeatable, row_major
     INTEGER, DIMENSION(:), INTENT(IN), &
       OPTIONAL                               :: grid_2d
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cp_blacs_env_create', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: ipcol, iprow, stat
-    LOGICAL                                  :: failure
 #if defined(__parallel)
     INTEGER                                  :: gcd_max, ipe, jpe,&
                                                 my_blacs_grid_layout, &
@@ -156,173 +152,147 @@ SUBROUTINE cp_blacs_env_create(blacs_env,para_env,blacs_grid_layout,blacs_repeat
                                                 my_row_major
 #endif
 
-  failure = .FALSE.
 
 #ifdef __parallel
 #ifndef __SCALAPACK
-  CALL cp_assert(.FALSE.,cp_failure_level, cp_assertion_failed,&
-       fromWhere=routineP,message="to USE the blacs environment "//&
-       "you need the blacs/scalapack library : recompile with -D__SCALAPACK (and link scalapack and blacs) "//&
-CPSourceFileRef,&
-       error=error)
+  CALL cp_abort(__LOCATION__,&
+       "to USE the blacs environment "//&
+       "you need the blacs/scalapack library : recompile with -D__SCALAPACK (and link scalapack and blacs) ")
 #endif
 #endif
 
-  CPPrecondition(.NOT.ASSOCIATED(blacs_env),cp_failure_level,routineP,error,failure)
+  CPASSERT(.NOT.ASSOCIATED(blacs_env))
 
-  ALLOCATE(blacs_env,stat=stat)
-  CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-  IF (.NOT. failure) THEN
-     blacs_env%group=0
-     blacs_env%ref_count=1
-     blacs_env%mepos(:)=0
-     blacs_env%num_pe(:)=1
-     blacs_env%my_pid=0
-     blacs_env%n_pid=1
-     CALL cp_para_env_retain(para_env,error=error)
-     blacs_env%para_env => para_env
+  ALLOCATE(blacs_env)
+  blacs_env%group=0
+  blacs_env%ref_count=1
+  blacs_env%mepos(:)=0
+  blacs_env%num_pe(:)=1
+  blacs_env%my_pid=0
+  blacs_env%n_pid=1
+  CALL cp_para_env_retain(para_env)
+  blacs_env%para_env => para_env
 
 #ifdef __SCALAPACK
-     ! get the number of cpus for this blacs grid
-     blacs_env%my_pid = para_env%mepos
-     blacs_env%n_pid  = para_env%num_pe
-     nprow=1
-     npcol=1
-     npe  =blacs_env%n_pid
-     ! get the layout of this grid
+  ! get the number of cpus for this blacs grid
+  blacs_env%my_pid = para_env%mepos
+  blacs_env%n_pid  = para_env%num_pe
+  nprow=1
+  npcol=1
+  npe  =blacs_env%n_pid
+  ! get the layout of this grid
 
-     IF (PRESENT(grid_2d)) THEN
-        nprow=grid_2d(1)
-        npcol=grid_2d(2)
-     ENDIF
+  IF (PRESENT(grid_2d)) THEN
+     nprow=grid_2d(1)
+     npcol=grid_2d(2)
+  ENDIF
 
-     IF (nprow*npcol.NE.npe) THEN
-       ! hard code for the time being the grid layout
-       my_blacs_grid_layout=BLACS_GRID_SQUARE
-       IF(PRESENT(blacs_grid_layout)) my_blacs_grid_layout=blacs_grid_layout
-       ! XXXXXX
-       SELECT CASE (my_blacs_grid_layout)
-       CASE (BLACS_GRID_SQUARE)
-          ! make the grid as 'square' as possible, where square is defined as nprow and npcol
-          ! having the largest possible gcd
-          gcd_max=-1
-          DO ipe=1,CEILING(SQRT(REAL(npe,dp)))
-             jpe=npe/ipe
-             IF(ipe*jpe.NE.npe) CYCLE
-             IF (gcd(ipe,jpe)>=gcd_max) THEN
-                nprow=ipe
-                npcol=jpe
-                gcd_max=gcd(ipe,jpe)
-             ENDIF
-          ENDDO
-       CASE (BLACS_GRID_ROW)
-          nprow = 1
-          npcol = npe
-       CASE (BLACS_GRID_COL)
-          nprow = npe
-          npcol = 1
-       END SELECT
-     ENDIF
+  IF (nprow*npcol.NE.npe) THEN
+    ! hard code for the time being the grid layout
+    my_blacs_grid_layout=BLACS_GRID_SQUARE
+    IF(PRESENT(blacs_grid_layout)) my_blacs_grid_layout=blacs_grid_layout
+    ! XXXXXX
+    SELECT CASE (my_blacs_grid_layout)
+    CASE (BLACS_GRID_SQUARE)
+       ! make the grid as 'square' as possible, where square is defined as nprow and npcol
+       ! having the largest possible gcd
+       gcd_max=-1
+       DO ipe=1,CEILING(SQRT(REAL(npe,dp)))
+          jpe=npe/ipe
+          IF(ipe*jpe.NE.npe) CYCLE
+          IF (gcd(ipe,jpe)>=gcd_max) THEN
+             nprow=ipe
+             npcol=jpe
+             gcd_max=gcd(ipe,jpe)
+          ENDIF
+       ENDDO
+    CASE (BLACS_GRID_ROW)
+       nprow = 1
+       npcol = npe
+    CASE (BLACS_GRID_COL)
+       nprow = npe
+       npcol = 1
+    END SELECT
+  ENDIF
 
 
-     ! blacs_env%group will be set to the blacs context for this blacs env, this is not the same as the MPI context
-     blacs_env%group=para_env%group
-     my_row_major=.TRUE.
-     IF (PRESENT(row_major)) my_row_major=row_major
-     IF (my_row_major) THEN
-        CALL cp_blacs_gridinit(blacs_env%group,"Row-major",nprow,npcol)
-     ELSE
-        CALL cp_blacs_gridinit(blacs_env%group,"Col-major",nprow,npcol)
-     ENDIF
+  ! blacs_env%group will be set to the blacs context for this blacs env, this is not the same as the MPI context
+  blacs_env%group=para_env%group
+  my_row_major=.TRUE.
+  IF (PRESENT(row_major)) my_row_major=row_major
+  IF (my_row_major) THEN
+     CALL cp_blacs_gridinit(blacs_env%group,"Row-major",nprow,npcol)
+  ELSE
+     CALL cp_blacs_gridinit(blacs_env%group,"Col-major",nprow,npcol)
+  ENDIF
 
-     my_blacs_repeatable = .FALSE.
-     IF(PRESENT(blacs_repeatable)) my_blacs_repeatable=blacs_repeatable
-     blacs_env%repeatable = my_blacs_repeatable
-     IF (blacs_env%repeatable) CALL cp_blacs_set(blacs_env%group, 15, 1)
+  my_blacs_repeatable = .FALSE.
+  IF(PRESENT(blacs_repeatable)) my_blacs_repeatable=blacs_repeatable
+  blacs_env%repeatable = my_blacs_repeatable
+  IF (blacs_env%repeatable) CALL cp_blacs_set(blacs_env%group, 15, 1)
 
-     ! fill in the info one needs
-     CALL cp_blacs_gridinfo(blacs_env%group,blacs_env%num_pe(1),&
-          blacs_env%num_pe(2),blacs_env%mepos(1),blacs_env%mepos(2))
+  ! fill in the info one needs
+  CALL cp_blacs_gridinfo(blacs_env%group,blacs_env%num_pe(1),&
+       blacs_env%num_pe(2),blacs_env%mepos(1),blacs_env%mepos(2))
 #endif
 
-     ! generate the mappings blacs2mpi and mpi2blacs
-     ALLOCATE(blacs_env%blacs2mpi(0:blacs_env%num_pe(1)-1,0:blacs_env%num_pe(2)-1),&
-          stat=stat)
-     CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-     blacs_env%blacs2mpi=0
-     blacs_env%blacs2mpi(blacs_env%mepos(1),blacs_env%mepos(2))=para_env%mepos
-     CALL mp_sum(blacs_env%blacs2mpi,para_env%group)
-     ALLOCATE(blacs_env%mpi2blacs(2,0:para_env%num_pe-1),stat=stat)
-     CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-     blacs_env%mpi2blacs=-1
-     DO ipcol=0,blacs_env%num_pe(2)-1
-        DO iprow=0,blacs_env%num_pe(1)-1
-           blacs_env%mpi2blacs(1,blacs_env%blacs2mpi(iprow,ipcol))=iprow
-           blacs_env%mpi2blacs(2,blacs_env%blacs2mpi(iprow,ipcol))=ipcol
-        END DO
+  ! generate the mappings blacs2mpi and mpi2blacs
+  ALLOCATE(blacs_env%blacs2mpi(0:blacs_env%num_pe(1)-1,0:blacs_env%num_pe(2)-1),&
+       stat=stat)
+  CPASSERT(stat==0)
+  blacs_env%blacs2mpi=0
+  blacs_env%blacs2mpi(blacs_env%mepos(1),blacs_env%mepos(2))=para_env%mepos
+  CALL mp_sum(blacs_env%blacs2mpi,para_env%group)
+  ALLOCATE(blacs_env%mpi2blacs(2,0:para_env%num_pe-1))
+  blacs_env%mpi2blacs=-1
+  DO ipcol=0,blacs_env%num_pe(2)-1
+     DO iprow=0,blacs_env%num_pe(1)-1
+        blacs_env%mpi2blacs(1,blacs_env%blacs2mpi(iprow,ipcol))=iprow
+        blacs_env%mpi2blacs(2,blacs_env%blacs2mpi(iprow,ipcol))=ipcol
      END DO
-  END IF
+  END DO
 END SUBROUTINE cp_blacs_env_create
 
 ! *****************************************************************************
 !> \brief retains the given blacs env
 !> \param blacs_env the blacs env to retain
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      08.2002 created [fawzi]
 !> \author Fawzi Mohamed
 ! *****************************************************************************
-SUBROUTINE cp_blacs_env_retain(blacs_env,error)
+SUBROUTINE cp_blacs_env_retain(blacs_env)
     TYPE(cp_blacs_env_type), POINTER         :: blacs_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cp_blacs_env_retain', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-  failure=.FALSE.
-  CPPrecondition(ASSOCIATED(blacs_env),cp_failure_level,routineP,error,failure)
-  IF (.NOT. failure) THEN
-     CPPrecondition(blacs_env%ref_count>0,cp_failure_level,routineP,error,failure)
-     blacs_env%ref_count=blacs_env%ref_count+1
-  END IF
+  CPASSERT(ASSOCIATED(blacs_env))
+  CPASSERT(blacs_env%ref_count>0)
+  blacs_env%ref_count=blacs_env%ref_count+1
 END SUBROUTINE cp_blacs_env_retain
 
 ! *****************************************************************************
 !> \brief releases the given blacs_env
 !> \param blacs_env the blacs env to relase
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      08.2002 created [fawzi]
 !> \author Fawzi Mohamed
 ! *****************************************************************************
-SUBROUTINE cp_blacs_env_release(blacs_env,error)
+SUBROUTINE cp_blacs_env_release(blacs_env)
     TYPE(cp_blacs_env_type), POINTER         :: blacs_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cp_blacs_env_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-  failure=.FALSE.
-
   IF (ASSOCIATED(blacs_env)) THEN
-     CPPrecondition(blacs_env%ref_count>0,cp_failure_level,routineP,error,failure)
+     CPASSERT(blacs_env%ref_count>0)
      blacs_env%ref_count=blacs_env%ref_count-1
      IF (blacs_env%ref_count<1) THEN
         CALL cp_blacs_gridexit(blacs_env%group)
-        CALL cp_para_env_release(blacs_env%para_env,error=error)
-        DEALLOCATE(blacs_env%mpi2blacs, stat=stat)
-        CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
-        DEALLOCATE(blacs_env%blacs2mpi,stat=stat)
-        CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
-        DEALLOCATE(blacs_env,stat=stat)
-        CPPostcondition(stat==0,cp_warning_level,routineP,error,failure)
+        CALL cp_para_env_release(blacs_env%para_env)
+        DEALLOCATE(blacs_env%mpi2blacs)
+        DEALLOCATE(blacs_env%blacs2mpi)
+        DEALLOCATE(blacs_env)
      END IF
   END IF
   NULLIFY(blacs_env)
@@ -333,42 +303,36 @@ END SUBROUTINE cp_blacs_env_release
 !> \param blacs_env the blacs environment to write
 !> \param unit_nr the unit number where to write the description of the
 !>        blacs environment
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      08.2002 created [fawzi]
 !> \author Fawzi Mohamed
 ! *****************************************************************************
-SUBROUTINE cp_blacs_env_write(blacs_env, unit_nr, error)
+SUBROUTINE cp_blacs_env_write(blacs_env, unit_nr)
     TYPE(cp_blacs_env_type), POINTER         :: blacs_env
     INTEGER, INTENT(in)                      :: unit_nr
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cp_blacs_env_write', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: iostat
-    LOGICAL                                  :: failure
-
-  failure=.FALSE.
 
   IF (ASSOCIATED(blacs_env)) THEN
      WRITE (unit=unit_nr,fmt="('  group=',i10,', ref_count=',i10,',')",&
           iostat=iostat) blacs_env%group, blacs_env%ref_count
-     CPInvariant(iostat==0,cp_failure_level,routineP,error,failure)
+     CPASSERT(iostat==0)
      WRITE (unit=unit_nr,fmt="('  mepos=(',i8,',',i8,'),')",&
           iostat=iostat) blacs_env%mepos(1), blacs_env%mepos(2)
-     CPInvariant(iostat==0,cp_failure_level,routineP,error,failure)
+     CPASSERT(iostat==0)
      WRITE (unit=unit_nr,fmt="('  num_pe=(',i8,',',i8,'),')",&
           iostat=iostat) blacs_env%num_pe(1), blacs_env%num_pe(2)
-     CPInvariant(iostat==0,cp_failure_level,routineP,error,failure)
+     CPASSERT(iostat==0)
      IF (ASSOCIATED(blacs_env%blacs2mpi)) THEN
         WRITE (unit=unit_nr,fmt="('  blacs2mpi=')",advance="no",iostat=iostat)
-        CPInvariant(iostat==0,cp_failure_level,routineP,error,failure)
-        CALL cp_2d_i_write(blacs_env%blacs2mpi,unit_nr=unit_nr, error=error)
+        CPASSERT(iostat==0)
+        CALL cp_2d_i_write(blacs_env%blacs2mpi,unit_nr=unit_nr)
      ELSE
         WRITE (unit=unit_nr,fmt="('  blacs2mpi=*null*')",iostat=iostat)
-        CPInvariant(iostat==0,cp_failure_level,routineP,error,failure)
+        CPASSERT(iostat==0)
      END IF
      IF (ASSOCIATED(blacs_env%para_env)) THEN
         WRITE (unit=unit_nr,fmt="('  para_env=<cp_para_env id=',i6,'>,')")&
@@ -378,11 +342,11 @@ SUBROUTINE cp_blacs_env_write(blacs_env, unit_nr, error)
      END IF
      WRITE (unit=unit_nr,fmt="('  my_pid=',i10,', n_pid=',i10,' }')",&
           iostat=iostat) blacs_env%my_pid, blacs_env%n_pid
-     CPInvariant(iostat==0,cp_failure_level,routineP,error,failure)
+     CPASSERT(iostat==0)
   ELSE
      WRITE (unit=unit_nr,&
           fmt="(a)", iostat=iostat) ' <cp_blacs_env>:*null* '
-     CPInvariant(iostat==0,cp_failure_level,routineP,error,failure)
+     CPASSERT(iostat==0)
   END IF
   CALL m_flush(unit_nr)
 END SUBROUTINE cp_blacs_env_write

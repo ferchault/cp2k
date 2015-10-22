@@ -29,9 +29,9 @@ MODULE orbital_transformation_matrices
                                              nsoset
   USE orbital_symbols,                 ONLY: cgf_symbol,&
                                              sgf_symbol
-  USE termination,                     ONLY: stop_memory,&
-                                             stop_program
+  USE termination,                     ONLY: stop_memory
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -86,15 +86,15 @@ CONTAINS
     REAL(KIND=dp)                            :: s, s1, s2
 
     IF (current_maxl > -1) THEN
-      CALL stop_program(routineN,moduleN,__LINE__,&
-                        "Spherical harmonics are already allocated. "//&
-                        "Use the init routine for an update")
+      CALL cp_abort(__LOCATION__,&
+           "Spherical harmonics are already allocated. "//&
+           "Use the init routine for an update")
     END IF
 
     IF (maxl < 0) THEN
-      CALL stop_program(routineN,moduleN,__LINE__,&
-                        "A negative maximum angular momentum quantum "//&
-                        "number is invalid")
+      CALL cp_abort(__LOCATION__,&
+           "A negative maximum angular momentum quantum "//&
+           "number is invalid")
     END IF
 
     ALLOCATE (orbtramat(0:maxl),STAT=istat)
@@ -286,43 +286,23 @@ CONTAINS
       routineN = 'deallocate_spherical_harmonics', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: istat, l
+    INTEGER                                  :: l
 
     IF (current_maxl > -1) THEN
 
       DO l=0,SIZE(orbtramat,1)-1
 
-        DEALLOCATE (orbtramat(l)%c2s,STAT=istat)
-        IF (istat /= 0) THEN
-          CALL stop_memory(routineN,moduleN,__LINE__,&
-                           "orbtramat(l)%c2s")
-        END IF
+        DEALLOCATE (orbtramat(l)%c2s)
 
-        DEALLOCATE (orbtramat(l)%slm,STAT=istat)
-        IF (istat /= 0) THEN
-          CALL stop_memory(routineN,moduleN,__LINE__,&
-                           "orbtramat(l)%slm")
-        END IF
+        DEALLOCATE (orbtramat(l)%slm)
 
-        DEALLOCATE (orbtramat(l)%s2c,STAT=istat)
-        IF (istat /= 0) THEN
-          CALL stop_memory(routineN,moduleN,__LINE__,&
-                           "orbtramat(l)%s2c")
-        END IF
+        DEALLOCATE (orbtramat(l)%s2c)
 
       END DO
 
-      DEALLOCATE (orbtramat,STAT=istat)
-      IF (istat /= 0) THEN
-        CALL stop_memory(routineN,moduleN,__LINE__,&
-                         "orbtramat")
-      END IF
+      DEALLOCATE (orbtramat)
 
-      DEALLOCATE (c2s_tramat,s2c_tramat,STAT=istat)
-      IF (istat /= 0) THEN
-        CALL stop_memory(routineN,moduleN,__LINE__,&
-                         "c2s_tramat, s2c_tramat")
-      END IF
+      DEALLOCATE (c2s_tramat,s2c_tramat)
 
       current_maxl = -1
 
@@ -334,18 +314,16 @@ CONTAINS
 !> \brief  Initialize or update the orbital transformation matrices.
 !> \param maxl ...
 !> \param output_unit ...
-!> \param error ...
 !> \date     09.07.1999
 !> \par Variables
 !>      - maxl   : Maximum angular momentum quantum number
 !> \author MK
 !> \version 1.0
 ! *****************************************************************************
-  SUBROUTINE init_spherical_harmonics(maxl,output_unit,error)
+  SUBROUTINE init_spherical_harmonics(maxl,output_unit)
 
     INTEGER, INTENT(IN)                      :: maxl
     INTEGER                                  :: output_unit
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'init_spherical_harmonics', &
       routineP = moduleN//':'//routineN
@@ -354,9 +332,9 @@ CONTAINS
     INTEGER                                  :: l, nc, ns
 
     IF (maxl < 0) THEN
-      CALL stop_program(routineN,moduleN,__LINE__,&
-                        "A negative maximum angular momentum quantum "//&
-                        "number is invalid")
+      CALL cp_abort(__LOCATION__,&
+           "A negative maximum angular momentum quantum "//&
+           "number is invalid")
     END IF
 
     IF (maxl > current_maxl) THEN

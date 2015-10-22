@@ -26,9 +26,8 @@ MODULE mp2_types
                                              ri_rpa_method_gpw
   USE kinds,                           ONLY: default_path_length,&
                                              dp
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -131,15 +130,16 @@ MODULE mp2_types
   END TYPE
 
   TYPE grad_util
-       REAL(KIND=dp), DIMENSION(:,:), ALLOCATABLE :: P_ij, P_ab
-       REAL(KIND=dp), DIMENSION(:,:,:), ALLOCATABLE :: Gamma_P_ia
-       REAL(KIND=dp), DIMENSION(:,:), ALLOCATABLE :: PQ_half, Gamma_PQ
-       TYPE(cp_dbcsr_p_type), DIMENSION(:), POINTER :: G_P_ia
+       REAL(KIND=dp), DIMENSION(:,:), ALLOCATABLE :: P_ij, P_ab, P_ij_beta, P_ab_beta
+       REAL(KIND=dp), DIMENSION(:,:,:), ALLOCATABLE :: Gamma_P_ia, Gamma_P_ia_beta
+       REAL(KIND=dp), DIMENSION(:,:), ALLOCATABLE :: PQ_half, Gamma_PQ, Gamma_PQ_beta
+       TYPE(cp_dbcsr_p_type), DIMENSION(:), POINTER :: G_P_ia, G_P_ia_beta
        TYPE(cp_dbcsr_type), POINTER             :: mo_coeff_o, mo_coeff_o_beta, &
                                                    mo_coeff_v, mo_coeff_v_beta
-       TYPE(cp_fm_type), POINTER                :: P_mo, W_mo, L_jb
+       TYPE(cp_fm_type), POINTER                :: P_mo, P_mo_beta, W_mo, W_mo_beta, &
+                                                   L_jb, L_jb_beta 
        REAL(KIND=dp) :: cphf_eps_conv
-       INTEGER :: cphf_max_num_iter
+       INTEGER :: cphf_max_num_iter, num_sing_ij, num_sing_ij_beta
   END TYPE
 
   TYPE mp2_type
@@ -162,6 +162,7 @@ MODULE mp2_types
        INTEGER  :: block_size_row
        INTEGER  :: block_size_col
        LOGICAL  :: calc_PQ_cond_num
+       LOGICAL  :: hf_fail
   END TYPE
 
   TYPE integ_mat_buffer_type
@@ -187,31 +188,25 @@ CONTAINS
 ! *****************************************************************************
 !> \brief ...
 !> \param mp2_env ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE mp2_env_release(mp2_env,error)
+  SUBROUTINE mp2_env_release(mp2_env)
     TYPE(mp2_type), POINTER                  :: mp2_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'mp2_env_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: handle, stat
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
+    INTEGER                                  :: handle
 
     CALL timeset(routineN,handle)
 
-    CPPostcondition(ASSOCIATED(mp2_env),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(mp2_env))
 
     ! release the HFX section for the EXX calculation
     IF(ASSOCIATED(mp2_env%ri_rpa%x_data)) THEN
-      CALL hfx_release(mp2_env%ri_rpa%x_data, error=error)
+      CALL hfx_release(mp2_env%ri_rpa%x_data)
     END IF
 
-    DEALLOCATE(mp2_env,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(mp2_env)
 
     CALL timestop(handle)
 
@@ -220,26 +215,20 @@ CONTAINS
 ! *****************************************************************************
 !> \brief ...
 !> \param mp2_env ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE mp2_env_create(mp2_env,error)
+  SUBROUTINE mp2_env_create(mp2_env)
     TYPE(mp2_type), POINTER                  :: mp2_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'mp2_env_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: handle, stat
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
+    INTEGER                                  :: handle
 
     CALL timeset(routineN,handle)
 
-    CPPostcondition(.NOT.ASSOCIATED(mp2_env),cp_failure_level,routineP,error,failure)
+    CPASSERT(.NOT.ASSOCIATED(mp2_env))
 
-    ALLOCATE(mp2_env,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(mp2_env)
 
     NULLIFY(mp2_env%ri_rpa%x_data)
 

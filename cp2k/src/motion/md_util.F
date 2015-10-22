@@ -15,9 +15,8 @@ MODULE md_util
                                              section_vals_val_get
   USE md_energies,                     ONLY: md_write_output
   USE md_environment_types,            ONLY: md_environment_type
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -37,15 +36,13 @@ CONTAINS
 !> \param md_section ...
 !> \param root_section ...
 !> \param forced_io ...
-!> \param error ...
 !> \par History
 !>      03.2006 created [Joost VandeVondele]
 ! *****************************************************************************
-  SUBROUTINE md_output(md_env,md_section,root_section,forced_io,error)
+  SUBROUTINE md_output(md_env,md_section,root_section,forced_io)
     TYPE(md_environment_type), POINTER       :: md_env
     TYPE(section_vals_type), POINTER         :: md_section, root_section
     LOGICAL, INTENT(IN)                      :: forced_io
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'md_output', &
       routineP = moduleN//':'//routineN
@@ -57,13 +54,13 @@ CONTAINS
     CALL timeset(routineN,handle)
     do_print = .TRUE.
     IF (forced_io) THEN
-       print_section => section_vals_get_subs_vals(md_section,"PRINT",error=error)
-       CALL section_vals_val_get(print_section,"FORCE_LAST",l_val=do_print,error=error)
+       print_section => section_vals_get_subs_vals(md_section,"PRINT")
+       CALL section_vals_val_get(print_section,"FORCE_LAST",l_val=do_print)
     END IF
     IF (do_print) THEN
        ! Dumps all files related to the MD run
-       CALL md_write_output(md_env, error)
-       CALL write_restart(md_env=md_env,root_section=root_section, error=error)
+       CALL md_write_output(md_env)
+       CALL write_restart(md_env=md_env,root_section=root_section)
     END IF
     CALL timestop(handle)
 

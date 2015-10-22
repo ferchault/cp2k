@@ -28,7 +28,7 @@ MODULE dbcsr_types
   USE kinds,                           ONLY: default_string_length,&
                                              int_8
 
-  !$ USE OMP_LIB
+  !$ USE OMP_LIB, ONLY: omp_get_max_threads, omp_get_thread_num, omp_get_num_threads
 
   IMPLICIT NONE
   PRIVATE
@@ -612,8 +612,7 @@ MODULE dbcsr_types
      INTEGER                               :: nfiltered
      ! rank 1: 1=right, 2=left
      ! rank 2: 1=total, 2=min, 3=max
-     INTEGER(KIND=int_8), DIMENSION(2,3) :: data_size
-     INTEGER(KIND=int_8), DIMENSION(2,3) :: index_size
+     REAL, DIMENSION(2,3)                :: data_size
      ! message size breakdown
      INTEGER(KIND=int_8), DIMENSION(SIZE(dbcsr_mpi_size_limits)+1,2,2) :: data_size_breakdown
   END TYPE dbcsr_mpi_statistics_type

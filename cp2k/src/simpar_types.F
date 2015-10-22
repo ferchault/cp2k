@@ -13,6 +13,7 @@ MODULE simpar_types
   
   USE kinds,                           ONLY: dp
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -94,47 +95,31 @@ CONTAINS
 ! *****************************************************************************
 !> \brief Creates the simulation parameters type
 !> \param simpar ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Teodoro Laino
 ! *****************************************************************************
-  SUBROUTINE create_simpar_type(simpar, error)
+  SUBROUTINE create_simpar_type(simpar)
     TYPE(simpar_type), POINTER               :: simpar
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'create_simpar_type', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
-    CPPrecondition(.NOT.ASSOCIATED(simpar),cp_failure_level,routineP,error,failure)
-    ALLOCATE(simpar, stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    CPASSERT(.NOT.ASSOCIATED(simpar))
+    ALLOCATE(simpar)
   END SUBROUTINE create_simpar_type
 
 ! *****************************************************************************
 !> \brief Releases the simulation parameters type
 !> \param simpar ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Teodoro Laino
 ! *****************************************************************************
-  SUBROUTINE release_simpar_type(simpar, error)
+  SUBROUTINE release_simpar_type(simpar)
     TYPE(simpar_type), POINTER               :: simpar
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'release_simpar_type', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
-    CPPrecondition(ASSOCIATED(simpar),cp_failure_level,routineP,error,failure)
-    DEALLOCATE(simpar, stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(simpar))
+    DEALLOCATE(simpar)
   END SUBROUTINE release_simpar_type
 
 END MODULE simpar_types

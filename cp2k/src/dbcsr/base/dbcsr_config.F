@@ -13,14 +13,14 @@
 !> - Created 2011-04-05
 ! *****************************************************************************
 MODULE dbcsr_config
-  USE dbcsr_error_handling,            ONLY: &
-       dbcsr_assert, dbcsr_caller_error, dbcsr_error_set, dbcsr_error_stop, &
-       dbcsr_error_type, dbcsr_fatal_level, dbcsr_wrong_args_error, &
-       external_timeset, external_timestop, timeset_interface, &
-       timestop_interface
+  USE dbcsr_error_handling,            ONLY: dbcsr_assert,&
+                                             dbcsr_caller_error,&
+                                             dbcsr_fatal_level,&
+                                             dbcsr_wrong_args_error
   USE kinds,                           ONLY: dp
+#include "../../base/base_uses.f90"
 
-!$ USE OMP_LIB
+!$ USE OMP_LIB, ONLY: omp_get_max_threads, omp_get_thread_num, omp_get_num_threads
 
   IMPLICIT NONE
 
@@ -43,9 +43,8 @@ MODULE dbcsr_config
   PUBLIC :: dbcsr_set_conf_use_mpi_filtering, dbcsr_get_conf_use_mpi_filtering
   PUBLIC :: dbcsr_set_conf_use_comm_thread, dbcsr_get_conf_use_comm_thread
   PUBLIC :: dbcsr_set_conf_comm_thread_load, dbcsr_get_conf_comm_thread_load
-  PUBLIC :: dbcsr_set_conf_external_timing
   PUBLIC :: dbcsr_get_conf_max_ele_block, dbcsr_set_conf_max_ele_block
-  
+  PUBLIC :: dbcsr_get_conf_randmat_seed, dbcsr_set_conf_randmat_seed
 
   ! These are for DBCSR internal use.
   !
@@ -75,6 +74,7 @@ MODULE dbcsr_config
 
   PUBLIC :: multrec_limit
   PUBLIC :: default_resize_factor
+  PUBLIC :: randmat_counter
 
   ! First the constants are declared.
   REAL(KIND=dp), PARAMETER             :: default_resize_factor = 1.2_dp
@@ -180,16 +180,18 @@ MODULE dbcsr_config
   INTEGER, SAVE :: accdrv_binning_nbins = 4096
   INTEGER, SAVE :: accdrv_binning_binsize = 16
 
+  ! a counter used to generate different random matrices from call to call
+  INTEGER, SAVE :: randmat_counter = 12341313
+
+
 CONTAINS
 
 ! *****************************************************************************
 !> \brief ...
 !> \param driver ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE dbcsr_set_conf_mm_driver (driver, error)
+  SUBROUTINE dbcsr_set_conf_mm_driver (driver)
     INTEGER, INTENT(IN)                      :: driver
-    TYPE(dbcsr_error_type), INTENT(INOUT)    :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'dbcsr_set_conf_mm_driver', &
       routineP = moduleN//':'//routineN
@@ -211,21 +213,21 @@ CONTAINS
       nk_stacks = 3
     ENDIF
 
-    CALL dbcsr_error_set(routineN, error_handle, error)
+    CALL timeset(routineN, error_handle)
     SELECT CASE (driver)
     CASE (mm_driver_matmul)
        mm_driver = mm_driver_matmul
     CASE (mm_driver_blas)
        CALL dbcsr_assert (has_blas,&
             dbcsr_fatal_level, dbcsr_caller_error, routineN,&
-            "Support for BLAS not compiled in.", __LINE__, error=error)
+            "Support for BLAS not compiled in.", __LINE__)
        mm_driver = mm_driver_blas
     CASE (mm_driver_smm)
        mm_driver = mm_driver_smm
     CASE (mm_driver_acc)
        CALL dbcsr_assert (has_acc,&
             dbcsr_fatal_level, dbcsr_caller_error, routineN,&
-            "Support for ACC not compiled in.", __LINE__, error=error)
+            "Support for ACC not compiled in.", __LINE__)
        mm_driver = mm_driver_acc
        mm_stack_size = 30000
        nm_stacks = 3
@@ -238,7 +240,7 @@ CONTAINS
     ELSE
        mm_host_driver = mm_driver
     ENDIF
-    CALL dbcsr_error_stop(error_handle, error)
+    CALL timestop(error_handle)
   END SUBROUTINE dbcsr_set_conf_mm_driver
 
 ! *****************************************************************************
@@ -258,20 +260,18 @@ CONTAINS
 ! *****************************************************************************
 !> \brief ...
 !> \param use_mpi_mem ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE dbcsr_set_conf_mpi_mem (use_mpi_mem, error)
+  SUBROUTINE dbcsr_set_conf_mpi_mem (use_mpi_mem)
     LOGICAL, INTENT(IN)                      :: use_mpi_mem
-    TYPE(dbcsr_error_type), INTENT(INOUT)    :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'dbcsr_set_conf_mpi_mem', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: error_handle
 
-    CALL dbcsr_error_set(routineN, error_handle, error)
+    CALL timeset(routineN, error_handle)
     use_MPI_memory = use_mpi_mem
-    CALL dbcsr_error_stop(error_handle, error)
+    CALL timestop(error_handle)
   END SUBROUTINE dbcsr_set_conf_mpi_mem
 
 ! *****************************************************************************
@@ -290,20 +290,18 @@ CONTAINS
 ! *****************************************************************************
 !> \brief ...
 !> \param use_mm_stacksize ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE dbcsr_set_conf_mm_stacksize (use_mm_stacksize, error)
+  SUBROUTINE dbcsr_set_conf_mm_stacksize (use_mm_stacksize)
     INTEGER, INTENT(IN)                      :: use_mm_stacksize
-    TYPE(dbcsr_error_type), INTENT(INOUT)    :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'dbcsr_set_conf_mm_stacksize', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: error_handle
 
-    CALL dbcsr_error_set(routineN, error_handle, error)
+    CALL timeset(routineN, error_handle)
     mm_stack_size = use_mm_stacksize
-    CALL dbcsr_error_stop(error_handle, error)
+    CALL timestop(error_handle)
   END SUBROUTINE dbcsr_set_conf_mm_stacksize
 
 ! *****************************************************************************
@@ -322,20 +320,18 @@ CONTAINS
 ! *****************************************************************************
 !> \brief ...
 !> \param max_ele_block ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE dbcsr_set_conf_max_ele_block (max_ele_block, error)
+  SUBROUTINE dbcsr_set_conf_max_ele_block (max_ele_block)
     INTEGER, INTENT(IN)                      :: max_ele_block
-    TYPE(dbcsr_error_type), INTENT(INOUT)    :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'dbcsr_set_conf_max_ele_block', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: error_handle
 
-    CALL dbcsr_error_set(routineN, error_handle, error)
+    CALL timeset(routineN, error_handle)
     max_elements_per_block = max_ele_block
-    CALL dbcsr_error_stop(error_handle, error)
+    CALL timestop(error_handle)
   END SUBROUTINE dbcsr_set_conf_max_ele_block
 
 ! *****************************************************************************
@@ -353,12 +349,41 @@ CONTAINS
 
 ! *****************************************************************************
 !> \brief ...
-!> \param new_avg_elements_images ...
-!> \param error ...
+!> \param randmat_seed ...
 ! *****************************************************************************
-  SUBROUTINE dbcsr_set_conf_avg_elements_images (new_avg_elements_images, error)
+  SUBROUTINE dbcsr_set_conf_randmat_seed (randmat_seed)
+    INTEGER, INTENT(IN)                      :: randmat_seed
+
+    CHARACTER(len=*), PARAMETER :: routineN = 'dbcsr_set_conf_randmat_seed', &
+      routineP = moduleN//':'//routineN
+
+    INTEGER                                  :: error_handle
+
+    CALL timeset(routineN, error_handle)
+    randmat_counter = randmat_seed
+    CALL timestop(error_handle)
+  END SUBROUTINE dbcsr_set_conf_randmat_seed
+
+! *****************************************************************************
+!> \brief ...
+!> \retval max_ele_block ...
+! *****************************************************************************
+  FUNCTION dbcsr_get_conf_randmat_seed () RESULT (randmat_seed)
+    INTEGER                                  :: randmat_seed
+
+    CHARACTER(len=*), PARAMETER :: routineN = 'dbcsr_get_conf_randmat_seed', &
+      routineP = moduleN//':'//routineN
+
+    randmat_seed = randmat_counter
+  END FUNCTION dbcsr_get_conf_randmat_seed
+
+
+! *****************************************************************************
+!> \brief ...
+!> \param new_avg_elements_images ...
+! *****************************************************************************
+  SUBROUTINE dbcsr_set_conf_avg_elements_images (new_avg_elements_images)
     INTEGER, INTENT(IN)                      :: new_avg_elements_images
-    TYPE(dbcsr_error_type), INTENT(INOUT)    :: error
 
     CHARACTER(len=*), PARAMETER :: &
       routineN = 'dbcsr_set_conf_avg_elements_images', &
@@ -366,9 +391,9 @@ CONTAINS
 
     INTEGER                                  :: error_handle
 
-    CALL dbcsr_error_set(routineN, error_handle, error)
+    CALL timeset(routineN, error_handle)
     avg_elements_images = new_avg_elements_images
-    CALL dbcsr_error_stop(error_handle, error)
+    CALL timestop(error_handle)
   END SUBROUTINE dbcsr_set_conf_avg_elements_images
 
 ! *****************************************************************************
@@ -384,68 +409,62 @@ CONTAINS
 ! *****************************************************************************
 !> \brief ...
 !> \param nstacks ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE dbcsr_set_conf_nstacks (nstacks, error)
+  SUBROUTINE dbcsr_set_conf_nstacks (nstacks)
     INTEGER, INTENT(IN)                      :: nstacks(:)
-    TYPE(dbcsr_error_type), INTENT(INOUT)    :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'dbcsr_set_conf_nstacks', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: error_handle
 
-    CALL dbcsr_error_set(routineN, error_handle, error)
+    CALL timeset(routineN, error_handle)
     CALL dbcsr_assert (SIZE(nstacks) ,"EQ", 3,&
          dbcsr_fatal_level, dbcsr_wrong_args_error, routineN,&
-         "ntacks size must be 3", __LINE__, error=error)
+         "ntacks size must be 3", __LINE__)
     nm_stacks        = nstacks(1)
     nn_stacks        = nstacks(2)
     nk_stacks        = nstacks(3)
-    CALL dbcsr_error_stop(error_handle, error)
+    CALL timestop(error_handle)
   END SUBROUTINE dbcsr_set_conf_nstacks
 
 ! *****************************************************************************
 !> \brief ...
 !> \param nstacks ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE dbcsr_get_conf_nstacks (nstacks, error)
+  SUBROUTINE dbcsr_get_conf_nstacks (nstacks)
     INTEGER, INTENT(OUT)                     :: nstacks(:)
-    TYPE(dbcsr_error_type), INTENT(INOUT)    :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'dbcsr_get_conf_nstacks', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: error_handle
 
-    CALL dbcsr_error_set(routineN, error_handle, error)
+    CALL timeset(routineN, error_handle)
     CALL dbcsr_assert (SIZE(nstacks) ,"EQ", 3,&
          dbcsr_fatal_level, dbcsr_wrong_args_error, routineN,&
-         "ntacks size must be 3", __LINE__, error=error)
+         "ntacks size must be 3", __LINE__)
     nstacks(1) = nm_stacks
     nstacks(2) = nn_stacks
     nstacks(3) = nk_stacks
-    CALL dbcsr_error_stop(error_handle, error)
+    CALL timestop(error_handle)
   END SUBROUTINE dbcsr_get_conf_nstacks
 
 ! *****************************************************************************
 !> \brief ...
 !> \param mpi_rma ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE dbcsr_set_conf_use_mpi_rma (mpi_rma, error)
+  SUBROUTINE dbcsr_set_conf_use_mpi_rma (mpi_rma)
     LOGICAL, INTENT(IN)                      :: mpi_rma
-    TYPE(dbcsr_error_type), INTENT(INOUT)    :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'dbcsr_set_conf_use_mpi_rma', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: error_handle
 
-    CALL dbcsr_error_set(routineN, error_handle, error)
+    CALL timeset(routineN, error_handle)
     use_mpi_rma = mpi_rma
-    CALL dbcsr_error_stop(error_handle, error)
+    CALL timestop(error_handle)
   END SUBROUTINE dbcsr_set_conf_use_mpi_rma
 
 ! *****************************************************************************
@@ -464,11 +483,9 @@ CONTAINS
 ! *****************************************************************************
 !> \brief ...
 !> \param mpi_filtering ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE dbcsr_set_conf_use_mpi_filtering (mpi_filtering, error)
+  SUBROUTINE dbcsr_set_conf_use_mpi_filtering (mpi_filtering)
     LOGICAL, INTENT(IN)                      :: mpi_filtering
-    TYPE(dbcsr_error_type), INTENT(INOUT)    :: error
 
     CHARACTER(len=*), PARAMETER :: &
       routineN = 'dbcsr_set_conf_use_mpi_filtering', &
@@ -476,9 +493,9 @@ CONTAINS
 
     INTEGER                                  :: error_handle
 
-    CALL dbcsr_error_set(routineN, error_handle, error)
+    CALL timeset(routineN, error_handle)
     use_mpi_filtering = mpi_filtering
-    CALL dbcsr_error_stop(error_handle, error)
+    CALL timestop(error_handle)
   END SUBROUTINE dbcsr_set_conf_use_mpi_filtering
 
 ! *****************************************************************************
@@ -498,11 +515,9 @@ CONTAINS
 ! *****************************************************************************
 !> \brief ...
 !> \param comm_thread ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE dbcsr_set_conf_use_comm_thread (comm_thread, error)
+  SUBROUTINE dbcsr_set_conf_use_comm_thread (comm_thread)
     LOGICAL, INTENT(IN)                      :: comm_thread
-    TYPE(dbcsr_error_type), INTENT(INOUT)    :: error
 
     CHARACTER(len=*), PARAMETER :: &
       routineN = 'dbcsr_set_conf_use_comm_thread', &
@@ -510,9 +525,9 @@ CONTAINS
 
     INTEGER                                  :: error_handle
 
-    CALL dbcsr_error_set(routineN, error_handle, error)
+    CALL timeset(routineN, error_handle)
     use_comm_thread = comm_thread
-    CALL dbcsr_error_stop(error_handle, error)
+    CALL timestop(error_handle)
   END SUBROUTINE dbcsr_set_conf_use_comm_thread
 
 
@@ -533,11 +548,9 @@ CONTAINS
 ! *****************************************************************************
 !> \brief ...
 !> \param load ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE dbcsr_set_conf_comm_thread_load (load, error)
+  SUBROUTINE dbcsr_set_conf_comm_thread_load (load)
     INTEGER, INTENT(IN)                      :: load
-    TYPE(dbcsr_error_type), INTENT(INOUT)    :: error
 
     CHARACTER(len=*), PARAMETER :: &
       routineN = 'dbcsr_set_conf_comm_thread_load', &
@@ -545,13 +558,13 @@ CONTAINS
 
     INTEGER                                  :: error_handle, nthreads
 
-    CALL dbcsr_error_set(routineN, error_handle, error)
+    CALL timeset(routineN, error_handle)
     nthreads = 1
     !$ nthreads = OMP_GET_MAX_THREADS()
     comm_thread_load = MAX(0,90-(30*nthreads)/8)
     IF(load >= 0)&
        comm_thread_load = load
-    CALL dbcsr_error_stop(error_handle, error)
+    CALL timestop(error_handle)
   END SUBROUTINE dbcsr_set_conf_comm_thread_load
 
 
@@ -587,48 +600,22 @@ CONTAINS
   END FUNCTION driver_is_async
 
 ! *****************************************************************************
-!> \brief Set the callback routines for the external timing hooks.
-!> \param timeset ...
-!> \param timestop ...
-!> \param error ...
-!> \date    2012-12-20
-!> \author  Ole Schuett
-!>
-!> \note <b>Modification history:</b>
-!> \note - Created 2012-12-20
-! *****************************************************************************
-  SUBROUTINE dbcsr_set_conf_external_timing(timeset, timestop, error)
-    PROCEDURE (timeset_interface)            :: timeset
-    PROCEDURE (timestop_interface)           :: timestop
-    TYPE(dbcsr_error_type), INTENT(INOUT)    :: error
-
-! no call to dbcsr_error_set / dbcsr_error_stop here,
-! otherwise thie would lead to mismatched calls to timeset/timestop
-
-    external_timeset  => timeset
-    external_timestop => timestop
-                
-  END SUBROUTINE dbcsr_set_conf_external_timing
-
-! *****************************************************************************
 !> \brief Configure DBCSR driver with default values.
-!> \param[inout] error        dbcsr error
 !>
 !> Basically it reads the default values and reset them.
 ! *****************************************************************************
-  SUBROUTINE dbcsr_set_default_config(error)
-    TYPE(dbcsr_error_type), INTENT(INOUT)    :: error
+  SUBROUTINE dbcsr_set_default_config()
 
     CHARACTER(len=*), PARAMETER :: routineN = 'dbcsr_set_default_config', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: comm_thread_load, &
-                                                error_handler, max_ele_block, &
-                                                mm_driver, mm_ss
+    INTEGER                                  :: comm_thread_load, handle, &
+                                                max_ele_block, mm_driver, &
+                                                mm_ss
     INTEGER, DIMENSION(3)                    :: nstacks
     LOGICAL                                  :: use_comm_thread, use_mpi_mem
 
-    CALL dbcsr_error_set (routineN, error_handler, error=error)
+    CALL timeset (routineN, handle)
 
     use_mpi_mem = dbcsr_get_conf_mpi_mem()
     mm_ss = -1
@@ -638,16 +625,18 @@ CONTAINS
     use_comm_thread = dbcsr_get_conf_use_comm_thread()
     comm_thread_load = -1
 
-    CALL dbcsr_set_conf_mm_driver (mm_driver, error=error)
-    CALL dbcsr_set_conf_mpi_mem (use_mpi_mem, error=error)
-    CALL dbcsr_set_conf_max_ele_block (max_ele_block, error=error)
-    IF (mm_ss > 0) CALL dbcsr_set_conf_mm_stacksize (mm_ss, error=error)
-    IF (nstacks(1) > 0) CALL dbcsr_set_conf_nstacks(nstacks, error=error)
+    randmat_counter = 12341313
 
-    CALL dbcsr_set_conf_use_comm_thread(use_comm_thread, error=error)
-    CALL dbcsr_set_conf_comm_thread_load(comm_thread_load, error=error)
+    CALL dbcsr_set_conf_mm_driver (mm_driver)
+    CALL dbcsr_set_conf_mpi_mem (use_mpi_mem)
+    CALL dbcsr_set_conf_max_ele_block (max_ele_block)
+    IF (mm_ss > 0) CALL dbcsr_set_conf_mm_stacksize (mm_ss)
+    IF (nstacks(1) > 0) CALL dbcsr_set_conf_nstacks(nstacks)
 
-    CALL dbcsr_error_stop(error_handler, error=error)
+    CALL dbcsr_set_conf_use_comm_thread(use_comm_thread)
+    CALL dbcsr_set_conf_comm_thread_load(comm_thread_load)
+
+    CALL timestop(handle)
 
   END SUBROUTINE dbcsr_set_default_config
 

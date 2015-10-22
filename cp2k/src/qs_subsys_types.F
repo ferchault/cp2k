@@ -39,6 +39,7 @@ MODULE qs_subsys_types
                                              qs_kind_type
   USE virial_types,                    ONLY: virial_type
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -72,54 +73,42 @@ CONTAINS
 ! *****************************************************************************
 !> \brief retains a subsys (see doc/ReferenceCounting.html)
 !> \param subsys the subsys to retain
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Ole Schuett
 ! *****************************************************************************
-  SUBROUTINE qs_subsys_retain(subsys, error)
+  SUBROUTINE qs_subsys_retain(subsys)
     TYPE(qs_subsys_type), POINTER            :: subsys
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'qs_subsys_retain', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
-
-    CPPrecondition(ASSOCIATED(subsys),cp_failure_level,routineP,error,failure)
-    IF (.NOT. failure) THEN
-       CPPreconditionNoFail(subsys%ref_count>0,cp_failure_level,routineP,error)
-       subsys%ref_count=subsys%ref_count+1
-    END IF
+    CPASSERT(ASSOCIATED(subsys))
+    CPASSERT(subsys%ref_count>0)
+    subsys%ref_count=subsys%ref_count+1
   END SUBROUTINE qs_subsys_retain
 
 ! *****************************************************************************
 !> \brief releases a subsys (see doc/ReferenceCounting.html)
 !> \param subsys the subsys to release
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Ole Schuett
 ! *****************************************************************************
-  SUBROUTINE qs_subsys_release(subsys, error)
+  SUBROUTINE qs_subsys_release(subsys)
     TYPE(qs_subsys_type), POINTER            :: subsys
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'qs_subsys_release', &
       routineP = moduleN//':'//routineN
 
     IF (ASSOCIATED(subsys)) THEN
-       CPPreconditionNoFail(subsys%ref_count>0,cp_failure_level,routineP,error)
+       CPASSERT(subsys%ref_count>0)
        subsys%ref_count=subsys%ref_count-1
        IF (subsys%ref_count==0) THEN
-          CALL cp_subsys_release(subsys%cp_subsys, error=error)
-          CALL cell_release(subsys%cell_ref,error=error)
+          CALL cp_subsys_release(subsys%cp_subsys)
+          CALL cell_release(subsys%cell_ref)
           IF (ASSOCIATED(subsys%qs_kind_set))&
-             CALL deallocate_qs_kind_set(subsys%qs_kind_set, error)
+             CALL deallocate_qs_kind_set(subsys%qs_kind_set)
           IF (ASSOCIATED(subsys%energy))&
              CALL deallocate_qs_energy(subsys%energy)
           IF (ASSOCIATED(subsys%force))&
-             CALL deallocate_qs_force(subsys%force,error)
+             CALL deallocate_qs_force(subsys%force)
           DEALLOCATE(subsys)
        END IF
     END IF
@@ -161,7 +150,6 @@ CONTAINS
 !> \param cp_subsys ...
 !> \param nelectron_total ...
 !> \param nelectron_spin ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE qs_subsys_get(subsys, atomic_kinds, atomic_kind_set, particles,particle_set,&
                            local_particles, molecules_new, molecule_set,&
@@ -170,8 +158,7 @@ CONTAINS
                            shell_particles, core_particles, gci, multipoles,&
                            natom, nparticle, ncore, nshell, nkind, atprop, virial, &
                            results, cell, cell_ref, use_ref_cell, energy, force,&
-                           qs_kind_set,cp_subsys,nelectron_total,nelectron_spin,&
-                           error)
+                           qs_kind_set,cp_subsys,nelectron_total,nelectron_spin)
     TYPE(qs_subsys_type), POINTER            :: subsys
     TYPE(atomic_kind_list_type), OPTIONAL, &
       POINTER                                :: atomic_kinds
@@ -218,7 +205,6 @@ CONTAINS
     TYPE(cp_subsys_type), OPTIONAL, POINTER  :: cp_subsys
     INTEGER, OPTIONAL                        :: nelectron_total
     INTEGER, DIMENSION(2), OPTIONAL          :: nelectron_spin
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'qs_subsys_get', &
       routineP = moduleN//':'//routineN
@@ -248,8 +234,7 @@ CONTAINS
                        atprop=atprop,&
                        virial=virial,&
                        results=results,&
-                       cell=cell,&
-                       error=error)
+                       cell=cell)
 
      IF (PRESENT(cell_ref)) cell_ref => subsys%cell_ref
      IF (PRESENT(use_ref_cell)) use_ref_cell = subsys%use_ref_cell
@@ -276,13 +261,11 @@ CONTAINS
 !> \param qs_kind_set ...
 !> \param nelectron_total ...
 !> \param nelectron_spin ...
-!> \param error ...
 ! *****************************************************************************
 SUBROUTINE qs_subsys_set(subsys,cp_subsys,&
                          local_particles,local_molecules_new,cell,&
                          cell_ref, use_ref_cell, energy, force,&
-                         qs_kind_set, nelectron_total, nelectron_spin,&
-                         error)
+                         qs_kind_set, nelectron_total, nelectron_spin)
     TYPE(qs_subsys_type), POINTER            :: subsys
     TYPE(cp_subsys_type), OPTIONAL, POINTER  :: cp_subsys
     TYPE(distribution_1d_type), OPTIONAL, &
@@ -297,26 +280,24 @@ SUBROUTINE qs_subsys_set(subsys,cp_subsys,&
       OPTIONAL, POINTER                      :: qs_kind_set
     INTEGER, OPTIONAL                        :: nelectron_total
     INTEGER, DIMENSION(2), OPTIONAL          :: nelectron_spin
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'qs_subsys_set', &
       routineP = moduleN//':'//routineN
 
     IF (PRESENT(cp_subsys)) THEN
-       CALL cp_subsys_retain(cp_subsys, error=error)
-       CALL cp_subsys_release(subsys%cp_subsys,error=error)
+       CALL cp_subsys_retain(cp_subsys)
+       CALL cp_subsys_release(subsys%cp_subsys)
        subsys%cp_subsys => cp_subsys
     END IF
 
     CALL cp_subsys_set(subsys%cp_subsys,&
                        local_particles=local_particles,&
                        local_molecules_new=local_molecules_new,&
-                       cell=cell,&
-                       error=error)
+                       cell=cell)
 
     IF (PRESENT(cell_ref)) THEN
-       CALL cell_retain(cell_ref, error=error)
-       CALL cell_release(subsys%cell_ref,error=error)
+       CALL cell_retain(cell_ref)
+       CALL cell_release(subsys%cell_ref)
        subsys%cell_ref => cell_ref
     END IF
 

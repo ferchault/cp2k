@@ -21,10 +21,9 @@ MODULE manybody_tersoff
                                              pair_potential_single_type,&
                                              tersoff_pot_type,&
                                              tersoff_type
-  USE timings,                         ONLY: timeset,&
-                                             timestop
   USE util,                            ONLY: sort
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -742,41 +741,35 @@ CONTAINS
 !> \param glob_cell_v ...
 !> \param glob_loc_list_a ...
 !> \param cell ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      Fast implementation of the tersoff potential - [tlaino] 2007
 !> \author Teodoro Laino - University of Zurich
 ! *****************************************************************************
-  SUBROUTINE setup_tersoff_arrays(nonbonded, potparm, glob_loc_list, glob_cell_v, glob_loc_list_a, cell, error)
+  SUBROUTINE setup_tersoff_arrays(nonbonded, potparm, glob_loc_list, glob_cell_v, glob_loc_list_a, cell)
     TYPE(fist_neighbor_type), POINTER        :: nonbonded
     TYPE(pair_potential_pp_type), POINTER    :: potparm
     INTEGER, DIMENSION(:, :), POINTER        :: glob_loc_list
     REAL(KIND=dp), DIMENSION(:, :), POINTER  :: glob_cell_v
     INTEGER, DIMENSION(:), POINTER           :: glob_loc_list_a
     TYPE(cell_type), POINTER                 :: cell
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'setup_tersoff_arrays', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, i, iend, igrp, ikind, &
                                                 ilist, ipair, istart, jkind, &
-                                                nkinds, npairs, npairs_tot, &
-                                                stat
+                                                nkinds, npairs, npairs_tot
     INTEGER, DIMENSION(:), POINTER           :: work_list, work_list2
     INTEGER, DIMENSION(:, :), POINTER        :: list
-    LOGICAL                                  :: failure
     REAL(KIND=dp), DIMENSION(3)              :: cell_v, cvi
     REAL(KIND=dp), DIMENSION(:, :), POINTER  :: rwork_list
     TYPE(neighbor_kind_pairs_type), POINTER  :: neighbor_kind_pair
     TYPE(pair_potential_single_type), &
       POINTER                                :: pot
 
-    CPPostcondition(.NOT.ASSOCIATED(glob_loc_list),cp_failure_level,routineP,error,failure)
-    CPPostcondition(.NOT.ASSOCIATED(glob_loc_list_a),cp_failure_level,routineP,error,failure)
-    CPPostcondition(.NOT.ASSOCIATED(glob_cell_v),cp_failure_level,routineP,error,failure)
-    failure = .FALSE.
+    CPASSERT(.NOT.ASSOCIATED(glob_loc_list))
+    CPASSERT(.NOT.ASSOCIATED(glob_loc_list_a))
+    CPASSERT(.NOT.ASSOCIATED(glob_cell_v))
     CALL timeset ( routineN, handle )
     npairs_tot = 0
     nkinds = SIZE(potparm%pot, 1)
@@ -797,14 +790,10 @@ CONTAINS
           END DO
        END DO Kind_Group_Loop1
     END DO
-    ALLOCATE(work_list(npairs_tot), stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(work_list2(npairs_tot), stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(glob_loc_list(2,npairs_tot), stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(glob_cell_v(3,npairs_tot), stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(work_list(npairs_tot))
+    ALLOCATE(work_list2(npairs_tot))
+    ALLOCATE(glob_loc_list(2,npairs_tot))
+    ALLOCATE(glob_cell_v(3,npairs_tot))
     ! Fill arrays with data
     npairs_tot = 0
     DO ilist=1,nonbonded%nlists
@@ -840,20 +829,15 @@ CONTAINS
        work_list2(ipair)=glob_loc_list(2,work_list(ipair))
     END DO
     glob_loc_list(2,:) = work_list2
-    DEALLOCATE(work_list2, stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(rwork_list(3,npairs_tot), stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(work_list2)
+    ALLOCATE(rwork_list(3,npairs_tot))
      DO ipair = 1, npairs_tot
        rwork_list(:,ipair)=glob_cell_v(:,work_list(ipair))
     END DO
     glob_cell_v = rwork_list
-    DEALLOCATE(rwork_list, stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    DEALLOCATE(work_list, stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(glob_loc_list_a(npairs_tot), stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(rwork_list)
+    DEALLOCATE(work_list)
+    ALLOCATE(glob_loc_list_a(npairs_tot))
     glob_loc_list_a = glob_loc_list(1,:)
     CALL timestop ( handle )
   END SUBROUTINE setup_tersoff_arrays
@@ -863,36 +847,26 @@ CONTAINS
 !> \param glob_loc_list ...
 !> \param glob_cell_v ...
 !> \param glob_loc_list_a ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      Fast implementation of the tersoff potential - [tlaino] 2007
 !> \author Teodoro Laino - University of Zurich
 ! *****************************************************************************
-  SUBROUTINE destroy_tersoff_arrays(glob_loc_list, glob_cell_v, glob_loc_list_a, error)
+  SUBROUTINE destroy_tersoff_arrays(glob_loc_list, glob_cell_v, glob_loc_list_a)
     INTEGER, DIMENSION(:, :), POINTER        :: glob_loc_list
     REAL(KIND=dp), DIMENSION(:, :), POINTER  :: glob_cell_v
     INTEGER, DIMENSION(:), POINTER           :: glob_loc_list_a
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'destroy_tersoff_arrays', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
     IF (ASSOCIATED(glob_loc_list)) THEN
-       DEALLOCATE(glob_loc_list, stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE(glob_loc_list)
     END IF
     IF (ASSOCIATED(glob_loc_list_a)) THEN
-       DEALLOCATE(glob_loc_list_a, stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE(glob_loc_list_a)
     END IF
     IF (ASSOCIATED(glob_cell_v)) THEN
-       DEALLOCATE(glob_cell_v, stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE(glob_cell_v)
     END IF
 
   END SUBROUTINE destroy_tersoff_arrays

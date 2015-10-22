@@ -11,6 +11,7 @@ MODULE semi_empirical_expns3_types
   
   USE kinds,                           ONLY: dp
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -45,24 +46,17 @@ CONTAINS
 ! *****************************************************************************
 !> \brief Allocate semi-empirical 1/R^3 expansion type
 !> \param expns3 ...
-!> \param error ...
 !> \author Teodoro Laino [tlaino] - 12.2008
 ! *****************************************************************************
-  SUBROUTINE semi_empirical_expns3_create(expns3, error)
+  SUBROUTINE semi_empirical_expns3_create(expns3)
     TYPE(semi_empirical_expns3_type), &
       POINTER                                :: expns3
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'semi_empirical_expns3_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    CPPrecondition(.NOT.ASSOCIATED(expns3),cp_failure_level,routineP,error,failure)
-    ALLOCATE (expns3,STAT=stat)
-    CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+    CPASSERT(.NOT.ASSOCIATED(expns3))
+    ALLOCATE (expns3)
     expns3%core_core = 0.0_dp
     expns3%e1b       = 0.0_dp
     expns3%e2a       = 0.0_dp
@@ -72,25 +66,18 @@ CONTAINS
 ! *****************************************************************************
 !> \brief Deallocate the semi-empirical type
 !> \param expns3 ...
-!> \param error ...
 !> \author Teodoro Laino [tlaino] - 12.2008
 ! *****************************************************************************
-  SUBROUTINE semi_empirical_expns3_release(expns3, error)
+  SUBROUTINE semi_empirical_expns3_release(expns3)
     TYPE(semi_empirical_expns3_type), &
       POINTER                                :: expns3
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: &
       routineN = 'semi_empirical_expns3_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
     IF (ASSOCIATED(expns3)) THEN
-       DEALLOCATE (expns3,STAT=stat)
-       CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE (expns3)
     END IF
   END SUBROUTINE semi_empirical_expns3_release
 

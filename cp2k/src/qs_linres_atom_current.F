@@ -63,11 +63,9 @@ MODULE qs_linres_atom_current
   USE sap_kind_types,                  ONLY: alist_pre_align_blk,&
                                              alist_type,&
                                              get_alist
-  USE termination,                     ONLY: stop_program
-  USE timings,                         ONLY: timeset,&
-                                             timestop
   USE util,                            ONLY: get_limit
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -92,14 +90,13 @@ CONTAINS
 !> \param mat_jp_riii ...
 !> \param iB ...
 !> \param idir ...
-!> \param error ...
 !> \par History
 !>      07.2006 created [MI]
 !>      02.2009 using new setup of projector-basis overlap [jgh]
 !> \author MI
 ! *****************************************************************************
   SUBROUTINE calculate_jrho_atom_coeff(qs_env,current_env,mat_d0,mat_jp,mat_jp_rii,&
-                                       mat_jp_riii,iB,idir,error)
+                                       mat_jp_riii,iB,idir)
     !
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(current_env_type)                   :: current_env
@@ -107,19 +104,18 @@ CONTAINS
       POINTER                                :: mat_d0, mat_jp, mat_jp_rii, &
                                                 mat_jp_riii
     INTEGER, INTENT(IN)                      :: iB, idir
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'calculate_jrho_atom_coeff', &
       routineP = moduleN//':'//routineN
 
     INTEGER :: bo(2), handle, iac, iat, iatom, ibc, idir2, ii, iii, ikind, &
-      ispin, istat, jatom, jkind, kac, katom, kbc, kkind, max_gau, max_nsgf, &
-      mepos, n_cont_a, n_cont_b, nat, natom, nkind, nsatbas, nsgfa, nsgfb, &
-      nso, nsoctot, nspins, num_pe, output_unit
+      ispin, jatom, jkind, kac, katom, kbc, kkind, max_gau, max_nsgf, mepos, &
+      n_cont_a, n_cont_b, nat, natom, nkind, nsatbas, nsgfa, nsgfb, nso, &
+      nsoctot, nspins, num_pe, output_unit
     INTEGER, DIMENSION(3)                    :: cell_b
     INTEGER, DIMENSION(:), POINTER           :: atom_list, list_a, list_b
-    LOGICAL :: den_found, dista, distab, distb, failure, is_not_associated, &
-      paw_atom, sgf_soft_only_a, sgf_soft_only_b
+    LOGICAL :: den_found, dista, distab, distb, is_not_associated, paw_atom, &
+      sgf_soft_only_a, sgf_soft_only_b
     REAL(dp)                                 :: eps_cpc, hard_radius_c, jmax, &
                                                 nbr_dbl, rab(3), rbc(3)
     REAL(dp), ALLOCATABLE, DIMENSION(:, :)   :: a_matrix, b_matrix, c_matrix, &
@@ -132,7 +128,6 @@ CONTAINS
       POINTER                                :: atomic_kind_set
     TYPE(cp_dbcsr_p_type), DIMENSION(:), &
       POINTER                                :: mat_a, mat_b, mat_c, mat_d
-    TYPE(cp_logger_type), POINTER            :: logger
     TYPE(cp_para_env_type), POINTER          :: para_env
     TYPE(dft_control_type), POINTER          :: dft_control
     TYPE(gto_basis_set_p_type), &
@@ -155,7 +150,6 @@ CONTAINS
 
     CALL timeset(routineN,handle)
     !
-    failure =.FALSE.
     NULLIFY(atom_list,atomic_kind_set,qs_kind_set,dft_control,orb_basis_set,sab_all,&
             jrho1_atom_set,oce,a_block,b_block,c_block,&
             d_block,jp_RARnu,jp2_RARnu,C_coeff_hh_a,C_coeff_hh_b,C_coeff_ss_a,&
@@ -167,17 +161,15 @@ CONTAINS
                     dft_control=dft_control,&
                     oce=oce,&
                     sab_all=sab_all,&
-                    para_env=para_env,&
-                    error=error)
+                    para_env=para_env)
 
     !
-    CPPrecondition(ASSOCIATED(oce),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(oce))
     !
     CALL get_current_env(current_env=current_env,&
-                     jrho1_atom_set=jrho1_atom_set,&
-                     error=error)
+                     jrho1_atom_set=jrho1_atom_set)
     !
-    CPPrecondition(ASSOCIATED(jrho1_atom_set),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(jrho1_atom_set))
     !
     CALL get_qs_kind_set(qs_kind_set=qs_kind_set,&
                              maxsgf=max_nsgf,&
@@ -208,8 +200,7 @@ CONTAINS
              c_matrix(max_nsgf,max_nsgf),d_matrix(max_nsgf,max_nsgf),&
              a_block(nspins),b_block(nspins),c_block(nspins),d_block(nspins),&
              jp_RARnu(nspins),jp2_RARnu(nspins),PC1(max_nsgf*max_gau),&
-             CPC(max_gau*max_gau),STAT=istat)
-    CPPrecondition(istat==0,cp_failure_level,routineP,error,failure)
+             CPC(max_gau*max_gau))
     !
     ! Reset CJC coefficients and local density arrays
     DO ikind = 1 ,nkind
@@ -241,10 +232,9 @@ CONTAINS
     ENDDO ! ikind
     !
     ! Three centers
-    ALLOCATE (basis_set_list(nkind),STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (basis_set_list(nkind))
     DO ikind=1,nkind
-      CALL get_qs_kind(qs_kind_set(ikind),orb_basis_set=basis_set_a)
+      CALL get_qs_kind(qs_kind_set(ikind),basis_set=basis_set_a)
       IF (ASSOCIATED(basis_set_a)) THEN
         basis_set_list(ikind)%gto_basis_set => basis_set_a
       ELSE
@@ -264,8 +254,7 @@ CONTAINS
        DO ispin = 1,nspins
           NULLIFY(jp_RARnu(ispin)%r_coef,jp2_RARnu(ispin)%r_coef)
           ALLOCATE(jp_RARnu(ispin)%r_coef(nsgfa,nsgfb),&
-                   jp2_RARnu(ispin)%r_coef(nsgfa,nsgfb),STAT=istat)
-          CPPrecondition(istat==0,cp_failure_level,routineP,error,failure)
+                   jp2_RARnu(ispin)%r_coef(nsgfa,nsgfb))
        ENDDO
 
        ! Take the block \mu\nu of jpab, jpab_ii and jpab_iii
@@ -297,7 +286,7 @@ CONTAINS
        DO kkind = 1,nkind
           NULLIFY(paw_proj)
           CALL get_qs_kind(qs_kind_set(kkind),&
-                               orb_basis_set=orb_basis_set,&
+                               basis_set=orb_basis_set,&
                                hard_radius=hard_radius_c,&
                                paw_proj_set=paw_proj,&
                                paw_atom=paw_atom)
@@ -313,8 +302,8 @@ CONTAINS
 
           IF (.NOT.ASSOCIATED(oce%intac(iac)%alist)) CYCLE
           IF (.NOT.ASSOCIATED(oce%intac(ibc)%alist)) CYCLE
-          CALL get_alist(oce%intac(iac), alist_ac, iatom, error)
-          CALL get_alist(oce%intac(ibc), alist_bc, jatom, error)
+          CALL get_alist(oce%intac(iac), alist_ac, iatom)
+          CALL get_alist(oce%intac(ibc), alist_bc, jatom)
           IF (.NOT.ASSOCIATED(alist_ac)) CYCLE
           IF (.NOT.ASSOCIATED(alist_bc)) CYCLE
 
@@ -342,7 +331,7 @@ CONTAINS
                    katom = alist_ac%clist(kac)%catom
 
                    IF(.NOT.ASSOCIATED(jrho1_atom_set(katom)%cjc0_h(1)%r_coef)) THEN
-                      CALL allocate_jrho_coeff(jrho1_atom_set,katom,nsoctot,error)
+                      CALL allocate_jrho_coeff(jrho1_atom_set,katom,nsoctot)
                    ENDIF
                    !
                    ! Compute the modified Qai matrix as
@@ -439,14 +428,12 @@ CONTAINS
 
        ENDDO ! kkind
        DO ispin = 1,nspins
-          DEALLOCATE(jp_RARnu(ispin)%r_coef,jp2_RARnu(ispin)%r_coef,STAT=istat)
-          CPPrecondition(istat==0,cp_failure_level,routineP,error,failure)
+          DEALLOCATE(jp_RARnu(ispin)%r_coef,jp2_RARnu(ispin)%r_coef)
        ENDDO
     END DO
     CALL neighbor_list_iterator_release(nl_iterator)
 
-    DEALLOCATE(basis_set_list,STAT=istat)
-    CPPrecondition(istat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(basis_set_list)
     !
     ! parallel sum up
     nbr_dbl = 0.0_dp
@@ -455,7 +442,7 @@ CONTAINS
                             atom_list=atom_list,&
                             natom=nat)
        CALL get_qs_kind(qs_kind_set(ikind),&
-                            orb_basis_set=orb_basis_set,&
+                            basis_set=orb_basis_set,&
                             paw_proj_set=paw_proj,&
                             paw_atom=paw_atom)
 
@@ -468,14 +455,13 @@ CONTAINS
        mepos  = para_env%mepos
        bo = get_limit(nat,num_pe,mepos)
        !
-       ALLOCATE(zero_coeff(nsoctot,nsoctot),STAT=istat)
-       CPPrecondition(istat==0,cp_failure_level,routineP,error,failure)
+       ALLOCATE(zero_coeff(nsoctot,nsoctot))
        DO iat = 1,nat
           iatom = atom_list(iat)
           is_not_associated = .NOT.ASSOCIATED(jrho1_atom_set(iatom)%cjc0_h(1)%r_coef)
           !
           IF(iat.GE.bo(1).AND.iat.LE.bo(2).AND.is_not_associated) THEN
-             CALL allocate_jrho_coeff(jrho1_atom_set,iatom,nsoctot,error)
+             CALL allocate_jrho_coeff(jrho1_atom_set,iatom,nsoctot)
           ENDIF
           !
           DO ispin = 1, nspins
@@ -532,22 +518,19 @@ CONTAINS
           ENDDO ! ispin
        ENDDO ! iat
        !
-       DEALLOCATE(zero_coeff,STAT=istat)
-       CPPrecondition(istat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE(zero_coeff)
        !
     ENDDO ! ikind
     !
     !
-    logger => cp_error_get_logger(error)
-    output_unit= cp_logger_get_default_io_unit(logger)
+    output_unit= cp_logger_get_default_io_unit()
     IF(output_unit>0) THEN
        WRITE(output_unit,'(A,E8.2)') 'calculate_jrho_atom_coeff: nbr_dbl=',nbr_dbl
     ENDIF
     !
     ! clean up
     DEALLOCATE(a_matrix,b_matrix,c_matrix,d_matrix,PC1,CPC,a_block,b_block,c_block,d_block,&
-               jp_RARnu,jp2_RARnu,STAT=istat)
-    CPPrecondition(istat==0,cp_failure_level,routineP,error,failure)
+               jp_RARnu,jp2_RARnu)
     !
     CALL timestop(handle)
     !
@@ -558,31 +541,29 @@ CONTAINS
 !> \param qs_env ...
 !> \param current_env ...
 !> \param idir ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE calculate_jrho_atom_rad(qs_env,current_env,idir,error)
+  SUBROUTINE calculate_jrho_atom_rad(qs_env,current_env,idir)
     !
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(current_env_type)                   :: current_env
     INTEGER, INTENT(IN)                      :: idir
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'calculate_jrho_atom_rad', &
       routineP = moduleN//':'//routineN
 
     INTEGER :: damax_iso_not0, damax_iso_not0_local, handle, i1, i2, iat, &
       iatom, icg, ikind, ipgf1, ipgf2, ir, iset1, iset2, iso, iso1, &
-      iso1_first, iso1_last, iso2, iso2_first, iso2_last, ispin, istat, l, &
-      l_iso, llmax, lmax12, lmax_expansion, lmin12, m1s, m2s, m_iso, &
-      max_iso_not0, max_iso_not0_local, max_max_iso_not0, max_nso, &
-      max_s_harm, maxl, maxlgto, maxso, mepos, n1s, n2s, na, natom, &
-      natom_tot, nkind, nr, nset, nspins, num_pe, size1, size2
+      iso1_first, iso1_last, iso2, iso2_first, iso2_last, ispin, l, l_iso, &
+      llmax, lmax12, lmax_expansion, lmin12, m1s, m2s, m_iso, max_iso_not0, &
+      max_iso_not0_local, max_max_iso_not0, max_nso, max_s_harm, maxl, &
+      maxlgto, maxso, mepos, n1s, n2s, na, natom, natom_tot, nkind, nr, nset, &
+      nspins, num_pe, size1, size2
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: cg_n_list, dacg_n_list
     INTEGER, ALLOCATABLE, DIMENSION(:, :, :) :: cg_list, dacg_list
     INTEGER, DIMENSION(2)                    :: bo
     INTEGER, DIMENSION(:), POINTER           :: atom_list, lmax, lmin, npgf, &
                                                 o2nindex
-    LOGICAL                                  :: failure, paw_atom
+    LOGICAL                                  :: paw_atom
     LOGICAL, ALLOCATABLE, DIMENSION(:, :)    :: is_set_to_0
     REAL(dp)                                 :: hard_radius
     REAL(dp), ALLOCATABLE, DIMENSION(:)      :: g1, g2, gauge_h, gauge_s
@@ -613,7 +594,6 @@ CONTAINS
 
     CALL timeset(routineN,handle)
     !
-    failure =.FALSE.
     NULLIFY(atomic_kind_set,qs_kind_set,dft_control,para_env,&
             coeff,Fr_h,Fr_s,Fr_a_h,Fr_a_s,Fr_a_h_ii,Fr_a_s_ii,&
             Fr_a_h_iii,Fr_a_s_iii,Fr_b_h,Fr_b_s,Fr_b_h_ii,&
@@ -624,23 +604,20 @@ CONTAINS
                     atomic_kind_set=atomic_kind_set,&
                     qs_kind_set=qs_kind_set,&
                     dft_control=dft_control,&
-                    para_env=para_env,&
-                    error=error)
+                    para_env=para_env)
 
     CALL get_qs_kind_set(qs_kind_set=qs_kind_set,maxlgto=maxlgto)
 
     !
     CALL get_current_env(current_env=current_env,&
-                     jrho1_atom_set=jrho1_atom_set,&
-                     error=error)
+                     jrho1_atom_set=jrho1_atom_set)
     !
 
     nkind = SIZE(qs_kind_set)
     nspins = dft_control%nspins
     !
     natom_tot = SIZE(jrho1_atom_set,1)
-    ALLOCATE(is_set_to_0(natom_tot,nspins),STAT=istat)
-    CPPrecondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(is_set_to_0(natom_tot,nspins))
     is_set_to_0(:,:) = .FALSE.
 
     !
@@ -657,7 +634,7 @@ CONTAINS
                             paw_atom=paw_atom,&
                             harmonics=harmonics,&
                             hard_radius=hard_radius,&
-                            orb_basis_set=orb_basis_set)
+                            basis_set=orb_basis_set)
        !
        ! Quick cycle if needed.
        IF(.NOT.paw_atom) CYCLE
@@ -695,8 +672,7 @@ CONTAINS
                 cjc_iii_h_block(max_nso,max_nso),cjc_iii_s_block(max_nso,max_nso),&
                 cg_list(2,nsoset(maxl)**2,max_s_harm),cg_n_list(max_s_harm),&
                 dacg_list(2,nsoset(maxl)**2,max_s_harm),dacg_n_list(max_s_harm),&
-                gauge_h(nr),gauge_s(nr),STAT=istat)
-       CPPrecondition(istat==0,cp_failure_level,routineP,error,failure)
+                gauge_h(nr),gauge_s(nr))
        !
        ! Compute the gauge
        SELECT CASE(current_env%gauge)
@@ -719,8 +695,7 @@ CONTAINS
           gauge_h(1:nr) = HUGE(0e0_dp)!0e0_dp
           gauge_s(1:nr) = HUGE(0e0_dp)!0e0_dp
        CASE DEFAULT
-          CALL stop_program(routineN,moduleN,__LINE__,&
-                            "Unknown gauge, try again...")
+          CPABORT("Unknown gauge, try again...")
        END SELECT
        !
        !
@@ -729,11 +704,11 @@ CONTAINS
           m2s = 0
           DO iset2 = 1,nset
              CALL get_none0_cg_list(my_CG,lmin(iset1),lmax(iset1),lmin(iset2),lmax(iset2),&
-                                    max_s_harm,lmax_expansion,cg_list,cg_n_list,max_iso_not0_local,error)
-             CPPrecondition(max_iso_not0_local.LE.max_iso_not0,cp_failure_level,routineP,error,failure)
+                                    max_s_harm,lmax_expansion,cg_list,cg_n_list,max_iso_not0_local)
+             CPASSERT(max_iso_not0_local.LE.max_iso_not0)
              CALL get_none0_cg_list(my_CG_dxyz_asym,lmin(iset1),lmax(iset1),lmin(iset2),lmax(iset2),&
-                                    max_s_harm,lmax_expansion,dacg_list,dacg_n_list,damax_iso_not0_local,error)
-             CPPrecondition(damax_iso_not0_local.LE.damax_iso_not0,cp_failure_level,routineP,error,failure)
+                                    max_s_harm,lmax_expansion,dacg_list,dacg_n_list,damax_iso_not0_local)
+             CPASSERT(damax_iso_not0_local.LE.damax_iso_not0)
 
              n1s = nsoset(lmax(iset1))
              DO ipgf1 = 1,npgf(iset1)
@@ -743,7 +718,7 @@ CONTAINS
                 iso1_first = o2nindex(iso1_first)
                 iso1_last  = o2nindex(iso1_last)
                 i1 = iso1_last - iso1_first + 1
-                CPPrecondition(size1==i1,cp_failure_level,routineP,error,failure)
+                CPASSERT(size1==i1)
                 i1 = nsoset(lmin(iset1)-1)+1
                 !
                 g1(1:nr) = EXP(-zet(ipgf1,iset1)*grid_atom%rad2(1:nr))
@@ -756,7 +731,7 @@ CONTAINS
                    iso2_first = o2nindex(iso2_first)
                    iso2_last  = o2nindex(iso2_last)
                    i2 = iso2_last - iso2_first + 1
-                   CPPrecondition(size2==i2,cp_failure_level,routineP,error,failure)
+                   CPASSERT(size2==i2)
                    i2 = nsoset(lmin(iset2)-1)+1
                    !
                    g2(1:nr) = EXP(-zet(ipgf2,iset2)*grid_atom%rad2(1:nr))
@@ -861,11 +836,11 @@ CONTAINS
                          jrho1_atom => jrho1_atom_set(iatom)
                          IF(.NOT.ASSOCIATED(jrho1_atom%jrho_a_h(ispin)%r_coef)) THEN
                             CALL allocate_jrho_atom_rad(jrho1_atom,ispin,nr,na,&
-                                 max_max_iso_not0,error=error)
+                                 max_max_iso_not0)
                             is_set_to_0(iatom,ispin) = .TRUE.
                          ELSE
                             IF(.NOT.is_set_to_0(iatom,ispin)) THEN
-                               CALL set2zero_jrho_atom_rad(jrho1_atom,ispin,error=error)
+                               CALL set2zero_jrho_atom_rad(jrho1_atom,ispin)
                                is_set_to_0(iatom,ispin) = .TRUE.
                             ENDIF
                          ENDIF
@@ -906,7 +881,7 @@ CONTAINS
                                   WRITE(*,*) 'iso1=',iso1,' iso2=',iso2,' iso=',iso,' icg=',icg
                                   WRITE(*,*) '.... will stop!'
                                ENDIF
-                               CPPrecondition(iso2>0.AND.iso1>0,cp_failure_level,routineP,error,failure)
+                               CPASSERT(iso2>0.AND.iso1>0)
                                !
                                l = indso(1,iso1) + indso(1,iso2)
                                IF(l.GT.lmax_expansion.OR.l.LT..0) THEN
@@ -914,7 +889,7 @@ CONTAINS
                                   WRITE(*,*) 'calculate_jrho_atom_rad: 1 lmax_expansion',lmax_expansion
                                   WRITE(*,*) '.... will stop!'
                                ENDIF
-                               CPPrecondition(l<=lmax_expansion,cp_failure_level,routineP,error,failure)
+                               CPASSERT(l<=lmax_expansion)
                                !------------------------------------------------------------------
                                ! P0
                                !
@@ -1020,7 +995,7 @@ CONTAINS
                                   WRITE(*,*) 'iso1=',iso1,' iso2=',iso2,' iso=',iso,' icg=',icg
                                   WRITE(*,*) '.... will stop!'
                                ENDIF
-                               CPPrecondition(iso2>0.AND.iso1>0,cp_failure_level,routineP,error,failure)
+                               CPASSERT(iso2>0.AND.iso1>0)
                                !
                                l = indso(1,iso1) + indso(1,iso2)
                                IF(l.GT.lmax_expansion) THEN
@@ -1028,7 +1003,7 @@ CONTAINS
                                   WRITE(*,*) 'calculate_jrho_atom_rad: 1 lmax_expansion',lmax_expansion
                                   WRITE(*,*) '.... will stop!'
                                ENDIF
-                               CPPrecondition(l<=lmax_expansion,cp_failure_level,routineP,error,failure)
+                               CPASSERT(l<=lmax_expansion)
                                !------------------------------------------------------------------
                                ! Daij
                                !
@@ -1112,13 +1087,11 @@ CONTAINS
        !
        DEALLOCATE(cjc0_h_block,cjc0_s_block,cjc_h_block,cjc_s_block,cjc_ii_h_block,cjc_ii_s_block,&
                   cjc_iii_h_block,cjc_iii_s_block,g1,g2,gg,gg_lm1,dgg_1,gauge_h,gauge_s,&
-                  cg_list,cg_n_list,dacg_list,dacg_n_list,STAT=istat)
-       CPPrecondition(istat==0,cp_failure_level,routineP,error,failure)
+                  cg_list,cg_n_list,dacg_list,dacg_n_list)
     ENDDO ! ikind
     !
     !
-    DEALLOCATE(is_set_to_0,STAT=istat)
-    CPPrecondition(istat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(is_set_to_0)
     !
     CALL timestop(handle)
     !
@@ -1138,11 +1111,10 @@ CONTAINS
 !> \param iB ...
 !> \param idir ...
 !> \param ispin ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE calculate_jrho_atom_ang(jrho1_atom,jrho_h,jrho_s,grid_atom,&
                                      harmonics,do_igaim,ratom,natm_gauge,&
-                                     iB,idir,ispin,error)
+                                     iB,idir,ispin)
     !
     TYPE(jrho_atom_type), POINTER            :: jrho1_atom
     REAL(dp), DIMENSION(:, :), POINTER       :: jrho_h, jrho_s
@@ -1150,15 +1122,13 @@ CONTAINS
     TYPE(harmonics_atom_type), POINTER       :: harmonics
     LOGICAL, INTENT(IN)                      :: do_igaim
     INTEGER, INTENT(IN)                      :: iB, idir, ispin, natm_gauge
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
     REAL(dp), INTENT(IN) :: ratom(:,:)
 
     CHARACTER(len=*), PARAMETER :: routineN = 'calculate_jrho_atom_ang', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: ia, idir2, iiB, iiiB, ir, &
-                                                iso, max_max_iso_not0, na, nr, istat
-    LOGICAL                                  :: failure
+                                                iso, max_max_iso_not0, na, nr
     REAL(dp)                                 :: rad_part, scale
     REAL(dp), DIMENSION(:, :), POINTER :: a, Fr_a_h, Fr_a_h_ii, Fr_a_h_iii, &
       Fr_a_s, Fr_a_s_ii, Fr_a_s_iii, Fr_b_h, Fr_b_h_ii, Fr_b_h_iii, Fr_b_s, &
@@ -1167,46 +1137,44 @@ CONTAINS
     REAL(dp), DIMENSION(:,:,:), ALLOCATABLE :: g
 !
 !
-    failure = .FALSE.
     NULLIFY(Fr_h,Fr_s,Fr_a_h,Fr_a_s,Fr_a_h_ii,Fr_a_s_ii,Fr_a_h_iii,Fr_a_s_iii,&
             Fr_b_h,Fr_b_s,Fr_b_h_ii,Fr_b_s_ii,Fr_b_h_iii,Fr_b_s_iii,&
             a,slm)
     !
-    CPPrecondition(ASSOCIATED(jrho_h),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(jrho_s),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(jrho1_atom),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(jrho_h))
+    CPASSERT(ASSOCIATED(jrho_s))
+    CPASSERT(ASSOCIATED(jrho1_atom))
     ! just to be sure...
-    CPPrecondition(ASSOCIATED(jrho1_atom%jrho_a_h),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(jrho1_atom%jrho_a_s),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(jrho1_atom%jrho_b_h),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(jrho1_atom%jrho_b_s),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(jrho1_atom%jrho_a_h(ispin)%r_coef),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(jrho1_atom%jrho_a_s(ispin)%r_coef),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(jrho1_atom%jrho_b_h(ispin)%r_coef),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(jrho1_atom%jrho_b_s(ispin)%r_coef),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(jrho1_atom%jrho_a_h_ii),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(jrho1_atom%jrho_a_s_ii),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(jrho1_atom%jrho_b_h_ii),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(jrho1_atom%jrho_b_s_ii),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(jrho1_atom%jrho_a_h_ii(ispin)%r_coef),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(jrho1_atom%jrho_a_s_ii(ispin)%r_coef),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(jrho1_atom%jrho_b_h_ii(ispin)%r_coef),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(jrho1_atom%jrho_b_s_ii(ispin)%r_coef),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(jrho1_atom%jrho_a_h_iii),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(jrho1_atom%jrho_a_s_iii),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(jrho1_atom%jrho_b_h_iii),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(jrho1_atom%jrho_b_s_iii),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(jrho1_atom%jrho_a_h_iii(ispin)%r_coef),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(jrho1_atom%jrho_a_s_iii(ispin)%r_coef),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(jrho1_atom%jrho_b_h_iii(ispin)%r_coef),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(jrho1_atom%jrho_b_s_iii(ispin)%r_coef),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(jrho1_atom%jrho_a_h))
+    CPASSERT(ASSOCIATED(jrho1_atom%jrho_a_s))
+    CPASSERT(ASSOCIATED(jrho1_atom%jrho_b_h))
+    CPASSERT(ASSOCIATED(jrho1_atom%jrho_b_s))
+    CPASSERT(ASSOCIATED(jrho1_atom%jrho_a_h(ispin)%r_coef))
+    CPASSERT(ASSOCIATED(jrho1_atom%jrho_a_s(ispin)%r_coef))
+    CPASSERT(ASSOCIATED(jrho1_atom%jrho_b_h(ispin)%r_coef))
+    CPASSERT(ASSOCIATED(jrho1_atom%jrho_b_s(ispin)%r_coef))
+    CPASSERT(ASSOCIATED(jrho1_atom%jrho_a_h_ii))
+    CPASSERT(ASSOCIATED(jrho1_atom%jrho_a_s_ii))
+    CPASSERT(ASSOCIATED(jrho1_atom%jrho_b_h_ii))
+    CPASSERT(ASSOCIATED(jrho1_atom%jrho_b_s_ii))
+    CPASSERT(ASSOCIATED(jrho1_atom%jrho_a_h_ii(ispin)%r_coef))
+    CPASSERT(ASSOCIATED(jrho1_atom%jrho_a_s_ii(ispin)%r_coef))
+    CPASSERT(ASSOCIATED(jrho1_atom%jrho_b_h_ii(ispin)%r_coef))
+    CPASSERT(ASSOCIATED(jrho1_atom%jrho_b_s_ii(ispin)%r_coef))
+    CPASSERT(ASSOCIATED(jrho1_atom%jrho_a_h_iii))
+    CPASSERT(ASSOCIATED(jrho1_atom%jrho_a_s_iii))
+    CPASSERT(ASSOCIATED(jrho1_atom%jrho_b_h_iii))
+    CPASSERT(ASSOCIATED(jrho1_atom%jrho_b_s_iii))
+    CPASSERT(ASSOCIATED(jrho1_atom%jrho_a_h_iii(ispin)%r_coef))
+    CPASSERT(ASSOCIATED(jrho1_atom%jrho_a_s_iii(ispin)%r_coef))
+    CPASSERT(ASSOCIATED(jrho1_atom%jrho_b_h_iii(ispin)%r_coef))
+    CPASSERT(ASSOCIATED(jrho1_atom%jrho_b_s_iii(ispin)%r_coef))
     !
     !
     nr = grid_atom%nr
     na = grid_atom%ng_sphere
     max_max_iso_not0 = MAX(harmonics%max_iso_not0,harmonics%damax_iso_not0)
-    ALLOCATE(g(3,nr,na),STAT=istat)
-    CPPrecondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(g(3,nr,na))
     !------------------------------------------------------------------
     !
     Fr_h => jrho1_atom%jrho_h(ispin)%r_coef
@@ -1299,8 +1267,7 @@ CONTAINS
        ENDDO ! iso
     ENDDO ! ir
     !
-    DEALLOCATE(g,STAT=istat)
-    CPPrecondition(istat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(g)
     !
   CONTAINS
     !
@@ -1360,25 +1327,21 @@ CONTAINS
 !> \param qs_env ...
 !> \param iB ...
 !> \param idir ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE calculate_jrho_atom(current_env,qs_env,iB,idir,error)
+  SUBROUTINE calculate_jrho_atom(current_env,qs_env,iB,idir)
     TYPE(current_env_type)                   :: current_env
     TYPE(qs_environment_type), POINTER       :: qs_env
     INTEGER, INTENT(IN)                      :: iB, idir
-    TYPE(cp_error_type), INTENT(INOUT), &
-      OPTIONAL                               :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'calculate_jrho_atom', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: iat, iatom, ikind, ispin, &
-                                                istat, jatom, natm_gauge, &
-                                                natm_tot, natom, nkind, nspins
+                                                jatom, natm_gauge, natm_tot, &
+                                                natom, nkind, nspins
     INTEGER, DIMENSION(2)                    :: bo
     INTEGER, DIMENSION(:), POINTER           :: atom_list
-    LOGICAL                                  :: do_igaim, failure, gapw, &
-                                                paw_atom
+    LOGICAL                                  :: do_igaim, gapw, paw_atom
     REAL(dp)                                 :: hard_radius, r(3)
     REAL(dp), ALLOCATABLE, DIMENSION(:, :)   :: ratom
     TYPE(atomic_kind_type), DIMENSION(:), &
@@ -1396,8 +1359,6 @@ CONTAINS
     TYPE(qs_kind_type), DIMENSION(:), &
       POINTER                                :: qs_kind_set
 
-    failure = .FALSE.
-
     NULLIFY(para_env, dft_control)
     NULLIFY(jrho1_atom_set, grid_atom, harmonics)
     NULLIFY(atomic_kind_set, qs_kind_set, atom_list)
@@ -1407,11 +1368,10 @@ CONTAINS
                     qs_kind_set=qs_kind_set,&
                     particle_set=particle_set,&
                     cell=cell,&
-                    para_env=para_env,error=error)
+                    para_env=para_env)
 
     CALL get_current_env(current_env=current_env,&
-                         jrho1_atom_set=jrho1_atom_set,&
-                         error=error)
+                         jrho1_atom_set=jrho1_atom_set)
 
     do_igaim = .FALSE.
     IF(current_env%gauge.EQ.current_gauge_atom) do_igaim = .TRUE.
@@ -1421,8 +1381,7 @@ CONTAINS
     nspins = dft_control%nspins
 
     natm_tot = SIZE(particle_set)
-    ALLOCATE(ratom(3,natm_tot),STAT=istat)
-    CPPrecondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(ratom(3,natm_tot))
 
     IF (gapw) THEN
        DO ikind = 1,nkind
@@ -1462,14 +1421,13 @@ CONTAINS
                      jrho1_atom%jrho_vec_rad_s(idir,ispin)%r_coef,&
                      grid_atom,harmonics,&
                      do_igaim,&
-                     ratom,natm_gauge,iB,idir,ispin,error=error)
+                     ratom,natm_gauge,iB,idir,ispin)
              END DO !ispin
           END DO !iat
        END DO !ikind
     END IF
 
-    DEALLOCATE(ratom,STAT=istat)
-    CPPrecondition(istat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(ratom)
 
   END SUBROUTINE calculate_jrho_atom
 

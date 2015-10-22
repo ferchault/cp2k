@@ -10,10 +10,15 @@
 !> \author Ole Schuett
 ! *****************************************************************************
 MODULE cuda_profiling
+  USE ISO_C_BINDING,                   ONLY: C_CHAR,&
+                                             C_INT,&
+                                             C_NULL_CHAR,&
+                                             C_SIZE_T
   USE kinds,                           ONLY: default_string_length,&
                                              int_8
+  USE message_passing,                 ONLY: mp_abort
 
- !$ USE OMP_LIB
+ !$ USE OMP_LIB, ONLY: omp_get_max_threads, omp_get_thread_num, omp_get_num_threads
 
  IMPLICIT NONE
 
@@ -26,7 +31,7 @@ MODULE cuda_profiling
   INTERFACE
      FUNCTION cuda_nvtx_range_push_dc(message) RESULT(level) &
        BIND(C, name="cuda_nvtx_range_push_cu") 
-       USE ISO_C_BINDING
+       IMPORT
     CHARACTER(kind=C_CHAR), DIMENSION(*), &
       INTENT(IN)                             :: message
     INTEGER(KIND=C_INT)                      :: level
@@ -37,7 +42,7 @@ MODULE cuda_profiling
   INTERFACE
      FUNCTION cuda_nvtx_range_pop_dc() RESULT(level) &
        BIND(C, name="cuda_nvtx_range_pop_cu") 
-       USE ISO_C_BINDING
+       IMPORT
     INTEGER(KIND=C_INT)                      :: level
 
      END FUNCTION cuda_nvtx_range_pop_dc
@@ -46,7 +51,7 @@ MODULE cuda_profiling
   INTERFACE
     FUNCTION cudaMemGetInfo_cu (free, total) RESULT(istat) &
       BIND(C, name="cudaMemGetInfo")
-      USE ISO_C_BINDING
+      IMPORT
     INTEGER(KIND=C_SIZE_T), INTENT(INOUT)    :: free, total
     INTEGER(KIND=C_INT)                      :: istat
 
@@ -56,24 +61,23 @@ MODULE cuda_profiling
   INTERFACE
      SUBROUTINE cuda_nvtx_name_osthread_cu(name)&
           BIND(C, name="cuda_nvtx_name_osthread_cu")
-        USE ISO_C_BINDING
+        IMPORT
     CHARACTER(KIND=C_CHAR), DIMENSION(*)     :: name
 
      END SUBROUTINE cuda_nvtx_name_osthread_cu
   END INTERFACE
 
-
 #endif
+
 
  CONTAINS
 
-#if defined( __CUDA_PROFILING )
- ! *****************************************************************************
+
 ! *****************************************************************************
 !> \brief ...
 ! *****************************************************************************
  SUBROUTINE cuda_nvtx_init()
-    USE ISO_C_BINDING
+#if defined( __CUDA_PROFILING )
     CHARACTER(len=default_string_length)     :: threadname
     INTEGER                                  :: ithread
 
@@ -83,91 +87,55 @@ MODULE cuda_profiling
     WRITE(threadname, "(I3,A,I2,A)") ithread
     CALL cuda_nvtx_name_osthread_cu(TRIM(threadname)//c_null_char)
     !$OMP END PARALLEL
+#endif
   END SUBROUTINE cuda_nvtx_init
 
- ! *****************************************************************************
 ! *****************************************************************************
 !> \brief ...
 !> \param routineN ...
 ! *****************************************************************************
   SUBROUTINE cuda_nvtx_range_push(routineN)
     CHARACTER(LEN=*), INTENT(IN)             :: routineN
-
+#if defined( __CUDA_PROFILING )
     INTEGER                                  :: level
-
     level = cuda_nvtx_range_push_dc(TRIM(routineN)//CHAR(0))
+#else
+    WRITE (*,*) "cuda_nvtx_range_push() called with: "//TRIM(routineN)
+    CALL mp_abort("cuda_nvtx_range_push: __CUDA_PROFILING not compiled in.")
+#endif
   END SUBROUTINE cuda_nvtx_range_push
 
- ! *****************************************************************************
 ! *****************************************************************************
 !> \brief ...
 ! *****************************************************************************
   SUBROUTINE cuda_nvtx_range_pop()
-    INTEGER                                  :: level
-
+#if defined( __CUDA_PROFILING )
+     INTEGER                                  :: level
      level = cuda_nvtx_range_pop_dc()
+#else
+     CALL mp_abort("cuda_nvtx_range_push: __CUDA_PROFILING not compiled in.")
+#endif
   END SUBROUTINE cuda_nvtx_range_pop
 
-  ! *****************************************************************************
 ! *****************************************************************************
 !> \brief ...
 !> \param free ...
 !> \param total ...
 ! *****************************************************************************
   SUBROUTINE cuda_mem_info(free, total)
-    USE ISO_C_BINDING
     INTEGER(KIND=int_8), INTENT(OUT)         :: free, total
-
+#if defined( __CUDA_PROFILING )
     INTEGER(KIND=C_INT)                      :: istat
     INTEGER(KIND=C_SIZE_T)                   :: free_c, total_c
 
     istat = cudaMemGetInfo_cu(free_c, total_c)
-    IF(istat /= 0) STOP "cuda_mem_info: failed"
+    IF(istat /= 0) CPABORT("cuda_mem_info: failed")
     free = free_c
     total = total_c
-  END SUBROUTINE cuda_mem_info
-
 #else
- ! *****************************************************************************
-! *****************************************************************************
-!> \brief ...
-! *****************************************************************************
-  SUBROUTINE cuda_nvtx_init()
-  ! nothing todo
-  END SUBROUTINE cuda_nvtx_init
-
- ! *****************************************************************************
-! *****************************************************************************
-!> \brief ...
-!> \param routineN ...
-! *****************************************************************************
-  SUBROUTINE cuda_nvtx_range_push(routineN)
-    CHARACTER(LEN=*), INTENT(IN)             :: routineN
-
-    STOP "cuda_nvtx_range_push: __CUDA_PROFILING not compiled in."
-  END SUBROUTINE cuda_nvtx_range_push
-
- ! *****************************************************************************
-! *****************************************************************************
-!> \brief ...
-! *****************************************************************************
-  SUBROUTINE cuda_nvtx_range_pop()
-     STOP "cuda_nvtx_range_push: __CUDA_PROFILING not compiled in."
-  END SUBROUTINE cuda_nvtx_range_pop
-
-  ! *****************************************************************************
-! *****************************************************************************
-!> \brief ...
-!> \param free ...
-!> \param total ...
-! *****************************************************************************
-  SUBROUTINE cuda_mem_info(free, total)
-    INTEGER(KIND=int_8), INTENT(OUT)         :: free, total
-
     free  = 0
     total = 0
-  END SUBROUTINE cuda_mem_info
 #endif
-
+  END SUBROUTINE cuda_mem_info
 
 END MODULE cuda_profiling

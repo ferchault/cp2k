@@ -50,9 +50,8 @@ MODULE et_coupling
   USE qs_rho_types,                    ONLY: qs_rho_get,&
                                              qs_rho_type
   USE termination,                     ONLY: stop_memory
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -68,12 +67,10 @@ CONTAINS
 ! *****************************************************************************
 !> \brief ...
 !> \param qs_env ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE calc_et_coupling(qs_env,error)
+  SUBROUTINE calc_et_coupling(qs_env)
 
     TYPE(qs_environment_type), POINTER       :: qs_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'calc_et_coupling', &
       routineP = moduleN//':'//routineN
@@ -105,28 +102,25 @@ CONTAINS
 
     CALL timeset(routineN,handle)
 
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
     et_coupling_section => section_vals_get_subs_vals(qs_env%input,&
-                            "PROPERTIES%ET_COUPLING",error=error)
+                            "PROPERTIES%ET_COUPLING")
 
-    CALL get_qs_env(qs_env, dft_control=dft_control, para_env=para_env, error=error)
+    CALL get_qs_env(qs_env, dft_control=dft_control, para_env=para_env)
     my_id=dft_control%qs_control%becke_control%density_type
 
     iw=cp_print_key_unit_nr(logger,et_coupling_section,"PROGRAM_RUN_INFO",&
-                                         extension=".log",error=error)
+                                         extension=".log")
 
     ALLOCATE(rest_MO(2))
     ALLOCATE(a(dft_control%nspins))
     ALLOCATE(b(dft_control%nspins))
     ALLOCATE(S_det(dft_control%nspins))
 
-    CALL mpools_get(qs_env%mpools, mo_mo_fm_pools=mo_mo_fm_pools,&
-         error=error)
-    mo_mo_fmstruct => fm_pool_get_el_struct(mo_mo_fm_pools(1)%pool,&
-         error=error)
+    CALL mpools_get(qs_env%mpools, mo_mo_fm_pools=mo_mo_fm_pools)
+    mo_mo_fmstruct => fm_pool_get_el_struct(mo_mo_fm_pools(1)%pool)
     DO i=1, dft_control%nspins
-    mo_mo_fmstruct => fm_pool_get_el_struct(mo_mo_fm_pools(i)%pool,&
-         error=error)
+    mo_mo_fmstruct => fm_pool_get_el_struct(mo_mo_fm_pools(i)%pool)
 
     CALL get_mo_set(mo_set=qs_env%mos(i)%mo_set,&
                     nao=nao,&
@@ -134,61 +128,56 @@ CONTAINS
 
     CALL cp_fm_create(matrix=tmp2,&
          matrix_struct=qs_env%mos(i)%mo_set%mo_coeff%matrix_struct,&
-         name="ET_TMP"//TRIM(ADJUSTL(cp_to_string(2)))//"MATRIX",&
-         error=error)
+         name="ET_TMP"//TRIM(ADJUSTL(cp_to_string(2)))//"MATRIX")
     CALL cp_fm_create(matrix=inverse_mat,&
          matrix_struct=mo_mo_fmstruct,&
-         name="INVERSE"//TRIM(ADJUSTL(cp_to_string(2)))//"MATRIX",&
-         error=error)
+         name="INVERSE"//TRIM(ADJUSTL(cp_to_string(2)))//"MATRIX")
     CALL cp_fm_create(matrix=Tinverse,&
          matrix_struct=mo_mo_fmstruct,&
-         name="T_INVERSE"//TRIM(ADJUSTL(cp_to_string(2)))//"MATRIX",&
-         error=error)
+         name="T_INVERSE"//TRIM(ADJUSTL(cp_to_string(2)))//"MATRIX")
     CALL cp_fm_create(matrix=SMO,&
          matrix_struct=mo_mo_fmstruct,&
-         name="ET_SMO"//TRIM(ADJUSTL(cp_to_string(1)))//"MATRIX",&
-         error=error)
+         name="ET_SMO"//TRIM(ADJUSTL(cp_to_string(1)))//"MATRIX")
     DO j=1,2
        NULLIFY(rest_MO(j)%matrix)
        CALL cp_fm_create(matrix=rest_MO(j)%matrix,&
             matrix_struct=mo_mo_fmstruct,&
-            name="ET_rest_MO"//TRIM(ADJUSTL(cp_to_string(j)))//"MATRIX",&
-            error=error)
+            name="ET_rest_MO"//TRIM(ADJUSTL(cp_to_string(j)))//"MATRIX")
     END DO
 
 !   calculate MO-overlap
 
-    CALL get_qs_env(qs_env, matrix_s=matrix_s, error=error)
+    CALL get_qs_env(qs_env, matrix_s=matrix_s)
     CALL cp_dbcsr_sm_fm_multiply(matrix_s(1)%matrix,qs_env%et_coupling%et_mo_coeff(i)%matrix,&
-         tmp2,nmo,1.0_dp,0.0_dp,error=error)
+         tmp2,nmo,1.0_dp,0.0_dp)
     CALL cp_gemm('T','N',nmo,nmo,nao,1.0_dp,&
          qs_env%mos(i)%mo_set%mo_coeff,&
-         tmp2,0.0_dp,SMO,error=error)
+         tmp2,0.0_dp,SMO)
 
 !    calculate the MO-representation of the restraint matrix A
 
     CALL cp_dbcsr_sm_fm_multiply(qs_env%et_coupling%rest_mat(1)%matrix,&
          qs_env%et_coupling%et_mo_coeff(i)%matrix,&
-         tmp2,nmo,1.0_dp,0.0_dp,error=error)
+         tmp2,nmo,1.0_dp,0.0_dp)
 
     CALL cp_gemm('T','N',nmo,nmo,nao,1.0_dp,&
          qs_env%mos(i)%mo_set%mo_coeff,&
-         tmp2,0.0_dp,rest_MO(1)%matrix,error=error)
+         tmp2,0.0_dp,rest_MO(1)%matrix)
 
 !    calculate the MO-representation of the restraint matrix D
 
     CALL cp_dbcsr_sm_fm_multiply(qs_env%et_coupling%rest_mat(2)%matrix,&
          qs_env%mos(i)%mo_set%mo_coeff,&
-         tmp2,nmo,1.0_dp,0.0_dp,error=error)
+         tmp2,nmo,1.0_dp,0.0_dp)
 
     CALL cp_gemm('T','N',nmo,nmo,nao,1.0_dp,&
          qs_env%et_coupling%et_mo_coeff(i)%matrix,&
-         tmp2,0.0_dp,rest_MO(2)%matrix,error=error)
+         tmp2,0.0_dp,rest_MO(2)%matrix)
 
-   CALL cp_fm_invert(SMO,inverse_mat,S_det(i),error=error)
+   CALL cp_fm_invert(SMO,inverse_mat,S_det(i))
 
     CALL cp_fm_get_info(inverse_mat, nrow_local=nrow_local, ncol_local=ncol_local,&
-                       row_indices=row_indices,col_indices=col_indices,error=error)
+                       row_indices=row_indices,col_indices=col_indices)
     b(i)=0.0_dp
 
     DO j=1,ncol_local
@@ -197,7 +186,7 @@ CONTAINS
        END DO
     END DO
 
-    CALL cp_fm_transpose(inverse_mat,Tinverse,error)
+    CALL cp_fm_transpose(inverse_mat,Tinverse)
     a(i)=0.0_dp
     DO j=1,ncol_local
        DO k=1,nrow_local
@@ -212,12 +201,12 @@ CONTAINS
 
     CALL mp_sum(b(i), para_env%group)
 
-       CALL cp_fm_release(tmp2,error)
-       CALL cp_fm_release(rest_MO(1)%matrix,error)
-       CALL cp_fm_release(rest_MO(2)%matrix,error)
-       CALL cp_fm_release(SMO,error)
-       CALL cp_fm_release(Tinverse,error)
-       CALL cp_fm_release(inverse_mat,error)
+       CALL cp_fm_release(tmp2)
+       CALL cp_fm_release(rest_MO(1)%matrix)
+       CALL cp_fm_release(rest_MO(2)%matrix)
+       CALL cp_fm_release(SMO)
+       CALL cp_fm_release(Tinverse)
+       CALL cp_fm_release(inverse_mat)
     END DO
     DEALLOCATE(rest_MO)
 
@@ -258,7 +247,7 @@ CONTAINS
     W_mat(1,2)=Wda
 
 !!  solve WC=SCN
-    CALL diamat_all (S_mat,eigenv,.TRUE.,error=error)
+    CALL diamat_all (S_mat,eigenv,.TRUE.)
     ! U = S**(-1/2)
     U=0.0_dp
     U(1,1)=1.0_dp/SQRT(eigenv(1))
@@ -267,10 +256,10 @@ CONTAINS
     U=MATMUL(S_mat,tmp_mat)
     tmp_mat=MATMUL(W_mat,U)
     W_mat=MATMUL(U,tmp_mat)
-    CALL diamat_all (W_mat,eigenv,.TRUE.,error=error)
+    CALL diamat_all (W_mat,eigenv,.TRUE.)
     tmp_mat=MATMUL(U,W_mat)
 
-    CALL get_qs_env(qs_env, energy=energy, error=error)
+    CALL get_qs_env(qs_env, energy=energy)
     W_mat(1,1)=energy%total
     W_mat(2,2)=qs_env%et_coupling%energy
     a(1)=(energy%total+strength*Wbb)*Sda-strength*Wda
@@ -293,10 +282,10 @@ CONTAINS
 
     ENDIF
 
-    CALL cp_dbcsr_deallocate_matrix_set(qs_env%et_coupling%rest_mat,error=error)
+    CALL cp_dbcsr_deallocate_matrix_set(qs_env%et_coupling%rest_mat)
 
     CALL cp_print_key_finished_output(iw,logger,et_coupling_section,&
-               "PROGRAM_RUN_INFO", error=error)
+               "PROGRAM_RUN_INFO")
     CALL timestop(handle)
   END SUBROUTINE calc_et_coupling
 
@@ -306,15 +295,13 @@ CONTAINS
 !> \param becke_const ...
 !> \param calc_pot logical if potential has to be calculated or only_energy
 !> \param calculate_forces ...
-!> \param error ...
 !> \author fschiff (01.2007)
 ! *****************************************************************************
-  SUBROUTINE becke_restraint(qs_env,becke_const ,calc_pot,calculate_forces,error)
+  SUBROUTINE becke_restraint(qs_env,becke_const ,calc_pot,calculate_forces)
 
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(pw_p_type)                          :: becke_const
     LOGICAL                                  :: calc_pot, calculate_forces
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'becke_restraint', &
       routineP = moduleN//':'//routineN
@@ -323,7 +310,6 @@ CONTAINS
                                                 j, jatom, k, np(3)
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: catom
     INTEGER, DIMENSION(2, 3)                 :: bo
-    LOGICAL                                  :: failure
     REAL(kind=dp)                            :: dE, dist1, dist2, dvol, my1, &
                                                 myexp, strength, &
                                                 sum_cell_f_all, &
@@ -343,7 +329,6 @@ CONTAINS
     TYPE(qs_energy_type), POINTER            :: energy
     TYPE(qs_rho_type), POINTER               :: rho
 
-    failure=.FALSE.
     NULLIFY(cell,particle_set,coeff,energy,rho,dft_control,para_env,rho_r)
     CALL timeset(routineN,handle)
 
@@ -352,10 +337,9 @@ CONTAINS
                     particle_set=particle_set,&
                     rho=rho,&
                     dft_control=dft_control,&
-                    para_env=para_env,&
-                    error=error)
+                    para_env=para_env)
 
-    CALL qs_rho_get(rho, rho_r=rho_r, error=error)
+    CALL qs_rho_get(rho, rho_r=rho_r)
 
     IF (dft_control%qs_control%becke_restraint) THEN
           target_val=dft_control%qs_control%becke_control%target
@@ -459,12 +443,9 @@ CONTAINS
              END DO
           END DO
 
-          DEALLOCATE(catom,STAT=istat)
-          IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"catom")
-          DEALLOCATE(R12,STAT=istat)
-          IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"R12")
-          DEALLOCATE(cell_functions,STAT=istat)
-          IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"cell_functions")
+          DEALLOCATE(catom)
+          DEALLOCATE(R12)
+          DEALLOCATE(cell_functions)
 
        END IF
 
@@ -472,12 +453,12 @@ CONTAINS
        DO i=1, dft_control%nspins
              dE=dE+accurate_sum(becke_const%pw%cr3d*rho_r(i)%pw%cr3d)*dvol
        END DO
-       CALL get_qs_env(qs_env,energy=energy,error=error)
+       CALL get_qs_env(qs_env,energy=energy)
        CALL mp_sum(dE, para_env%group)
        dft_control%qs_control%becke_control%becke_order_p=dE
        energy%becke=(dE-target_val)*strength
 
-       IF(calculate_forces) CALL becke_force(qs_env,becke_const,error)
+       IF(calculate_forces) CALL becke_force(qs_env,becke_const)
 
     END IF
     CALL timestop(handle)
@@ -487,14 +468,12 @@ CONTAINS
 !> \brief calculates a becke contraint forces
 !> \param qs_env ...
 !> \param becke_const ...
-!> \param error ...
 !> \author fschiff (01.2007)
 ! *****************************************************************************
-  SUBROUTINE becke_force(qs_env,becke_const,error)
+  SUBROUTINE becke_force(qs_env,becke_const)
 
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(pw_p_type)                          :: becke_const
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'becke_force', &
       routineP = moduleN//':'//routineN
@@ -504,7 +483,6 @@ CONTAINS
                                                 natom, np(3)
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: atom_of_kind, catom, kind_of
     INTEGER, DIMENSION(2, 3)                 :: bo
-    LOGICAL                                  :: failure
     LOGICAL, ALLOCATABLE, DIMENSION(:)       :: is_constraint
     REAL(kind=dp) :: dist1, dist2, dpolyn, dvol, f_3, my1, polyn, strength, &
       sum_cell_f_constr, sum_Pm, target_val, th, tmp_const
@@ -529,7 +507,6 @@ CONTAINS
       POINTER                                :: force
     TYPE(qs_rho_type), POINTER               :: rho
 
-    failure=.FALSE.
     CALL timeset(routineN,handle)
     NULLIFY(dft_control,cell,particle_set,para_env,rho_r)
 
@@ -541,11 +518,10 @@ CONTAINS
                     rho=rho,&
                     force=force,&
                     dft_control=dft_control,&
-                    para_env=para_env,&
-                    error=error)
+                    para_env=para_env)
 
 
-    CALL qs_rho_get(rho, rho_r=rho_r, error=error)
+    CALL qs_rho_get(rho, rho_r=rho_r)
 
     th=1.0e-8_dp
     IF(dft_control%qs_control%becke_restraint)THEN
@@ -736,30 +712,18 @@ CONTAINS
           END DO
        END DO
 
-       DEALLOCATE (catom,STAT=istat)
-       IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"catom")
-       DEALLOCATE (R12,STAT=istat)
-       IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"R12")
-       DEALLOCATE (s_my_ij,STAT=istat)
-       IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"s_my_ij")
-       DEALLOCATE (ds_dR,STAT=istat)
-       IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"ds_dR")
-       DEALLOCATE (P_i,STAT=istat)
-       IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"P_i")
-       DEALLOCATE (dw_dR,STAT=istat)
-       IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"dw_dR")
-       DEALLOCATE (is_constraint,STAT=istat)
-       IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"is_constraint")
-       DEALLOCATE (d_sum_Pm_dR,STAT=istat)
-       IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"d_sum")
-       DEALLOCATE (d_sum_const_dR,STAT=istat)
-       IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"d_sum_const")
-       DEALLOCATE (dP_i_dRi,STAT=istat)
-       IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"dP_i_dRj")
-       DEALLOCATE (dP_i_dRj,STAT=istat)
-       IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"dP_i_dRj")
-       DEALLOCATE (coefficients,STAT=istat)
-       IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"coefficients")
+       DEALLOCATE (catom)
+       DEALLOCATE (R12)
+       DEALLOCATE (s_my_ij)
+       DEALLOCATE (ds_dR)
+       DEALLOCATE (P_i)
+       DEALLOCATE (dw_dR)
+       DEALLOCATE (is_constraint)
+       DEALLOCATE (d_sum_Pm_dR)
+       DEALLOCATE (d_sum_const_dR)
+       DEALLOCATE (dP_i_dRi)
+       DEALLOCATE (dP_i_dRj)
+       DEALLOCATE (coefficients)
        CALL mp_sum(integrated, para_env%group)
 
        DO iatom=1,natom
@@ -769,12 +733,9 @@ CONTAINS
                force(ikind)%rho_elec(:,i) + integrated(:,iatom)*strength
        END DO
 
-       DEALLOCATE (integrated,STAT=istat)
-       IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"integrated")
-       DEALLOCATE (atom_of_kind,STAT=istat)
-       IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"atom_of_kind")
-       DEALLOCATE (kind_of,STAT=istat)
-       IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"kind_of")
+       DEALLOCATE (integrated)
+       DEALLOCATE (atom_of_kind)
+       DEALLOCATE (kind_of)
 
      END IF
 

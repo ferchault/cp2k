@@ -11,8 +11,8 @@ MODULE mixed_energy_types
 
   
   USE kinds,                           ONLY: dp
-  USE termination,                     ONLY: stop_program
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
   CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'mixed_energy_types'
@@ -42,25 +42,18 @@ CONTAINS
 ! *****************************************************************************
 !> \brief   Allocate and/or initialise a mixed energy data structure.
 !> \param mixed_energy ...
-!> \param error ...
 !> \date    11.06
 !> \author  fschiff
 !> \version 1.0
 ! *****************************************************************************
-  SUBROUTINE allocate_mixed_energy(mixed_energy, error)
+  SUBROUTINE allocate_mixed_energy(mixed_energy)
     TYPE(mixed_energy_type), POINTER         :: mixed_energy
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'allocate_mixed_energy', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
     IF (.NOT.ASSOCIATED(mixed_energy)) THEN
-      ALLOCATE (mixed_energy,STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE (mixed_energy)
     END IF
     CALL init_mixed_energy(mixed_energy)
   END SUBROUTINE allocate_mixed_energy
@@ -68,25 +61,18 @@ CONTAINS
 ! *****************************************************************************
 !> \brief   Deallocate a mixed energy data structure.
 !> \param mixed_energy ...
-!> \param error ...
 !> \date    11.06
 !> \author  fschiff
 !> \version 1.0
 ! *****************************************************************************
-  SUBROUTINE deallocate_mixed_energy(mixed_energy, error)
+  SUBROUTINE deallocate_mixed_energy(mixed_energy)
     TYPE(mixed_energy_type), POINTER         :: mixed_energy
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'deallocate_mixed_energy', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
     IF (ASSOCIATED(mixed_energy)) THEN
-      DEALLOCATE (mixed_energy,STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      DEALLOCATE (mixed_energy)
     END IF
   END SUBROUTINE deallocate_mixed_energy
 
@@ -103,9 +89,9 @@ CONTAINS
     IF (ASSOCIATED(mixed_energy)) THEN
       mixed_energy%pot = 0.0_dp
     ELSE
-      CALL stop_program(routineN,moduleN,__LINE__,&
-                        "The mixed_energy pointer is not associated "//&
-                        "and cannot be initialised")
+      CALL cp_abort(__LOCATION__,&
+           "The mixed_energy pointer is not associated "//&
+           "and cannot be initialised")
     END IF
   END SUBROUTINE init_mixed_energy
 

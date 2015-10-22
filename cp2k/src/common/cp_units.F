@@ -38,6 +38,7 @@ MODULE cp_units
                                              s2a,&
                                              uppercase
 #include "cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -158,14 +159,11 @@ CONTAINS
 !> \brief creates a unit parsing a string
 !> \param unit the unit to initialize
 !> \param string the string containing the description of the unit
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author fawzi
 ! *****************************************************************************
-  SUBROUTINE cp_unit_create(unit, string, error)
+  SUBROUTINE cp_unit_create(unit, string)
     TYPE(cp_unit_type), POINTER              :: unit
     CHARACTER(len=*), INTENT(in)             :: string
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cp_unit_create', &
       routineP = moduleN//':'//routineN
@@ -177,7 +175,7 @@ CONTAINS
     INTEGER, DIMENSION(cp_unit_max_kinds)    :: kind_id, power, unit_id
     LOGICAL                                  :: failure
 
-    failure=.FALSE.
+    failure = .FALSE.
     unit_id=cp_units_none
     kind_id=cp_ukind_none
     power=0
@@ -200,10 +198,7 @@ CONTAINS
        IF (i_high<=i_low.OR.i_low>len_string) EXIT
        i_unit=i_unit+1
        IF (i_unit>cp_unit_max_kinds) THEN
-          CALL cp_assert(.FALSE.,cp_failure_level,&
-               cp_assertion_failed,routineP,&
-               "Maximum number of combined units exceeded",&
-               error,failure)
+          CPABORT("Maximum number of combined units exceeded")
           EXIT
        END IF
        ! read unit
@@ -365,15 +360,11 @@ CONTAINS
           unit_id(i_unit)=cp_units_none
           kind_id(i_unit)=cp_ukind_force
        CASE("au")
-          CALL cp_assert(.FALSE.,cp_failure_level,&
-               cp_assertion_failed,routineP,&
+          CALL cp_abort(__LOCATION__,&
                "au unit without specifing its kind not accepted, use "//&
-               "(au_e, au_f, au_t, au_temp, au_l, au_m, au_p, au_pot)",&
-               error,failure)
+               "(au_e, au_f, au_t, au_temp, au_l, au_m, au_p, au_pot)")
        CASE default
-          CALL cp_assert(.FALSE.,cp_failure_level,cp_assertion_failed,&
-               routineP,"Unknown unit: "//string(i_low:i_high-1),&
-               error,failure)
+          CPABORT("Unknown unit: "//string(i_low:i_high-1))
        END SELECT
        power(i_unit)=next_power
        ! parse op
@@ -407,10 +398,7 @@ CONTAINS
                 END SELECT
              END DO
              IF (i_high<=i_low.OR.i_low>len_string) THEN
-                CALL cp_assert(.FALSE.,cp_failure_level,&
-                     cp_assertion_failed,routineP,&
-                     "an integer number is expected after a '^'",&
-                     error,failure)
+                CPABORT("an integer number is expected after a '^'")
                 EXIT
              END IF
              formatstr="(i"//cp_to_string(i_high-i_low+1)//")"
@@ -451,8 +439,8 @@ CONTAINS
        ENDIF
     END DO
     CALL cp_unit_create2(unit,kind_id=kind_id, unit_id=unit_id, &
-         power=power, error=error)
-    desc=cp_unit_desc(unit,error=error)
+         power=power)
+    desc=cp_unit_desc(unit)
   END SUBROUTINE cp_unit_create
 
 ! *****************************************************************************
@@ -463,30 +451,25 @@ CONTAINS
 !>        cp_ukind_*
 !> \param unit_id the actual unit (use constants cp_units_*)
 !> \param power ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author fawzi
 ! *****************************************************************************
-  SUBROUTINE cp_unit_create2(unit, kind_id, unit_id, power, error)
+  SUBROUTINE cp_unit_create2(unit, kind_id, unit_id, power)
     TYPE(cp_unit_type), POINTER              :: unit
     INTEGER, DIMENSION(:), INTENT(in)        :: kind_id, unit_id
     INTEGER, DIMENSION(:), INTENT(in), &
       OPTIONAL                               :: power
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cp_unit_create2', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, j, max_kind, max_pos, stat
+    INTEGER                                  :: i, j, max_kind, max_pos
     LOGICAL                                  :: failure, repeat
 
-    failure=.FALSE.
-
-    CPPrecondition(.NOT.ASSOCIATED(unit),cp_failure_level,routineP,error,failure)
-    CPPrecondition(SIZE(kind_id)<=cp_unit_max_kinds,cp_failure_level,routineP,error,failure)
-    CPPrecondition(SIZE(unit_id)<=cp_unit_max_kinds,cp_failure_level,routineP,error,failure)
-    ALLOCATE(unit,stat=stat)
-    CPPostcondition(stat==0,cp_fatal_level,routineP,error,failure)
+    failure = .FALSE.
+    CPASSERT(.NOT.ASSOCIATED(unit))
+    CPASSERT(SIZE(kind_id)<=cp_unit_max_kinds)
+    CPASSERT(SIZE(unit_id)<=cp_unit_max_kinds)
+    ALLOCATE(unit)
     unit%ref_count=1
     last_unit_id=last_unit_id+1
     unit%id_nr=last_unit_id
@@ -561,64 +544,46 @@ CONTAINS
        END IF
        ! check unit
        failure=failure.OR..NOT.cp_basic_unit_check(basic_kind=unit%kind_id(i),&
-            basic_unit=unit%unit_id(i),error=error)
+            basic_unit=unit%unit_id(i))
     END DO
   END SUBROUTINE cp_unit_create2
 
 ! *****************************************************************************
 !> \brief retains the given unit
 !> \param unit the unit to retain
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author fawzi
 !> \note
 !>      at the moment not needed, there for completeness
 ! *****************************************************************************
-  SUBROUTINE cp_unit_retain(unit,error)
+  SUBROUTINE cp_unit_retain(unit)
     TYPE(cp_unit_type), POINTER              :: unit
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cp_unit_retain', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
-
-    CPPrecondition(ASSOCIATED(unit),cp_failure_level,routineP,error,failure)
-    IF (.NOT. failure) THEN
-       CPPreconditionNoFail(unit%ref_count>0,cp_failure_level,routineP,error)
-       unit%ref_count=unit%ref_count+1
-    END IF
+    CPASSERT(ASSOCIATED(unit))
+    CPASSERT(unit%ref_count>0)
+    unit%ref_count=unit%ref_count+1
   END SUBROUTINE cp_unit_retain
 
 ! *****************************************************************************
 !> \brief releases the given unit
 !> \param unit the unit to release
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author fawzi
 !> \note
 !>      at the moment not needed, there for completeness
 ! *****************************************************************************
-  SUBROUTINE cp_unit_release(unit,error)
+  SUBROUTINE cp_unit_release(unit)
     TYPE(cp_unit_type), POINTER              :: unit
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cp_unit_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
-
     IF (ASSOCIATED(unit)) THEN
-       CPPreconditionNoFail(unit%ref_count>0,cp_failure_level,routineP,error)
+       CPASSERT(unit%ref_count>0)
        unit%ref_count=unit%ref_count-1
        IF (unit%ref_count==0) THEN
-          DEALLOCATE(unit,stat=stat)
-          CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+          DEALLOCATE(unit)
        END IF
     END IF
   END SUBROUTINE cp_unit_release
@@ -627,128 +592,93 @@ CONTAINS
 !> \brief controls that the kind and contains meaningful information
 !> \param basic_kind the kind of the unit
 !> \param basic_unit the unit to check
-!> \param error_level error level of the errors due to invalid values.
-!>        Defaults to cp_failure_level
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \retval res ...
 !> \author fawzi
 ! *****************************************************************************
-  FUNCTION cp_basic_unit_check(basic_kind,basic_unit,error_level,error)&
+  FUNCTION cp_basic_unit_check(basic_kind,basic_unit)&
        RESULT(res)
     INTEGER, INTENT(in)                      :: basic_kind, basic_unit
-    INTEGER, INTENT(in), OPTIONAL            :: error_level
-    TYPE(cp_error_type), INTENT(inout)       :: error
     LOGICAL                                  :: res
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cp_basic_unit_check', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: my_error_level
     LOGICAL                                  :: failure
 
-    failure=.FALSE.
-    my_error_level=cp_failure_level
-    IF (PRESENT(error_level)) my_error_level=error_level
+    failure = .FALSE.
 
-    IF (.NOT. failure) THEN
-       SELECT CASE(basic_kind)
-       CASE(cp_ukind_undef)
-          SELECT CASE (basic_unit)
-          CASE(cp_units_none)
-          CASE default
-             CALL cp_assert(.FALSE.,my_error_level,cp_assertion_failed,&
-                  routineP,"unknown undef unit:"//TRIM(cp_to_string(basic_unit)),&
-                  error,failure)
-          END SELECT
-       CASE(cp_ukind_energy)
-          SELECT CASE (basic_unit)
-          CASE(cp_units_hartree, cp_units_wavenum, cp_units_joule, cp_units_kcalmol,&
-               cp_units_kjmol, cp_units_Ry, cp_units_eV, cp_units_keV, cp_units_au, cp_units_k,&
-               cp_units_jmol, cp_units_none)
-          CASE default
-             CALL cp_assert(.FALSE.,my_error_level,cp_assertion_failed,&
-                  routineP,"unknown energy unit:"//TRIM(cp_to_string(basic_unit)),&
-                  error,failure)
-          END SELECT
-       CASE(cp_ukind_length)
-          SELECT CASE (basic_unit)
-          CASE(cp_units_bohr, cp_units_angstrom, cp_units_au, cp_units_none, cp_units_m,&
-               cp_units_pm, cp_units_nm)
-          CASE default
-             CALL cp_assert(.FALSE.,my_error_level,cp_assertion_failed,&
-                  routineP,"unknown length unit:"//TRIM(cp_to_string(basic_unit)),&
-                  error,failure)
-          END SELECT
-       CASE(cp_ukind_temperature)
-          SELECT CASE (basic_unit)
-          CASE(cp_units_k,cp_units_au,cp_units_none)
-          CASE default
-             CALL cp_assert(.FALSE.,my_error_level,cp_assertion_failed,&
-                  routineP,"unknown temperature unit:"//TRIM(cp_to_string(basic_unit)),&
-                  error,failure)
-          END SELECT
-       CASE(cp_ukind_pressure)
-          SELECT CASE (basic_unit)
-          CASE(cp_units_bar,cp_units_atm,cp_units_kbar,cp_units_Pa,cp_units_MPa,cp_units_GPa,cp_units_au,cp_units_none)
-          CASE default
-             CALL cp_assert(.FALSE.,my_error_level,cp_assertion_failed,&
-                  routineP,"unknown pressure unit:"//TRIM(cp_to_string(basic_unit)),&
-                  error,failure)
-          END SELECT
-       CASE(cp_ukind_angle)
-          SELECT CASE (basic_unit)
-          CASE(cp_units_rad, cp_units_deg,cp_units_none)
-          CASE default
-             CALL cp_assert(.FALSE.,my_error_level,cp_assertion_failed,&
-                  routineP,"unknown angle unit:"//TRIM(cp_to_string(basic_unit)),&
-                  error,failure)
-          END SELECT
-       CASE(cp_ukind_time)
-          SELECT CASE (basic_unit)
-          CASE(cp_units_s, cp_units_fs, cp_units_ps, cp_units_au, cp_units_wn, cp_units_none)
-          CASE default
-             CALL cp_assert(.FALSE.,my_error_level,cp_assertion_failed,&
-                  routineP,"unknown time unit:"//TRIM(cp_to_string(basic_unit)),&
-                  error,failure)
-          END SELECT
-       CASE(cp_ukind_mass)
-          SELECT CASE (basic_unit)
-          CASE(cp_units_kg, cp_units_amu, cp_units_m_e, cp_units_au, cp_units_none)
-          CASE default
-             CALL cp_assert(.FALSE.,my_error_level,cp_assertion_failed,&
-                  routineP,"unknown mass unit:"//TRIM(cp_to_string(basic_unit)),&
-                  error,failure)
-          END SELECT
-       CASE(cp_ukind_potential)
-          SELECT CASE (basic_unit)
-          CASE(cp_units_volt, cp_units_au, cp_units_none)
-          CASE default
-             CALL cp_assert(.FALSE.,my_error_level,cp_assertion_failed,&
-                  routineP,"unknown potential unit:"//TRIM(cp_to_string(basic_unit)),&
-                  error,failure)
-          END SELECT
-       CASE(cp_ukind_force)
-          SELECT CASE (basic_unit)
-          CASE(cp_units_Newton, cp_units_mNewton, cp_units_au, cp_units_none)
-          CASE default
-             CALL cp_assert(.FALSE.,my_error_level,cp_assertion_failed,&
-                  routineP,"unknown force unit:"//TRIM(cp_to_string(basic_unit)),&
-                  error,failure)
-          END SELECT
-       CASE(cp_ukind_none)
-          IF(basic_unit/=cp_units_none)&
-               CALL cp_assert(.FALSE.,my_error_level,&
-               cp_assertion_failed, routineP,&
-               "if the kind of the unit is none also unit must be undefined,not:"&
-               //TRIM(cp_to_string(basic_unit)),&
-               error,failure)
+    SELECT CASE(basic_kind)
+    CASE(cp_ukind_undef)
+       SELECT CASE (basic_unit)
+       CASE(cp_units_none)
        CASE default
-          CALL cp_assert(.FALSE.,my_error_level,cp_assertion_failed,&
-               routineP,"unknown kind of unit:"//TRIM(cp_to_string(basic_kind)),&
-               error,failure)
+          CPABORT("unknown undef unit:"//TRIM(cp_to_string(basic_unit)))
        END SELECT
-    END IF
+    CASE(cp_ukind_energy)
+       SELECT CASE (basic_unit)
+       CASE(cp_units_hartree, cp_units_wavenum, cp_units_joule, cp_units_kcalmol,&
+            cp_units_kjmol, cp_units_Ry, cp_units_eV, cp_units_keV, cp_units_au, cp_units_k,&
+            cp_units_jmol, cp_units_none)
+       CASE default
+          CPABORT("unknown energy unit:"//TRIM(cp_to_string(basic_unit)))
+       END SELECT
+    CASE(cp_ukind_length)
+       SELECT CASE (basic_unit)
+       CASE(cp_units_bohr, cp_units_angstrom, cp_units_au, cp_units_none, cp_units_m,&
+            cp_units_pm, cp_units_nm)
+       CASE default
+          CPABORT("unknown length unit:"//TRIM(cp_to_string(basic_unit)))
+       END SELECT
+    CASE(cp_ukind_temperature)
+       SELECT CASE (basic_unit)
+       CASE(cp_units_k,cp_units_au,cp_units_none)
+       CASE default
+          CPABORT("unknown temperature unit:"//TRIM(cp_to_string(basic_unit)))
+       END SELECT
+    CASE(cp_ukind_pressure)
+       SELECT CASE (basic_unit)
+       CASE(cp_units_bar,cp_units_atm,cp_units_kbar,cp_units_Pa,cp_units_MPa,cp_units_GPa,cp_units_au,cp_units_none)
+       CASE default
+          CPABORT("unknown pressure unit:"//TRIM(cp_to_string(basic_unit)))
+       END SELECT
+    CASE(cp_ukind_angle)
+       SELECT CASE (basic_unit)
+       CASE(cp_units_rad, cp_units_deg,cp_units_none)
+       CASE default
+          CPABORT("unknown angle unit:"//TRIM(cp_to_string(basic_unit)))
+       END SELECT
+    CASE(cp_ukind_time)
+       SELECT CASE (basic_unit)
+       CASE(cp_units_s, cp_units_fs, cp_units_ps, cp_units_au, cp_units_wn, cp_units_none)
+       CASE default
+          CPABORT("unknown time unit:"//TRIM(cp_to_string(basic_unit)))
+       END SELECT
+    CASE(cp_ukind_mass)
+       SELECT CASE (basic_unit)
+       CASE(cp_units_kg, cp_units_amu, cp_units_m_e, cp_units_au, cp_units_none)
+       CASE default
+          CPABORT("unknown mass unit:"//TRIM(cp_to_string(basic_unit)))
+       END SELECT
+    CASE(cp_ukind_potential)
+       SELECT CASE (basic_unit)
+       CASE(cp_units_volt, cp_units_au, cp_units_none)
+       CASE default
+          CPABORT("unknown potential unit:"//TRIM(cp_to_string(basic_unit)))
+       END SELECT
+    CASE(cp_ukind_force)
+       SELECT CASE (basic_unit)
+       CASE(cp_units_Newton, cp_units_mNewton, cp_units_au, cp_units_none)
+       CASE default
+          CPABORT("unknown force unit:"//TRIM(cp_to_string(basic_unit)))
+       END SELECT
+    CASE(cp_ukind_none)
+       IF(basic_unit/=cp_units_none)&
+            CALL cp_abort(__LOCATION__,&
+                 "if the kind of the unit is none also unit must be undefined,not:"&
+                 //TRIM(cp_to_string(basic_unit)))
+    CASE default
+       CPABORT("unknown kind of unit:"//TRIM(cp_to_string(basic_kind)))
+    END SELECT
     res=.not.failure
   END FUNCTION cp_basic_unit_check
 
@@ -758,198 +688,166 @@ CONTAINS
 !> \param basic_kind the kind of the unit of the value
 !> \param basic_unit the unit of the value
 !> \param power the power of the unit (defaults to 1)
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \retval res ...
 !> \author fawzi
 ! *****************************************************************************
-  FUNCTION cp_basic_unit_to_cp2k(value,basic_kind,basic_unit,power,error)  RESULT(res)
+  FUNCTION cp_basic_unit_to_cp2k(value,basic_kind,basic_unit,power)  RESULT(res)
     REAL(kind=dp), INTENT(in)                :: value
     INTEGER, INTENT(in)                      :: basic_kind, basic_unit
     INTEGER, INTENT(in), OPTIONAL            :: power
-    TYPE(cp_error_type), INTENT(inout)       :: error
     REAL(kind=dp)                            :: res
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cp_basic_unit_to_cp2k', &
       routineP = moduleN//':'//routineN
-    INTEGER, PARAMETER :: my_error_level = cp_failure_level
 
     INTEGER                                  :: my_power
-    LOGICAL                                  :: failure
 
-    failure=.FALSE.
     my_power=1
     IF (PRESENT(power)) my_power=power
     IF (basic_unit==cp_units_none.AND.basic_kind/=cp_ukind_undef) THEN
-       CALL cp_assert(basic_kind==cp_units_none,my_error_level,&
-            cp_assertion_failed,routineP,&
-            "unit not yet fully specified, unit of kind "//&
-            TRIM(cp_to_string(basic_unit)),error,failure)
+       IF(basic_kind/=cp_units_none)&
+          CALL cp_abort(__LOCATION__,&
+               "unit not yet fully specified, unit of kind "//&
+               TRIM(cp_to_string(basic_unit)))
     END IF
-    IF (.NOT.failure) THEN
-       SELECT CASE(basic_kind)
-       CASE(cp_ukind_undef)
-          SELECT CASE (basic_unit)
-          CASE(cp_units_none)
-             res = value
-          CASE default
-             CALL cp_assert(.FALSE.,my_error_level,cp_assertion_failed,&
-                  routineP,"unknown energy unit:"//TRIM(cp_to_string(basic_unit)),&
-                  error,failure)
-          END SELECT
-       CASE(cp_ukind_energy)
-          SELECT CASE (basic_unit)
-          CASE(cp_units_hartree,cp_units_au)
-             res=value
-          CASE(cp_units_wavenum)
-             res=wavenumbers**(-my_power)*value
-          CASE(cp_units_joule)
-             res=joule**(-my_power)*value
-          CASE(cp_units_kcalmol)
-             res=kcalmol**(-my_power)*value
-          CASE(cp_units_kjmol)
-             res=kjmol**(-my_power)*value
-          CASE(cp_units_jmol)
-             res=(kjmol*1.0E+3_dp)**(-my_power)*value
-          CASE(cp_units_Ry)
-             res=0.5_dp**my_power*value
-          CASE(cp_units_eV)
-             res=evolt**(-my_power)*value
-          CASE(cp_units_keV)
-             res=(1.0E-3_dp*evolt)**(-my_power)*value
-          CASE(cp_units_k)
-             res=kelvin**(-my_power)*value
-          CASE default
-             CALL cp_assert(.FALSE.,my_error_level,cp_assertion_failed,&
-                  routineP,"unknown energy unit:"//TRIM(cp_to_string(basic_unit)),&
-                  error,failure)
-          END SELECT
-       CASE(cp_ukind_length)
-          SELECT CASE (basic_unit)
-          CASE(cp_units_bohr,cp_units_au)
-             res=value
-          CASE(cp_units_m)
-             res=value*(1.0E10_dp*bohr)**my_power
-          CASE(cp_units_pm)
-             res=value*(0.01_dp*bohr)**my_power
-          CASE(cp_units_nm)
-             res=value*(10.0_dp*bohr)**my_power
-          CASE(cp_units_angstrom)
-             res=value*bohr**my_power
-          CASE default
-             CALL cp_assert(.FALSE.,my_error_level,cp_assertion_failed,&
-                  routineP,"unknown length unit:"//TRIM(cp_to_string(basic_unit)),&
-                  error,failure)
-          END SELECT
-       CASE(cp_ukind_temperature)
-          SELECT CASE (basic_unit)
-          CASE(cp_units_k)
-             res=kelvin**(-my_power)*value
-          CASE(cp_units_au)
-             res=value
-          CASE default
-             CALL cp_assert(.FALSE.,my_error_level,cp_assertion_failed,&
-                  routineP,"unknown temperature unit:"//TRIM(cp_to_string(basic_unit)),&
-                  error,failure)
-          END SELECT
-       CASE(cp_ukind_pressure)
-          SELECT CASE (basic_unit)
-          CASE(cp_units_bar)
-             res = bar**(-my_power)*value
-          CASE(cp_units_atm)
-             res = atm**(-my_power)*value
-          CASE(cp_units_kbar)
-             res = (1.0E-3_dp*bar)**(-my_power)*value
-          CASE(cp_units_Pa)
-             res = pascal**(-my_power)*value
-          CASE(cp_units_MPa)
-             res = (1.0E-6_dp*pascal)**(-my_power)*value
-          CASE(cp_units_GPa)
-             res = (1.0E-9_dp*pascal)**(-my_power)*value
-          CASE(cp_units_au)
-             res = value
-          CASE default
-             CALL cp_assert(.FALSE.,my_error_level,cp_assertion_failed,&
-                  routineP,"unknown pressure unit:"//TRIM(cp_to_string(basic_unit)),&
-                  error,failure)
-          END SELECT
-       CASE(cp_ukind_angle)
-          SELECT CASE (basic_unit)
-          CASE(cp_units_rad)
-             res=value
-          CASE(cp_units_deg)
-             res=value*(radians)**my_power
-          CASE default
-             CALL cp_assert(.FALSE.,my_error_level,cp_assertion_failed,&
-                  routineP,"unknown angle unit:"//TRIM(cp_to_string(basic_unit)),&
-                  error,failure)
-          END SELECT
-       CASE(cp_ukind_time)
-          SELECT CASE (basic_unit)
-          CASE(cp_units_s)
-             res=value*seconds**(-my_power)
-          CASE(cp_units_fs)
-             res=value*femtoseconds**(-my_power)
-          CASE(cp_units_ps)
-             res=value*picoseconds**(-my_power)
-          CASE(cp_units_au)
-             res=value
-          CASE(cp_units_wn)
-             res=(twopi*wavenumbers)**(my_power)/value
-          CASE default
-             CALL cp_assert(.FALSE.,my_error_level,cp_assertion_failed,&
-                  routineP,"unknown time unit:"//TRIM(cp_to_string(basic_unit)),&
-                  error,failure)
-          END SELECT
-       CASE(cp_ukind_mass)
-          SELECT CASE (basic_unit)
-          CASE(cp_units_kg)
-             res=e_mass**my_power*value
-          CASE(cp_units_amu)
-             res=massunit**my_power*value
-          CASE(cp_units_m_e,cp_units_au)
-             res=value
-          CASE default
-             CALL cp_assert(.FALSE.,my_error_level,cp_assertion_failed,&
-                  routineP,"unknown mass unit:"//TRIM(cp_to_string(basic_unit)),&
-                  error,failure)
-          END SELECT
-       CASE(cp_ukind_potential)
-          SELECT CASE (basic_unit)
-          CASE(cp_units_volt)
-             res=evolt**(-my_power)*value
-          CASE(cp_units_au)
-             res=value
-          CASE default
-             CALL cp_assert(.FALSE.,my_error_level,cp_assertion_failed,&
-                  routineP,"unknown potential unit:"//TRIM(cp_to_string(basic_unit)),&
-                  error,failure)
-          END SELECT
-       CASE(cp_ukind_force)
-          SELECT CASE (basic_unit)
-          CASE(cp_units_Newton)
-             res=value*newton**(-my_power)
-          CASE(cp_units_mNewton)
-             res=value*(1.0E+3*newton)**(-my_power)
-          CASE(cp_units_au)
-             res=value
-          CASE default
-             CALL cp_assert(.FALSE.,my_error_level,cp_assertion_failed,&
-                  routineP,"unknown force unit:"//TRIM(cp_to_string(basic_unit)),&
-                  error,failure)
-          END SELECT
-       CASE(cp_ukind_none)
-          CALL cp_assert(.FALSE.,my_error_level,&
-               cp_assertion_failed, routineP,&
-               "if the kind of the unit is none also unit must be undefined,not:"&
-               //TRIM(cp_to_string(basic_unit)),&
-               error,failure)
+    SELECT CASE(basic_kind)
+    CASE(cp_ukind_undef)
+       SELECT CASE (basic_unit)
+       CASE(cp_units_none)
+          res = value
        CASE default
-          CALL cp_assert(.FALSE.,my_error_level,cp_assertion_failed,&
-               routineP,"unknown kind of unit:"//TRIM(cp_to_string(basic_kind)),&
-               error,failure)
+          CPABORT("unknown energy unit:"//TRIM(cp_to_string(basic_unit)))
        END SELECT
-    END IF
+    CASE(cp_ukind_energy)
+       SELECT CASE (basic_unit)
+       CASE(cp_units_hartree,cp_units_au)
+          res=value
+       CASE(cp_units_wavenum)
+          res=wavenumbers**(-my_power)*value
+       CASE(cp_units_joule)
+          res=joule**(-my_power)*value
+       CASE(cp_units_kcalmol)
+          res=kcalmol**(-my_power)*value
+       CASE(cp_units_kjmol)
+          res=kjmol**(-my_power)*value
+       CASE(cp_units_jmol)
+          res=(kjmol*1.0E+3_dp)**(-my_power)*value
+       CASE(cp_units_Ry)
+          res=0.5_dp**my_power*value
+       CASE(cp_units_eV)
+          res=evolt**(-my_power)*value
+       CASE(cp_units_keV)
+          res=(1.0E-3_dp*evolt)**(-my_power)*value
+       CASE(cp_units_k)
+          res=kelvin**(-my_power)*value
+       CASE default
+          CPABORT("unknown energy unit:"//TRIM(cp_to_string(basic_unit)))
+       END SELECT
+    CASE(cp_ukind_length)
+       SELECT CASE (basic_unit)
+       CASE(cp_units_bohr,cp_units_au)
+          res=value
+       CASE(cp_units_m)
+          res=value*(1.0E10_dp*bohr)**my_power
+       CASE(cp_units_pm)
+          res=value*(0.01_dp*bohr)**my_power
+       CASE(cp_units_nm)
+          res=value*(10.0_dp*bohr)**my_power
+       CASE(cp_units_angstrom)
+          res=value*bohr**my_power
+       CASE default
+          CPABORT("unknown length unit:"//TRIM(cp_to_string(basic_unit)))
+       END SELECT
+    CASE(cp_ukind_temperature)
+       SELECT CASE (basic_unit)
+       CASE(cp_units_k)
+          res=kelvin**(-my_power)*value
+       CASE(cp_units_au)
+          res=value
+       CASE default
+          CPABORT("unknown temperature unit:"//TRIM(cp_to_string(basic_unit)))
+       END SELECT
+    CASE(cp_ukind_pressure)
+       SELECT CASE (basic_unit)
+       CASE(cp_units_bar)
+          res = bar**(-my_power)*value
+       CASE(cp_units_atm)
+          res = atm**(-my_power)*value
+       CASE(cp_units_kbar)
+          res = (1.0E-3_dp*bar)**(-my_power)*value
+       CASE(cp_units_Pa)
+          res = pascal**(-my_power)*value
+       CASE(cp_units_MPa)
+          res = (1.0E-6_dp*pascal)**(-my_power)*value
+       CASE(cp_units_GPa)
+          res = (1.0E-9_dp*pascal)**(-my_power)*value
+       CASE(cp_units_au)
+          res = value
+       CASE default
+          CPABORT("unknown pressure unit:"//TRIM(cp_to_string(basic_unit)))
+       END SELECT
+    CASE(cp_ukind_angle)
+       SELECT CASE (basic_unit)
+       CASE(cp_units_rad)
+          res=value
+       CASE(cp_units_deg)
+          res=value*(radians)**my_power
+       CASE default
+          CPABORT("unknown angle unit:"//TRIM(cp_to_string(basic_unit)))
+       END SELECT
+    CASE(cp_ukind_time)
+       SELECT CASE (basic_unit)
+       CASE(cp_units_s)
+          res=value*seconds**(-my_power)
+       CASE(cp_units_fs)
+          res=value*femtoseconds**(-my_power)
+       CASE(cp_units_ps)
+          res=value*picoseconds**(-my_power)
+       CASE(cp_units_au)
+          res=value
+       CASE(cp_units_wn)
+          res=(twopi*wavenumbers)**(my_power)/value
+       CASE default
+          CPABORT("unknown time unit:"//TRIM(cp_to_string(basic_unit)))
+       END SELECT
+    CASE(cp_ukind_mass)
+       SELECT CASE (basic_unit)
+       CASE(cp_units_kg)
+          res=e_mass**my_power*value
+       CASE(cp_units_amu)
+          res=massunit**my_power*value
+       CASE(cp_units_m_e,cp_units_au)
+          res=value
+       CASE default
+          CPABORT("unknown mass unit:"//TRIM(cp_to_string(basic_unit)))
+       END SELECT
+    CASE(cp_ukind_potential)
+       SELECT CASE (basic_unit)
+       CASE(cp_units_volt)
+          res=evolt**(-my_power)*value
+       CASE(cp_units_au)
+          res=value
+       CASE default
+          CPABORT("unknown potential unit:"//TRIM(cp_to_string(basic_unit)))
+       END SELECT
+    CASE(cp_ukind_force)
+       SELECT CASE (basic_unit)
+       CASE(cp_units_Newton)
+          res=value*newton**(-my_power)
+       CASE(cp_units_mNewton)
+          res=value*(1.0E+3*newton)**(-my_power)
+       CASE(cp_units_au)
+          res=value
+       CASE default
+          CPABORT("unknown force unit:"//TRIM(cp_to_string(basic_unit)))
+       END SELECT
+    CASE(cp_ukind_none)
+       CALL cp_abort(__LOCATION__,&
+            "if the kind of the unit is none also unit must be undefined,not:"&
+            //TRIM(cp_to_string(basic_unit)))
+    CASE default
+       CPABORT("unknown kind of unit:"//TRIM(cp_to_string(basic_kind)))
+    END SELECT
   END FUNCTION cp_basic_unit_to_cp2k
 
 ! *****************************************************************************
@@ -958,257 +856,226 @@ CONTAINS
 !> \param basic_unit the unit of the value
 !> \param power the power of the unit (defaults to 1)
 !> \param accept_undefined ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \retval res ...
 !> \author fawzi
 ! *****************************************************************************
-  FUNCTION cp_basic_unit_desc(basic_kind,basic_unit,power,accept_undefined,error)&
+  FUNCTION cp_basic_unit_desc(basic_kind,basic_unit,power,accept_undefined)&
        RESULT(res)
     INTEGER, INTENT(in)                      :: basic_kind, basic_unit
     INTEGER, INTENT(in), OPTIONAL            :: power
     LOGICAL, INTENT(in), OPTIONAL            :: accept_undefined
-    TYPE(cp_error_type), INTENT(inout)       :: error
     CHARACTER(len=cp_unit_basic_desc_length) :: res
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cp_basic_unit_desc', &
       routineP = moduleN//':'//routineN
-    INTEGER, PARAMETER :: my_error_level = cp_failure_level
 
     INTEGER                                  :: a, my_power
-    LOGICAL                                  :: failure, my_accept_undefined
+    LOGICAL                                  :: my_accept_undefined
 
-    failure=.FALSE.
     my_power=1
     res=""
     my_accept_undefined=.FALSE.
     IF (accept_undefined) my_accept_undefined=accept_undefined
     IF (PRESENT(power)) my_power=power
     IF (basic_unit==cp_units_none) THEN
-       CALL cp_assert(my_accept_undefined.OR.basic_kind/=cp_units_none,&
-            my_error_level,cp_assertion_failed,routineP,&
-            "unit not yet fully specified, unit of kind "//&
-            TRIM(cp_to_string(basic_kind)),error,failure)
+       IF(.NOT.my_accept_undefined.AND.basic_kind==cp_units_none)&
+          CALL cp_abort(__LOCATION__,"unit not yet fully specified, unit of kind "//&
+               TRIM(cp_to_string(basic_kind)))
     END IF
-    IF (.NOT.failure) THEN
-       SELECT CASE(basic_kind)
-       CASE(cp_ukind_undef)
-          SELECT CASE (basic_unit)
-          CASE(cp_units_none)
-             res="internal_cp2k"
-          CASE DEFAULT
-             CALL cp_assert(.FALSE.,my_error_level,&
-                  cp_assertion_failed,routineP,&
-                  "unit not yet fully specified, unit of kind "//&
-                  TRIM(res),error,failure)
-          END SELECT
-       CASE(cp_ukind_energy)
-          SELECT CASE (basic_unit)
-          CASE(cp_units_hartree,cp_units_au)
-             res="hartree"
-          CASE(cp_units_wavenum)
-             res="wavenumber_e"
-          CASE(cp_units_joule)
-             res="joule"
-          CASE(cp_units_kcalmol)
-             res="kcalmol"
-          CASE(cp_units_kjmol)
-             res="kjmol"
-          CASE(cp_units_jmol)
-             res="jmol"
-          CASE(cp_units_Ry)
-             res="Ry"
-          CASE(cp_units_eV)
-             res="eV"
-          CASE(cp_units_keV)
-             res="keV"
-          CASE(cp_units_k)
-             res="K_e"
-          CASE(cp_units_none)
-             res="energy"
-             CALL cp_assert(my_accept_undefined,my_error_level,&
-                  cp_assertion_failed,routineP,&
-                  "unit not yet fully specified, unit of kind "//&
-                  TRIM(res),error,failure)
-          CASE default
-             CALL cp_assert(.FALSE.,my_error_level,cp_assertion_failed,&
-                  routineP,"unknown energy unit:"//TRIM(cp_to_string(basic_unit)),&
-                  error,failure)
-          END SELECT
-       CASE(cp_ukind_length)
-          SELECT CASE (basic_unit)
-          CASE(cp_units_bohr,cp_units_au)
-             res="bohr"
-          CASE(cp_units_m)
-             res="m"
-          CASE(cp_units_pm)
-             res="pm"
-          CASE(cp_units_nm)
-             res="nm"
-          CASE(cp_units_angstrom)
-             res="angstrom"
-          CASE default
-             res="length"
-             CALL cp_assert(.FALSE.,my_error_level,cp_assertion_failed,&
-                  routineP,"unknown length unit:"//TRIM(cp_to_string(basic_unit)),&
-                  error,failure)
-          END SELECT
-       CASE(cp_ukind_temperature)
-          SELECT CASE (basic_unit)
-          CASE(cp_units_k)
-             res="K"
-          CASE(cp_units_au)
-             res="au_temp"
-          CASE(cp_units_none)
-             res="temperature"
-             CALL cp_assert(my_accept_undefined,my_error_level,&
-                  cp_assertion_failed,routineP,&
-                  "unit not yet fully specified, unit of kind "//&
-                  TRIM(res),error,failure)
-          CASE default
-             CALL cp_assert(.FALSE.,my_error_level,cp_assertion_failed,&
-                  routineP,"unknown temperature unit:"//TRIM(cp_to_string(basic_unit)),&
-                  error,failure)
-          END SELECT
-       CASE(cp_ukind_pressure)
-          SELECT CASE (basic_unit)
-          CASE(cp_units_bar)
-             res="bar"
-          CASE(cp_units_atm)
-             res="atm"
-          CASE(cp_units_kbar)
-             res="kbar"
-          CASE(cp_units_Pa)
-             res="Pa"
-          CASE(cp_units_MPa)
-             res="MPa"
-          CASE(cp_units_GPa)
-             res="GPa"
-          CASE(cp_units_au)
-             res="au_p"
-          CASE(cp_units_none)
-             res="pressure"
-             CALL cp_assert(my_accept_undefined,my_error_level,&
-                  cp_assertion_failed,routineP,&
-                  "unit not yet fully specified, unit of kind "//&
-                  TRIM(res),error,failure)
-          CASE default
-             CALL cp_assert(.FALSE.,my_error_level,cp_assertion_failed,&
-                  routineP,"unknown pressure unit:"//TRIM(cp_to_string(basic_unit)),&
-                  error,failure)
-          END SELECT
-       CASE(cp_ukind_angle)
-          SELECT CASE (basic_unit)
-          CASE(cp_units_rad)
-             res="rad"
-          CASE(cp_units_deg)
-             res="deg"
-          CASE(cp_units_none)
-             res="angle"
-             CALL cp_assert(my_accept_undefined,my_error_level,&
-                  cp_assertion_failed,routineP,&
-                  "unit not yet fully specified, unit of kind "//&
-                  TRIM(res),error,failure)
-          CASE default
-             CALL cp_assert(.FALSE.,my_error_level,cp_assertion_failed,&
-                  routineP,"unknown angle unit:"//TRIM(cp_to_string(basic_unit)),&
-                  error,failure)
-          END SELECT
-       CASE(cp_ukind_time)
-          SELECT CASE (basic_unit)
-          CASE(cp_units_s)
-             res="s"
-          CASE(cp_units_fs)
-             res="fs"
-          CASE(cp_units_ps)
-             res="ps"
-          CASE(cp_units_au)
-             res="au_t"
-          CASE(cp_units_wn)
-             res="wavenumber_t"
-          CASE(cp_units_none)
-             res="time"
-             CALL cp_assert(my_accept_undefined,my_error_level,&
-                  cp_assertion_failed,routineP,&
-                  "unit not yet fully specified, unit of kind "//&
-                  TRIM(res),error,failure)
-          CASE default
-             CALL cp_assert(.FALSE.,my_error_level,cp_assertion_failed,&
-                  routineP,"unknown time unit:"//TRIM(cp_to_string(basic_unit)),&
-                  error,failure)
-          END SELECT
-       CASE(cp_ukind_mass)
-          SELECT CASE (basic_unit)
-          CASE(cp_units_kg)
-             res="kg"
-          CASE(cp_units_amu)
-             res="amu"
-          CASE(cp_units_m_e,cp_units_au)
-             res="m_e"
-          CASE(cp_units_none)
-             res="mass"
-             CALL cp_assert(my_accept_undefined,my_error_level,&
-                  cp_assertion_failed,routineP,&
-                  "unit not yet fully specified, unit of kind "//&
-                  TRIM(res),error,failure)
-          CASE default
-             CALL cp_assert(.FALSE.,my_error_level,cp_assertion_failed,&
-                  routineP,"unknown mass unit:"//TRIM(cp_to_string(basic_unit)),&
-                  error,failure)
-          END SELECT
-       CASE(cp_ukind_potential)
-          SELECT CASE (basic_unit)
-          CASE(cp_units_volt)
-             res="volt"
-          CASE(cp_units_au)
-             res="au_pot"
-          CASE(cp_units_none)
-             res="potential"
-             CALL cp_assert(my_accept_undefined,my_error_level,&
-                  cp_assertion_failed,routineP,&
-                  "unit not yet fully specified, unit of kind "//&
-                  TRIM(res),error,failure)
-          CASE default
-             CALL cp_assert(.FALSE.,my_error_level,cp_assertion_failed,&
-                  routineP,"unknown potential unit:"//TRIM(cp_to_string(basic_unit)),&
-                  error,failure)
-          END SELECT
-       CASE(cp_ukind_force)
-          SELECT CASE (basic_unit)
-          CASE(cp_units_Newton)
-             res="N"
-          CASE(cp_units_mNewton)
-             res="mN"
-          CASE(cp_units_au)
-             res="au_f"
-          CASE(cp_units_none)
-             res="force"
-             CALL cp_assert(my_accept_undefined,my_error_level,&
-                  cp_assertion_failed,routineP,&
-                  "unit not yet fully specified, unit of kind "//&
-                  TRIM(res),error,failure)
-          CASE default
-             CALL cp_assert(.FALSE.,my_error_level,cp_assertion_failed,&
-                  routineP,"unknown potential unit:"//TRIM(cp_to_string(basic_unit)),&
-                  error,failure)
-          END SELECT
-       CASE(cp_ukind_none)
-          CALL cp_assert(.FALSE.,my_error_level,&
-               cp_assertion_failed, routineP,&
-               "if the kind of the unit is none also unit must be undefined,not:"&
-               //TRIM(cp_to_string(basic_unit)),&
-               error,failure)
-       CASE default
-          CALL cp_assert(.FALSE.,my_error_level,cp_assertion_failed,&
-               routineP,"unknown kind of unit:"//TRIM(cp_to_string(basic_kind)),&
-               error,failure)
+    SELECT CASE(basic_kind)
+    CASE(cp_ukind_undef)
+       SELECT CASE (basic_unit)
+       CASE(cp_units_none)
+          res="internal_cp2k"
+       CASE DEFAULT
+          CALL cp_abort(__LOCATION__,&
+               "unit not yet fully specified, unit of kind "//&
+               TRIM(res))
        END SELECT
-       IF (my_power/=1) THEN
-          a=LEN_TRIM(res)
-          CPPrecondition(LEN(res)-a>=3,cp_failure_level,routineP,error,failure)
-          WRITE (res(a+1:),"('^',i3)") my_power
-          CALL compress(res,.TRUE.)
-       END IF
+    CASE(cp_ukind_energy)
+       SELECT CASE (basic_unit)
+       CASE(cp_units_hartree,cp_units_au)
+          res="hartree"
+       CASE(cp_units_wavenum)
+          res="wavenumber_e"
+       CASE(cp_units_joule)
+          res="joule"
+       CASE(cp_units_kcalmol)
+          res="kcalmol"
+       CASE(cp_units_kjmol)
+          res="kjmol"
+       CASE(cp_units_jmol)
+          res="jmol"
+       CASE(cp_units_Ry)
+          res="Ry"
+       CASE(cp_units_eV)
+          res="eV"
+       CASE(cp_units_keV)
+          res="keV"
+       CASE(cp_units_k)
+          res="K_e"
+       CASE(cp_units_none)
+          res="energy"
+          IF(.NOT.my_accept_undefined)&
+             CALL cp_abort(__LOCATION__,&
+                  "unit not yet fully specified, unit of kind "//&
+                  TRIM(res))
+       CASE default
+          CPABORT("unknown energy unit:"//TRIM(cp_to_string(basic_unit)))
+       END SELECT
+    CASE(cp_ukind_length)
+       SELECT CASE (basic_unit)
+       CASE(cp_units_bohr,cp_units_au)
+          res="bohr"
+       CASE(cp_units_m)
+          res="m"
+       CASE(cp_units_pm)
+          res="pm"
+       CASE(cp_units_nm)
+          res="nm"
+       CASE(cp_units_angstrom)
+          res="angstrom"
+       CASE default
+          res="length"
+          CPABORT("unknown length unit:"//TRIM(cp_to_string(basic_unit)))
+       END SELECT
+    CASE(cp_ukind_temperature)
+       SELECT CASE (basic_unit)
+       CASE(cp_units_k)
+          res="K"
+       CASE(cp_units_au)
+          res="au_temp"
+       CASE(cp_units_none)
+          res="temperature"
+          IF(.NOT.my_accept_undefined)&
+             CALL cp_abort(__LOCATION__,&
+                  "unit not yet fully specified, unit of kind "//&
+                  TRIM(res))
+       CASE default
+          CPABORT("unknown temperature unit:"//TRIM(cp_to_string(basic_unit)))
+       END SELECT
+    CASE(cp_ukind_pressure)
+       SELECT CASE (basic_unit)
+       CASE(cp_units_bar)
+          res="bar"
+       CASE(cp_units_atm)
+          res="atm"
+       CASE(cp_units_kbar)
+          res="kbar"
+       CASE(cp_units_Pa)
+          res="Pa"
+       CASE(cp_units_MPa)
+          res="MPa"
+       CASE(cp_units_GPa)
+          res="GPa"
+       CASE(cp_units_au)
+          res="au_p"
+       CASE(cp_units_none)
+          res="pressure"
+          IF(.NOT.my_accept_undefined)&
+             CALL cp_abort(__LOCATION__,&
+                  "unit not yet fully specified, unit of kind "//&
+                  TRIM(res))
+       CASE default
+          CPABORT("unknown pressure unit:"//TRIM(cp_to_string(basic_unit)))
+       END SELECT
+    CASE(cp_ukind_angle)
+       SELECT CASE (basic_unit)
+       CASE(cp_units_rad)
+          res="rad"
+       CASE(cp_units_deg)
+          res="deg"
+       CASE(cp_units_none)
+          res="angle"
+          IF(.NOT.my_accept_undefined)&
+             CALL cp_abort(__LOCATION__,&
+                  "unit not yet fully specified, unit of kind "//&
+                  TRIM(res))
+       CASE default
+          CPABORT("unknown angle unit:"//TRIM(cp_to_string(basic_unit)))
+       END SELECT
+    CASE(cp_ukind_time)
+       SELECT CASE (basic_unit)
+       CASE(cp_units_s)
+          res="s"
+       CASE(cp_units_fs)
+          res="fs"
+       CASE(cp_units_ps)
+          res="ps"
+       CASE(cp_units_au)
+          res="au_t"
+       CASE(cp_units_wn)
+          res="wavenumber_t"
+       CASE(cp_units_none)
+          res="time"
+          IF(.NOT.my_accept_undefined)&
+             CALL cp_abort(__LOCATION__,&
+                  "unit not yet fully specified, unit of kind "//&
+                  TRIM(res))
+       CASE default
+          CPABORT("unknown time unit:"//TRIM(cp_to_string(basic_unit)))
+       END SELECT
+    CASE(cp_ukind_mass)
+       SELECT CASE (basic_unit)
+       CASE(cp_units_kg)
+          res="kg"
+       CASE(cp_units_amu)
+          res="amu"
+       CASE(cp_units_m_e,cp_units_au)
+          res="m_e"
+       CASE(cp_units_none)
+          res="mass"
+          IF(.NOT.my_accept_undefined)&
+             CALL cp_abort(__LOCATION__,&
+                  "unit not yet fully specified, unit of kind "//&
+                  TRIM(res))
+       CASE default
+          CPABORT("unknown mass unit:"//TRIM(cp_to_string(basic_unit)))
+       END SELECT
+    CASE(cp_ukind_potential)
+       SELECT CASE (basic_unit)
+       CASE(cp_units_volt)
+          res="volt"
+       CASE(cp_units_au)
+          res="au_pot"
+       CASE(cp_units_none)
+          res="potential"
+          IF(.NOT.my_accept_undefined)&
+             CALL cp_abort(__LOCATION__,&
+                  "unit not yet fully specified, unit of kind "//&
+                  TRIM(res))
+       CASE default
+          CPABORT("unknown potential unit:"//TRIM(cp_to_string(basic_unit)))
+       END SELECT
+    CASE(cp_ukind_force)
+       SELECT CASE (basic_unit)
+       CASE(cp_units_Newton)
+          res="N"
+       CASE(cp_units_mNewton)
+          res="mN"
+       CASE(cp_units_au)
+          res="au_f"
+       CASE(cp_units_none)
+          res="force"
+          IF(.NOT.my_accept_undefined)&
+             CALL cp_abort(__LOCATION__,&
+                  "unit not yet fully specified, unit of kind "//&
+                  TRIM(res))
+       CASE default
+          CPABORT("unknown potential unit:"//TRIM(cp_to_string(basic_unit)))
+       END SELECT
+    CASE(cp_ukind_none)
+       CALL cp_abort(__LOCATION__,&
+            "if the kind of the unit is none also unit must be undefined,not:"&
+            //TRIM(cp_to_string(basic_unit)))
+    CASE default
+       CPABORT("unknown kind of unit:"//TRIM(cp_to_string(basic_kind)))
+    END SELECT
+    IF (my_power/=1) THEN
+       a=LEN_TRIM(res)
+       CPASSERT(LEN(res)-a>=3)
+       WRITE (res(a+1:),"('^',i3)") my_power
+       CALL compress(res,.TRUE.)
     END IF
   END FUNCTION cp_basic_unit_desc
 
@@ -1218,60 +1085,52 @@ CONTAINS
 !> \param defaults defaults for the undefined units, optional
 !> \param accept_undefined if defaults is not present or is not associated
 !>        whether undefined units should be accepted (defaults to false)
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \retval res ...
 !> \author fawzi
 ! *****************************************************************************
-  FUNCTION cp_unit_desc(unit,defaults,accept_undefined,error)&
+  FUNCTION cp_unit_desc(unit,defaults,accept_undefined)&
        RESULT(res)
     TYPE(cp_unit_type), POINTER              :: unit
     TYPE(cp_unit_set_type), OPTIONAL, &
       POINTER                                :: defaults
     LOGICAL, INTENT(in), OPTIONAL            :: accept_undefined
-    TYPE(cp_error_type), INTENT(inout)       :: error
     CHARACTER(len=cp_unit_desc_length)       :: res
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cp_unit_desc', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: i, my_unit, pos
-    LOGICAL                                  :: check, failure, has_defaults, &
+    LOGICAL                                  :: check, has_defaults, &
                                                 my_accept_undefined
 
-    failure=.FALSE.
-
-    CPPrecondition(ASSOCIATED(unit),cp_failure_level,routineP,error,failure)
-    IF (.NOT. failure) THEN
-       res=""
-       pos=1
-       my_accept_undefined=.FALSE.
-       IF (PRESENT(accept_undefined)) my_accept_undefined=accept_undefined
-       DO i=1,unit%n_kinds
-          CPPrecondition(unit%kind_id(i)/=0,cp_failure_level,routineP,error,failure)
-          CPPrecondition(pos<LEN(res),cp_failure_level,routineP,error,failure)
-          IF (failure) EXIT
-          my_unit=unit%unit_id(i)
-          has_defaults=.FALSE.
-          IF (PRESENT(defaults)) has_defaults=ASSOCIATED(defaults)
-          IF (my_unit==0) THEN
-             IF (has_defaults) THEN
-                my_unit=defaults%units(unit%kind_id(i))%unit%unit_id(1)
-             ELSE
-                check = my_accept_undefined.OR.unit%kind_id(i)/=0
-                CPPrecondition(check,cp_failure_level,routineP,error,failure)
-             END IF
+    CPASSERT(ASSOCIATED(unit))
+    res=""
+    pos=1
+    my_accept_undefined=.FALSE.
+    IF (PRESENT(accept_undefined)) my_accept_undefined=accept_undefined
+    DO i=1,unit%n_kinds
+       CPASSERT(unit%kind_id(i)/=0)
+       CPASSERT(pos<LEN(res))
+       my_unit=unit%unit_id(i)
+       has_defaults=.FALSE.
+       IF (PRESENT(defaults)) has_defaults=ASSOCIATED(defaults)
+       IF (my_unit==0) THEN
+          IF (has_defaults) THEN
+             my_unit=defaults%units(unit%kind_id(i))%unit%unit_id(1)
+          ELSE
+             check = my_accept_undefined.OR.unit%kind_id(i)/=0
+             CPASSERT(check)
           END IF
-          IF (i > 1) THEN
-             res(pos:pos) = "*"
-             pos = pos + 1
-          END IF
-          res(pos:)=TRIM(cp_basic_unit_desc(basic_kind=unit%kind_id(i),&
-               basic_unit=my_unit,accept_undefined=my_accept_undefined,&
-               power=unit%power(i),error=error))
-          pos=LEN_TRIM(res)+1
-       END DO
-    END IF
+       END IF
+       IF (i > 1) THEN
+          res(pos:pos) = "*"
+          pos = pos + 1
+       END IF
+       res(pos:)=TRIM(cp_basic_unit_desc(basic_kind=unit%kind_id(i),&
+            basic_unit=my_unit,accept_undefined=my_accept_undefined,&
+            power=unit%power(i)))
+       pos=LEN_TRIM(res)+1
+    END DO
 
   END FUNCTION cp_unit_desc
 
@@ -1282,18 +1141,15 @@ CONTAINS
 !> \param defaults the defaults unit for those that are left free
 !>        (cp_units_none)
 !> \param power the power of the unit (defaults to 1)
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \retval res ...
 !> \author fawzi
 ! *****************************************************************************
-  FUNCTION cp_unit_to_cp2k1(value,unit,defaults,power,error) RESULT(res)
+  FUNCTION cp_unit_to_cp2k1(value,unit,defaults,power) RESULT(res)
     REAL(kind=dp), INTENT(in)                :: value
     TYPE(cp_unit_type), POINTER              :: unit
     TYPE(cp_unit_set_type), OPTIONAL, &
       POINTER                                :: defaults
     INTEGER, INTENT(in), OPTIONAL            :: power
-    TYPE(cp_error_type), INTENT(inout)       :: error
     REAL(kind=dp)                            :: res
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cp_unit_to_cp2k1', &
@@ -1301,34 +1157,24 @@ CONTAINS
 
     INTEGER                                  :: i_unit, my_basic_unit, &
                                                 my_power
-    LOGICAL                                  :: failure
 
-    failure=.FALSE.
     my_power=1
     IF (PRESENT(power)) my_power=power
     res=value
-    CPPrecondition(ASSOCIATED(unit),cp_failure_level,routineP,error,failure)
-    IF (.NOT. failure) THEN
-       DO i_unit=1,unit%n_kinds
-          CPPrecondition(unit%kind_id(i_unit)>0,cp_failure_level,routineP,error,failure)
-          my_basic_unit=unit%unit_id(i_unit)
-          IF (my_basic_unit==0.AND.unit%kind_id(i_unit)/=cp_ukind_undef) THEN
-             CPPrecondition(PRESENT(defaults),cp_failure_level,routineP,error,failure)
-             IF (failure) EXIT
-             CPPrecondition(ASSOCIATED(defaults),cp_failure_level,routineP,error,failure)
-             IF (failure) EXIT
-             CALL cp_assert(ASSOCIATED(defaults%units(unit%kind_id(i_unit))%unit),&
-                  cp_failure_level,cp_assertion_failed,routineP,&
-                  CPSourceFileRef,&
-                  error,failure)
-             IF (failure) EXIT
-             my_basic_unit=defaults%units(unit%kind_id(i_unit))%unit%unit_id(1)
-          END IF
-          res=cp_basic_unit_to_cp2k(value=res,basic_unit=my_basic_unit,&
-               basic_kind=unit%kind_id(i_unit),&
-               power=my_power*unit%power(i_unit),error=error)
-       END DO
-    END IF
+    CPASSERT(ASSOCIATED(unit))
+    DO i_unit=1,unit%n_kinds
+       CPASSERT(unit%kind_id(i_unit)>0)
+       my_basic_unit=unit%unit_id(i_unit)
+       IF (my_basic_unit==0.AND.unit%kind_id(i_unit)/=cp_ukind_undef) THEN
+          CPASSERT(PRESENT(defaults))
+          CPASSERT(ASSOCIATED(defaults))
+          CPASSERT(ASSOCIATED(defaults%units(unit%kind_id(i_unit))%unit))
+          my_basic_unit=defaults%units(unit%kind_id(i_unit))%unit%unit_id(1)
+       END IF
+       res=cp_basic_unit_to_cp2k(value=res,basic_unit=my_basic_unit,&
+            basic_kind=unit%kind_id(i_unit),&
+            power=my_power*unit%power(i_unit))
+    END DO
   END FUNCTION cp_unit_to_cp2k1
 
 ! *****************************************************************************
@@ -1338,34 +1184,29 @@ CONTAINS
 !> \param defaults the defaults unit for those that are left free
 !>        (cp_units_none)
 !> \param power the power of the unit (defaults to 1)
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \retval res ...
 !> \author fawzi
 ! *****************************************************************************
-  FUNCTION cp_unit_from_cp2k1(value,unit,defaults,power,error) RESULT(res)
+  FUNCTION cp_unit_from_cp2k1(value,unit,defaults,power) RESULT(res)
     REAL(kind=dp), INTENT(in)                :: value
     TYPE(cp_unit_type), POINTER              :: unit
     TYPE(cp_unit_set_type), OPTIONAL, &
       POINTER                                :: defaults
     INTEGER, INTENT(in), OPTIONAL            :: power
-    TYPE(cp_error_type), INTENT(inout)       :: error
     REAL(kind=dp)                            :: res
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cp_unit_from_cp2k1', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: my_power
-    LOGICAL                                  :: failure
 
-    failure=.FALSE.
     my_power=1
     IF (PRESENT(power)) my_power=power
     IF (PRESENT(defaults)) THEN
        res=cp_unit_to_cp2k1(value=value,unit=unit,defaults=defaults,&
-            power=-my_power,error=error)
+            power=-my_power)
     ELSE
-       res=cp_unit_to_cp2k1(value=value,unit=unit,power=-my_power,error=error)
+       res=cp_unit_to_cp2k1(value=value,unit=unit,power=-my_power)
     END IF
   END FUNCTION cp_unit_from_cp2k1
 
@@ -1376,18 +1217,15 @@ CONTAINS
 !> \param defaults the defaults unit for those that are left free
 !>        (cp_units_none)
 !> \param power the power of the unit (defaults to 1)
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \retval res ...
 !> \author fawzi
 ! *****************************************************************************
-  FUNCTION cp_unit_to_cp2k(value,unit_str,defaults,power,error) RESULT(res)
+  FUNCTION cp_unit_to_cp2k(value,unit_str,defaults,power) RESULT(res)
     REAL(kind=dp), INTENT(in)                :: value
     CHARACTER(len=*), INTENT(in)             :: unit_str
     TYPE(cp_unit_set_type), OPTIONAL, &
       POINTER                                :: defaults
     INTEGER, INTENT(in), OPTIONAL            :: power
-    TYPE(cp_error_type), INTENT(inout)       :: error
     REAL(kind=dp)                            :: res
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cp_unit_to_cp2k', &
@@ -1396,14 +1234,14 @@ CONTAINS
     TYPE(cp_unit_type), POINTER              :: my_unit
 
     NULLIFY(my_unit)
-    CALL cp_unit_create(my_unit,unit_str,error=error)
+    CALL cp_unit_create(my_unit,unit_str)
     IF (PRESENT(defaults)) THEN
        res=cp_unit_to_cp2k1(value=value,unit=my_unit,defaults=defaults,&
-            power=power,error=error)
+            power=power)
     ELSE
-       res=cp_unit_to_cp2k1(value=value,unit=my_unit,power=power,error=error)
+       res=cp_unit_to_cp2k1(value=value,unit=my_unit,power=power)
     END IF
-    CALL cp_unit_release(my_unit,error=error)
+    CALL cp_unit_release(my_unit)
   END FUNCTION cp_unit_to_cp2k
 
 ! *****************************************************************************
@@ -1413,18 +1251,15 @@ CONTAINS
 !> \param defaults the defaults unit for those that are left free
 !>        (cp_units_none)
 !> \param power the power of the unit (defaults to 1)
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \retval res ...
 !> \author fawzi
 ! *****************************************************************************
-  FUNCTION cp_unit_from_cp2k(value,unit_str,defaults,power,error) RESULT(res)
+  FUNCTION cp_unit_from_cp2k(value,unit_str,defaults,power) RESULT(res)
     REAL(kind=dp), INTENT(in)                :: value
     CHARACTER(len=*), INTENT(in)             :: unit_str
     TYPE(cp_unit_set_type), OPTIONAL, &
       POINTER                                :: defaults
     INTEGER, INTENT(in), OPTIONAL            :: power
-    TYPE(cp_error_type), INTENT(inout)       :: error
     REAL(kind=dp)                            :: res
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cp_unit_from_cp2k', &
@@ -1433,28 +1268,25 @@ CONTAINS
     TYPE(cp_unit_type), POINTER              :: my_unit
 
     NULLIFY(my_unit)
-    CALL cp_unit_create(my_unit,unit_str,error=error)
+    CALL cp_unit_create(my_unit,unit_str)
     IF (PRESENT(defaults)) THEN
        res=cp_unit_from_cp2k1(value=value,unit=my_unit,defaults=defaults,&
-            power=power,error=error)
+            power=power)
     ELSE
-       res=cp_unit_from_cp2k1(value=value,unit=my_unit,power=power,error=error)
+       res=cp_unit_from_cp2k1(value=value,unit=my_unit,power=power)
     END IF
-    CALL cp_unit_release(my_unit,error=error)
+    CALL cp_unit_release(my_unit)
   END FUNCTION cp_unit_from_cp2k
 
 ! *****************************************************************************
 !> \brief returs true if the two units are compatible
 !> \param ref_unit ...
 !> \param unit ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \retval res ...
 !> \author Teodoro Laino [tlaino] - 11.2007 - University of Zurich
 ! *****************************************************************************
-  FUNCTION cp_unit_compatible(ref_unit,unit,error) RESULT(res)
+  FUNCTION cp_unit_compatible(ref_unit,unit) RESULT(res)
     TYPE(cp_unit_type), POINTER              :: ref_unit, unit
-    TYPE(cp_error_type), INTENT(inout)       :: error
     LOGICAL                                  :: res
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cp_unit_compatible', &
@@ -1477,145 +1309,118 @@ CONTAINS
 !> \param unit_set the set to initialize
 !> \param name the name of the set, used for the dafault initialization of
 !>        the various units
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author fawzi
 ! *****************************************************************************
-  SUBROUTINE cp_unit_set_create(unit_set,name,error)
+  SUBROUTINE cp_unit_set_create(unit_set,name)
     TYPE(cp_unit_set_type), POINTER          :: unit_set
     CHARACTER(len=*), INTENT(in)             :: name
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cp_unit_set_create', &
       routineP = moduleN//':'//routineN
 
     CHARACTER(len=default_string_length)     :: my_name
-    INTEGER                                  :: i, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: i
 
-    failure=.FALSE.
-    CPPrecondition(.NOT.ASSOCIATED(unit_set),cp_failure_level,routineP,error,failure)
-    ALLOCATE(unit_set,stat=stat)
-    CPPostcondition(stat==0,cp_fatal_level,routineP,error,failure)
+    CPASSERT(.NOT.ASSOCIATED(unit_set))
+    ALLOCATE(unit_set)
     unit_set%ref_count=1
     last_unit_set_id=last_unit_set_id+1
     unit_set%id_nr=last_unit_set_id
     my_name=name
     CALL uppercase(my_name)
-    IF (.NOT.failure) THEN
 
-       DO i=1,cp_ukind_max
-          NULLIFY(unit_set%units(i)%unit)
-       END DO
-       DO i=1,cp_ukind_max
-          SELECT CASE(name)
-          CASE('ATOM','ATOMIC','INTERNAL','CP2K')
-             IF (i==cp_ukind_angle) THEN
-                CALL cp_unit_create2(unit_set%units(i)%unit, kind_id=(/i/),&
-                     unit_id=(/cp_units_rad/), power=(/1/), error=error)
-             ELSE
-                CALL cp_unit_create2(unit_set%units(i)%unit, kind_id=(/i/),&
-                     unit_id=(/cp_units_au/), power=(/1/), error=error)
-             END IF
-          CASE('OUTPUT')
-             SELECT CASE(i)
-             CASE(cp_ukind_undef)
-                CALL cp_unit_create2(unit_set%units(i)%unit, kind_id=(/i/), unit_id=(/cp_units_none/),&
-                     power=(/1/), error=error)
-             CASE(cp_ukind_energy)
-                CALL cp_unit_create2(unit_set%units(i)%unit, kind_id=(/i/), unit_id=(/cp_units_hartree/),&
-                     power=(/1/), error=error)
-             CASE (cp_ukind_length)
-                CALL cp_unit_create2(unit_set%units(i)%unit, kind_id=(/i/), unit_id=(/cp_units_angstrom/),&
-                     power=(/1/), error=error)
-             CASE (cp_ukind_temperature)
-                CALL cp_unit_create2(unit_set%units(i)%unit, kind_id=(/i/), unit_id=(/cp_units_k/),&
-                     power=(/1/), error=error)
-             CASE (cp_ukind_angle)
-                CALL cp_unit_create2(unit_set%units(i)%unit, kind_id=(/i/), unit_id=(/cp_units_deg/),&
-                     power=(/1/), error=error)
-             CASE (cp_ukind_pressure)
-                CALL cp_unit_create2(unit_set%units(i)%unit, kind_id=(/i/), unit_id=(/cp_units_bar/),&
-                     power=(/1/), error=error)
-             CASE (cp_ukind_time)
-                CALL cp_unit_create2(unit_set%units(i)%unit, kind_id=(/i/), unit_id=(/cp_units_fs/),&
-                     power=(/1/), error=error)
-             CASE (cp_ukind_mass)
-                CALL cp_unit_create2(unit_set%units(i)%unit, kind_id=(/i/), unit_id=(/cp_units_amu/),&
-                     power=(/1/), error=error)
-             CASE (cp_ukind_potential)
-                CALL cp_unit_create2(unit_set%units(i)%unit, kind_id=(/i/), unit_id=(/cp_units_volt/),&
-                     power=(/1/), error=error)
-             CASE (cp_ukind_force)
-                CALL cp_unit_create2(unit_set%units(i)%unit, kind_id=(/i/), unit_id=(/cp_units_newton/),&
-                     power=(/1/), error=error)
-             CASE default
-                CALL cp_assert(.FALSE.,cp_assertion_failed,cp_failure_level,routineP,&
-                     "unhandled unit type "//TRIM(cp_to_string(i)),error,failure)
-                EXIT
-             END SELECT
+    DO i=1,cp_ukind_max
+       NULLIFY(unit_set%units(i)%unit)
+    END DO
+    DO i=1,cp_ukind_max
+       SELECT CASE(name)
+       CASE('ATOM','ATOMIC','INTERNAL','CP2K')
+          IF (i==cp_ukind_angle) THEN
+             CALL cp_unit_create2(unit_set%units(i)%unit, kind_id=(/i/),&
+                  unit_id=(/cp_units_rad/), power=(/1/))
+          ELSE
+             CALL cp_unit_create2(unit_set%units(i)%unit, kind_id=(/i/),&
+                  unit_id=(/cp_units_au/), power=(/1/))
+          END IF
+       CASE('OUTPUT')
+          SELECT CASE(i)
+          CASE(cp_ukind_undef)
+             CALL cp_unit_create2(unit_set%units(i)%unit, kind_id=(/i/), unit_id=(/cp_units_none/),&
+                  power=(/1/))
+          CASE(cp_ukind_energy)
+             CALL cp_unit_create2(unit_set%units(i)%unit, kind_id=(/i/), unit_id=(/cp_units_hartree/),&
+                  power=(/1/))
+          CASE (cp_ukind_length)
+             CALL cp_unit_create2(unit_set%units(i)%unit, kind_id=(/i/), unit_id=(/cp_units_angstrom/),&
+                  power=(/1/))
+          CASE (cp_ukind_temperature)
+             CALL cp_unit_create2(unit_set%units(i)%unit, kind_id=(/i/), unit_id=(/cp_units_k/),&
+                  power=(/1/))
+          CASE (cp_ukind_angle)
+             CALL cp_unit_create2(unit_set%units(i)%unit, kind_id=(/i/), unit_id=(/cp_units_deg/),&
+                  power=(/1/))
+          CASE (cp_ukind_pressure)
+             CALL cp_unit_create2(unit_set%units(i)%unit, kind_id=(/i/), unit_id=(/cp_units_bar/),&
+                  power=(/1/))
+          CASE (cp_ukind_time)
+             CALL cp_unit_create2(unit_set%units(i)%unit, kind_id=(/i/), unit_id=(/cp_units_fs/),&
+                  power=(/1/))
+          CASE (cp_ukind_mass)
+             CALL cp_unit_create2(unit_set%units(i)%unit, kind_id=(/i/), unit_id=(/cp_units_amu/),&
+                  power=(/1/))
+          CASE (cp_ukind_potential)
+             CALL cp_unit_create2(unit_set%units(i)%unit, kind_id=(/i/), unit_id=(/cp_units_volt/),&
+                  power=(/1/))
+          CASE (cp_ukind_force)
+             CALL cp_unit_create2(unit_set%units(i)%unit, kind_id=(/i/), unit_id=(/cp_units_newton/),&
+                  power=(/1/))
           CASE default
-             CALL cp_assert(.FALSE.,cp_assertion_failed,cp_failure_level,&
-                  routineP,'unknown parameter set name '//TRIM(name),&
-                  error,failure)
+             CPABORT("unhandled unit type "//TRIM(cp_to_string(i)))
+             EXIT
           END SELECT
-       END DO
-    END IF
+       CASE default
+          CPABORT('unknown parameter set name '//TRIM(name))
+       END SELECT
+    END DO
   END SUBROUTINE cp_unit_set_create
 
 ! *****************************************************************************
 !> \brief retains the given unit set
 !> \param unit_set the unit set to retain
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author fawzi
 ! *****************************************************************************
-  SUBROUTINE cp_unit_set_retain(unit_set,error)
+  SUBROUTINE cp_unit_set_retain(unit_set)
     TYPE(cp_unit_set_type), POINTER          :: unit_set
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cp_unit_set_retain', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
-
-    CPPrecondition(ASSOCIATED(unit_set),cp_failure_level,routineP,error,failure)
-    IF (.NOT. failure) THEN
-       CPPrecondition(unit_set%ref_count>0,cp_failure_level,routineP,error,failure)
-       unit_set%ref_count=unit_set%ref_count+1
-    END IF
+    CPASSERT(ASSOCIATED(unit_set))
+    CPASSERT(unit_set%ref_count>0)
+    unit_set%ref_count=unit_set%ref_count+1
   END SUBROUTINE cp_unit_set_retain
 
 ! *****************************************************************************
 !> \brief releases the given unit set
 !> \param unit_set the unit set to release
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author fawzi
 ! *****************************************************************************
-  SUBROUTINE cp_unit_set_release(unit_set,error)
+  SUBROUTINE cp_unit_set_release(unit_set)
     TYPE(cp_unit_set_type), POINTER          :: unit_set
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cp_unit_set_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, stat
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
+    INTEGER                                  :: i
 
     IF (ASSOCIATED(unit_set)) THEN
-       CPPrecondition(unit_set%ref_count>0,cp_failure_level,routineP,error,failure)
+       CPASSERT(unit_set%ref_count>0)
        unit_set%ref_count=unit_set%ref_count-1
        IF (unit_set%ref_count == 0) THEN
           DO i = 1, SIZE(unit_set%units)
-             CALL cp_unit_release(unit_set%units(i)%unit,error)
+             CALL cp_unit_release(unit_set%units(i)%unit)
           END DO
-          DEALLOCATE(unit_set,stat=stat)
-          CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+          DEALLOCATE(unit_set)
        END IF
     END IF
   END SUBROUTINE cp_unit_set_release

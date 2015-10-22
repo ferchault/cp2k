@@ -36,7 +36,7 @@
     CASE(3)
        CALL index_nmin_real_eval_d(ar_data%evals, control%current_step, control%selected_ind, control%nval_out)
     CASE DEFAULT
-       STOP 'unknown selection index'
+       CALL dbcsr_abort(routineP,__LINE__,"unknown selection index")
     END SELECT
     ! test whether we are converged
     DO i=1, control%nval_out

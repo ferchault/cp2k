@@ -47,6 +47,7 @@ MODULE qs_dftb_parameters
                                              set_qs_kind
   USE string_utilities,                ONLY: uppercase
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -72,10 +73,9 @@ CONTAINS
 !> \param dftb_potential ...
 !> \param subsys_section ...
 !> \param para_env ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE qs_dftb_param_init (atomic_kind_set,qs_kind_set,dftb_control,dftb_potential,&
-                                 subsys_section,para_env,error)
+                                 subsys_section,para_env)
     TYPE(atomic_kind_type), DIMENSION(:), &
       POINTER                                :: atomic_kind_set
     TYPE(qs_kind_type), DIMENSION(:), &
@@ -85,7 +85,6 @@ CONTAINS
       DIMENSION(:, :), POINTER               :: dftb_potential
     TYPE(section_vals_type), POINTER         :: subsys_section
     TYPE(cp_para_env_type), POINTER          :: para_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'qs_dftb_param_init', &
       routineP = moduleN//':'//routineN
@@ -97,10 +96,10 @@ CONTAINS
       ALLOCATABLE, DIMENSION(:, :)           :: sk_files
     CHARACTER(LEN=default_string_length)     :: iname, jname, name_a, name_b, &
                                                 skfn
-    INTEGER :: ikind, isp, istat, jkind, k, l, l1, l2, llm, lmax, lmax_a, &
-      lmax_b, lp, m, n_urpoly, ngrd, nkind, output_unit, runit, spdim, z
-    LOGICAL                                  :: at_end, failure, found, ldum, &
-                                                search, sklist
+    INTEGER :: ikind, isp, jkind, k, l, l1, l2, llm, lmax, lmax_a, lmax_b, &
+      lp, m, n_urpoly, ngrd, nkind, output_unit, runit, spdim, z
+    LOGICAL                                  :: at_end, found, ldum, search, &
+                                                sklist
     REAL(dp)                                 :: da, db, dgrd, dij, energy, &
                                                 eps_disp, ra, radmax, rb, &
                                                 rcdisp, rmax6, s_cut, xij, &
@@ -114,14 +113,13 @@ CONTAINS
     TYPE(cp_parser_type), POINTER            :: parser
     TYPE(qs_dftb_atom_type), POINTER         :: dftb_atom_a, dftb_atom_b
 
-    failure = .FALSE.
     output_unit = -1
     NULLIFY(logger)
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
     IF (BTEST(cp_print_key_should_output(logger%iter_info,subsys_section,&
-         "PRINT%KINDS/BASIS_SET",error=error),cp_p_file)) THEN
+         "PRINT%KINDS/BASIS_SET"),cp_p_file)) THEN
        output_unit = cp_print_key_unit_nr(logger,subsys_section,&
-            "PRINT%KINDS",extension=".Log",error=error)
+            "PRINT%KINDS",extension=".Log")
        IF ( output_unit > 0 ) THEN
          WRITE(output_unit,"(/,A)") " DFTB| A set of relativistic DFTB "//&
               "parameters for material sciences."
@@ -145,18 +143,16 @@ CONTAINS
             " M. Krause et al, JCP 115 6596 (2001)"
        END IF
        CALL cp_print_key_finished_output(output_unit,logger,subsys_section,&
-            "PRINT%KINDS",error=error)
+            "PRINT%KINDS")
     END IF
 
     sklist = (dftb_control%sk_file_list /= "")
 
     nkind  = SIZE(atomic_kind_set)
-    ALLOCATE(sk_files(nkind,nkind),STAT=istat)
-    CPPostcondition(istat==0,cp_fatal_level,routineP,error,failure)
+    ALLOCATE(sk_files(nkind,nkind))
     ! allocate potential structures
-    ALLOCATE(dftb_potential(nkind,nkind),STAT=istat)
-    CPPostcondition(istat==0,cp_fatal_level,routineP,error,failure)
-    CALL qs_dftb_pairpot_init(dftb_potential,error)
+    ALLOCATE(dftb_potential(nkind,nkind))
+    CALL qs_dftb_pairpot_init(dftb_potential)
 
     DO ikind = 1, nkind
       CALL get_atomic_kind(atomic_kind_set(ikind),name=iname,element_symbol=iel)
@@ -185,16 +181,16 @@ CONTAINS
           file_name = TRIM(dftb_control%sk_file_path)//"/"//&
                       TRIM(dftb_control%sk_file_list)
           NULLIFY(parser)
-          CALL parser_create(parser,file_name,para_env=para_env,error=error)
+          CALL parser_create(parser,file_name,para_env=para_env)
           DO
             at_end = .FALSE.
-            CALL parser_get_next_line(parser,1,at_end,error=error)
+            CALL parser_get_next_line(parser,1,at_end)
             IF ( at_end ) EXIT
-            CALL parser_get_object(parser,name_a,lower_to_upper=.TRUE.,error=error)
-            CALL parser_get_object(parser,name_b,lower_to_upper=.TRUE.,error=error)
+            CALL parser_get_object(parser,name_a,lower_to_upper=.TRUE.)
+            CALL parser_get_object(parser,name_b,lower_to_upper=.TRUE.)
             !Checking Names
             IF ( (iname==name_a .AND. jname==name_b) ) THEN
-              CALL parser_get_object(parser,skfn,string_length=8,error=error)
+              CALL parser_get_object(parser,skfn,string_length=8)
               sk_files(ikind,jkind) = TRIM(dftb_control%sk_file_path)//"/"//&
                                       TRIM(skfn)
               found = .TRUE.
@@ -202,20 +198,19 @@ CONTAINS
             END IF
             !Checking Element
             IF ( (iel==name_a .AND. jel==name_b) ) THEN
-              CALL parser_get_object(parser,skfn,string_length=8,error=error)
+              CALL parser_get_object(parser,skfn,string_length=8)
               sk_files(ikind,jkind) = TRIM(dftb_control%sk_file_path)//"/"//&
                                       TRIM(skfn)
               found = .TRUE.
               EXIT
             END IF
           END DO
-          CALL parser_release(parser,error=error)
+          CALL parser_release(parser)
         END IF
-        CALL cp_assert(found,cp_fatal_level,cp_assertion_failed,routineP,&
-             "Failure in assigning KINDS <"//TRIM(iname)//"> and <"//TRIM(jname)//&
-             "> to a DFTB interaction pair!"//&
-CPSourceFileRef,&
-             only_ionode=.TRUE.)
+        IF(.NOT.found)&
+           CALL cp_abort(__LOCATION__,&
+                "Failure in assigning KINDS <"//TRIM(iname)//"> and <"//TRIM(jname)//&
+                "> to a DFTB interaction pair!")
       END DO
     END DO
     ! reading the files
@@ -225,7 +220,7 @@ CPSourceFileRef,&
 
       CALL get_qs_kind(qs_kind_set(ikind),dftb_parameter=dftb_atom_a)
       IF (.NOT.ASSOCIATED(dftb_atom_a)) THEN
-        CALL allocate_dftb_atom_param(dftb_atom_a,error=error)
+        CALL allocate_dftb_atom_param(dftb_atom_a)
         CALL set_qs_kind(qs_kind_set(ikind),dftb_parameter=dftb_atom_a)
       END IF
 
@@ -279,14 +274,11 @@ CPSourceFileRef,&
 
       CALL set_dftb_atom_param(dftb_parameter=dftb_atom_a,&
            z=z,zeff=SUM(occupation),defined=.TRUE.,&
-           skself=skself,energy=energy,eta=eta,occupation=occupation,&
-           error=error)
+           skself=skself,energy=energy,eta=eta,occupation=occupation)
 
       ! Slater-Koster table
-      ALLOCATE(fmat(ngrd,10),STAT=istat)
-      CPPostcondition(istat==0,cp_fatal_level,routineP,error,failure)
-      ALLOCATE(smat(ngrd,10),STAT=istat)
-      CPPostcondition(istat==0,cp_fatal_level,routineP,error,failure)
+      ALLOCATE(fmat(ngrd,10))
+      ALLOCATE(smat(ngrd,10))
       IF ( para_env%ionode ) THEN
         DO k=1,ngrd
           READ (runit,fmt=*,END=1,err=1) fwork(1:10),swork(1:10)
@@ -310,7 +302,7 @@ CPSourceFileRef,&
       DO l=0,3
         SELECT CASE (l)
           CASE DEFAULT
-            STOP
+            CPABORT("")
           CASE (0)
             lp = 10
           CASE (1)
@@ -328,7 +320,7 @@ CPSourceFileRef,&
       ! l=2 (d) is maximum
       lmax = MIN ( 2, lmax )
       CALL set_dftb_atom_param(dftb_parameter=dftb_atom_a,&
-         lmax=lmax, natorb=(lmax+1)**2, error=error)
+         lmax=lmax, natorb=(lmax+1)**2)
 
       spdim = 0
       IF ( n_urpoly == 0 ) THEN
@@ -341,10 +333,8 @@ CPSourceFileRef,&
               search = .FALSE.
               ! spline dimension and left-hand cutoff
               READ (runit,fmt=*,END=1,err=1) spdim,s_cut
-              ALLOCATE(spxr(spdim,2),STAT=istat)
-              CPPostcondition(istat==0,cp_fatal_level,routineP,error,failure)
-              ALLOCATE(scoeff(spdim,4),STAT=istat)
-              CPPostcondition(istat==0,cp_fatal_level,routineP,error,failure)
+              ALLOCATE(spxr(spdim,2))
+              ALLOCATE(scoeff(spdim,4))
               ! e-functions describing left-hand extrapolation
               READ (runit,fmt=*,END=1,err=1) srep(1:3)
               DO isp = 1,spdim-1
@@ -364,10 +354,8 @@ CPSourceFileRef,&
 
       CALL mp_bcast(spdim,para_env%source,para_env%group)
       IF ( spdim > 0 .AND. (.NOT. para_env%ionode)) THEN
-        ALLOCATE(spxr(spdim,2),STAT=istat)
-        CPPostcondition(istat==0,cp_fatal_level,routineP,error,failure)
-        ALLOCATE(scoeff(spdim,4),STAT=istat)
-        CPPostcondition(istat==0,cp_fatal_level,routineP,error,failure)
+        ALLOCATE(spxr(spdim,2))
+        ALLOCATE(scoeff(spdim,4))
       END IF
       IF(spdim > 0) THEN
         CALL mp_bcast(spxr,para_env%source,para_env%group)
@@ -390,7 +378,7 @@ CPSourceFileRef,&
         END DO
       END DO
       CALL qs_dftb_pairpot_create(dftb_potential(ikind,jkind),&
-                                  ngrd,llm,spdim,error)
+                                  ngrd,llm,spdim)
 
       ! repulsive potential
       dftb_potential(ikind,jkind)%n_urpoly = n_urpoly
@@ -415,15 +403,11 @@ CPSourceFileRef,&
         dftb_potential(ikind,jkind)%surr = surr
       END IF
 
-      DEALLOCATE(fmat,STAT=istat)
-      CPPostcondition(istat==0,cp_fatal_level,routineP,error,failure)
-      DEALLOCATE(smat,STAT=istat)
-      CPPostcondition(istat==0,cp_fatal_level,routineP,error,failure)
+      DEALLOCATE(fmat)
+      DEALLOCATE(smat)
       IF(spdim > 0) THEN
-        DEALLOCATE(spxr,STAT=istat)
-        CPPostcondition(istat==0,cp_fatal_level,routineP,error,failure)
-        DEALLOCATE(scoeff,STAT=istat)
-        CPPostcondition(istat==0,cp_fatal_level,routineP,error,failure)
+        DEALLOCATE(spxr)
+        DEALLOCATE(scoeff)
       END IF
 
     END DO
@@ -434,7 +418,7 @@ CPSourceFileRef,&
       CALL get_qs_kind(qs_kind_set(ikind),dftb_parameter=dftb_atom_a)
 
       IF (.NOT.ASSOCIATED(dftb_atom_a)) THEN
-        CALL allocate_dftb_atom_param(dftb_atom_a,error=error)
+        CALL allocate_dftb_atom_param(dftb_atom_a)
         CALL set_qs_kind(qs_kind_set(ikind),dftb_parameter=dftb_atom_a)
       END IF
 
@@ -484,10 +468,8 @@ CPSourceFileRef,&
         CALL mp_bcast(dgrd,para_env%source,para_env%group)
 
         ! Slater-Koster table
-        ALLOCATE(fmat(ngrd,10),STAT=istat)
-        CPPostcondition(istat==0,cp_fatal_level,routineP,error,failure)
-        ALLOCATE(smat(ngrd,10),STAT=istat)
-        CPPostcondition(istat==0,cp_fatal_level,routineP,error,failure)
+        ALLOCATE(fmat(ngrd,10))
+        ALLOCATE(smat(ngrd,10))
         IF ( para_env%ionode ) THEN
           DO k=1,ngrd
             READ (runit,fmt=*,END=1,err=1) fwork(1:10),swork(1:10)
@@ -509,10 +491,8 @@ CPSourceFileRef,&
                 search = .FALSE.
                 ! spline dimension and left-hand cutoff
                 READ (runit,fmt=*,END=1,err=1) spdim,s_cut
-                ALLOCATE(spxr(spdim,2),STAT=istat)
-                CPPostcondition(istat==0,cp_fatal_level,routineP,error,failure)
-                ALLOCATE(scoeff(spdim,4),STAT=istat)
-                CPPostcondition(istat==0,cp_fatal_level,routineP,error,failure)
+                ALLOCATE(spxr(spdim,2))
+                ALLOCATE(scoeff(spdim,4))
                 ! e-functions describing left-hand extrapolation
                 READ (runit,fmt=*,END=1,err=1) srep(1:3)
                 DO isp = 1,spdim-1
@@ -532,10 +512,8 @@ CPSourceFileRef,&
 
         CALL mp_bcast(spdim,para_env%source,para_env%group)
         IF ( spdim > 0 .AND. (.NOT. para_env%ionode)) THEN
-          ALLOCATE(spxr(spdim,2),STAT=istat)
-          CPPostcondition(istat==0,cp_fatal_level,routineP,error,failure)
-          ALLOCATE(scoeff(spdim,4),STAT=istat)
-          CPPostcondition(istat==0,cp_fatal_level,routineP,error,failure)
+          ALLOCATE(spxr(spdim,2))
+          ALLOCATE(scoeff(spdim,4))
         END IF
         IF(spdim > 0) THEN
           CALL mp_bcast(spxr,para_env%source,para_env%group)
@@ -558,7 +536,7 @@ CPSourceFileRef,&
           END DO
         END DO
         CALL qs_dftb_pairpot_create(dftb_potential(ikind,jkind),&
-                                    ngrd,llm,spdim,error)
+                                    ngrd,llm,spdim)
 
         ! repulsive potential
         dftb_potential(ikind,jkind)%n_urpoly = n_urpoly
@@ -583,22 +561,17 @@ CPSourceFileRef,&
           dftb_potential(ikind,jkind)%surr = surr
         END IF
 
-        DEALLOCATE(fmat,STAT=istat)
-        CPPostcondition(istat==0,cp_fatal_level,routineP,error,failure)
-        DEALLOCATE(smat,STAT=istat)
-        CPPostcondition(istat==0,cp_fatal_level,routineP,error,failure)
+        DEALLOCATE(fmat)
+        DEALLOCATE(smat)
         IF(spdim > 0) THEN
-          DEALLOCATE(spxr,STAT=istat)
-          CPPostcondition(istat==0,cp_fatal_level,routineP,error,failure)
-          DEALLOCATE(scoeff,STAT=istat)
-          CPPostcondition(istat==0,cp_fatal_level,routineP,error,failure)
+          DEALLOCATE(spxr)
+          DEALLOCATE(scoeff)
         END IF
 
       END DO
     END DO
 
-    DEALLOCATE(sk_files,STAT=istat)
-    CPPostcondition(istat==0,cp_fatal_level,routineP,error,failure)
+    DEALLOCATE(sk_files)
 
     ! read dispersion parameters (UFF type)
     IF ( dftb_control%dispersion ) THEN
@@ -612,28 +585,28 @@ CPSourceFileRef,&
 
           m = LEN_TRIM(iname)
           NULLIFY(parser)
-          CALL parser_create(parser,file_name,para_env=para_env,error=error)
+          CALL parser_create(parser,file_name,para_env=para_env)
           found = .FALSE.
           DO
             at_end = .FALSE.
-            CALL parser_get_next_line(parser,1,at_end,error=error)
+            CALL parser_get_next_line(parser,1,at_end)
             IF ( at_end ) EXIT
-            CALL parser_get_object(parser,name_a,error=error)
+            CALL parser_get_object(parser,name_a)
             ! parser is no longer removing leading quotes
             IF(name_a(1:1) == '"') name_a(1:m) = name_a(2:m+1)
             IF ( name_a(1:m) == TRIM(iname) ) THEN
-              CALL parser_get_object(parser,rb,error=error)
-              CALL parser_get_object(parser,rb,error=error)
-              CALL parser_get_object(parser,ra,error=error)
-              CALL parser_get_object(parser,da,error=error)
+              CALL parser_get_object(parser,rb)
+              CALL parser_get_object(parser,rb)
+              CALL parser_get_object(parser,ra)
+              CALL parser_get_object(parser,da)
               found = .TRUE.
               ra = ra/angstrom
               da = da/kcalmol
-              CALL set_dftb_atom_param(dftb_parameter=dftb_atom_a,name=iname,xi=ra,di=da,error=error)
+              CALL set_dftb_atom_param(dftb_parameter=dftb_atom_a,name=iname,xi=ra,di=da)
               EXIT
             END IF
           END DO
-          CALL parser_release(parser,error=error)
+          CALL parser_release(parser)
         END DO
       END IF
 
@@ -644,21 +617,21 @@ CPSourceFileRef,&
       CALL get_qs_kind(qs_kind_set(ikind),dftb_parameter=dftb_atom_a)
       radmax = (dftb_potential(ikind,ikind)%ngrdcut + 1) * &
                dftb_potential(ikind,ikind)%dgrd*0.5_dp
-      CALL set_dftb_atom_param(dftb_parameter=dftb_atom_a,cutoff=radmax,error=error)
+      CALL set_dftb_atom_param(dftb_parameter=dftb_atom_a,cutoff=radmax)
     END DO
     DO ikind = 1, nkind
       CALL get_qs_kind(qs_kind_set(ikind),dftb_parameter=dftb_atom_a)
-      CALL get_dftb_atom_param(dftb_parameter=dftb_atom_a,cutoff=ra,error=error)
+      CALL get_dftb_atom_param(dftb_parameter=dftb_atom_a,cutoff=ra)
       DO jkind = 1, nkind
         CALL get_qs_kind(qs_kind_set(jkind),dftb_parameter=dftb_atom_b)
-        CALL get_dftb_atom_param(dftb_parameter=dftb_atom_b,cutoff=rb,error=error)
+        CALL get_dftb_atom_param(dftb_parameter=dftb_atom_b,cutoff=rb)
         radmax = (dftb_potential(ikind,jkind)%ngrdcut + 1) * &
                  dftb_potential(ikind,jkind)%dgrd
         IF ( ra+rb < radmax ) THEN
           ra = ra + (radmax-ra-rb)*0.5_dp
           rb = rb + (radmax-ra-rb)*0.5_dp
-          CALL set_dftb_atom_param(dftb_parameter=dftb_atom_a,cutoff=ra,error=error)
-          CALL set_dftb_atom_param(dftb_parameter=dftb_atom_b,cutoff=rb,error=error)
+          CALL set_dftb_atom_param(dftb_parameter=dftb_atom_a,cutoff=ra)
+          CALL set_dftb_atom_param(dftb_parameter=dftb_atom_b,cutoff=rb)
         END IF
       END DO
     END DO
@@ -666,7 +639,7 @@ CPSourceFileRef,&
     ! set correct core charge in potential
     DO ikind = 1, nkind
       CALL get_qs_kind(qs_kind_set(ikind),dftb_parameter=dftb_atom_a)
-      CALL get_dftb_atom_param(dftb_parameter=dftb_atom_a,zeff=zeff,error=error)
+      CALL get_dftb_atom_param(dftb_parameter=dftb_atom_a,zeff=zeff)
       CALL set_potential(potential=qs_kind_set(ikind)%all_potential,&
                   zeff=zeff,zeff_correction=0.0_dp)
     END DO
@@ -676,7 +649,7 @@ CPSourceFileRef,&
       DO ikind = 1, nkind
         CALL get_qs_kind(qs_kind_set(ikind), dftb3_param=db)
         CALL get_qs_kind(qs_kind_set(ikind), dftb_parameter=dftb_atom_a)
-        CALL set_dftb_atom_param(dftb_parameter=dftb_atom_a,dudq=db,error=error)
+        CALL set_dftb_atom_param(dftb_parameter=dftb_atom_a,dudq=db)
       END DO
     END IF
 
@@ -686,11 +659,11 @@ CPSourceFileRef,&
         eps_disp = dftb_control%eps_disp
         DO ikind = 1, nkind
           CALL get_qs_kind(qs_kind_set(ikind), dftb_parameter=dftb_atom_a)
-          CALL get_dftb_atom_param(dftb_parameter=dftb_atom_a,xi=ra,di=da,error=error)
+          CALL get_dftb_atom_param(dftb_parameter=dftb_atom_a,xi=ra,di=da)
           rcdisp = 0._dp
           DO jkind = 1, nkind
             CALL get_qs_kind(qs_kind_set(jkind),dftb_parameter=dftb_atom_b)
-            CALL get_dftb_atom_param(dftb_parameter=dftb_atom_b,xi=rb,di=db,error=error)
+            CALL get_dftb_atom_param(dftb_parameter=dftb_atom_b,xi=rb,di=db)
             xij = SQRT(ra*rb)
             dij = SQRT(da*db)
             dftb_potential(ikind,jkind)%xij  = xij
@@ -704,7 +677,7 @@ CPSourceFileRef,&
             rmax6 = ((8._dp*pi*dij/eps_disp)*xij**6)**0.25_dp
             rcdisp = MAX(rcdisp,rmax6*0.5_dp)
           END DO
-          CALL set_dftb_atom_param(dftb_parameter=dftb_atom_a,rcdisp=rcdisp,error=error)
+          CALL set_dftb_atom_param(dftb_parameter=dftb_atom_a,rcdisp=rcdisp)
         END DO
       END IF
     END IF
@@ -712,7 +685,7 @@ CPSourceFileRef,&
     RETURN
 
 1   CONTINUE
-    CPPostcondition(.FALSE.,cp_fatal_level,routineP,error,failure)
+    CPABORT("")
 
   END SUBROUTINE qs_dftb_param_init
 

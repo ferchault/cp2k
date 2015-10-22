@@ -6,6 +6,7 @@
 MODULE qs_fb_trial_fns_types
 
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
   IMPLICIT NONE
 
   PRIVATE
@@ -63,26 +64,19 @@ CONTAINS
 !> \brief retains given object
 !> \brief ...
 !> \param trial_fns : the fb_trial_fns object in question
-!> \param error : cp2k error container
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
-  SUBROUTINE fb_trial_fns_retain(trial_fns, error)
+  SUBROUTINE fb_trial_fns_retain(trial_fns)
     ! note INTENT(IN) is okay because the obj pointer contained in the
     ! obj type will not be changed
     TYPE(fb_trial_fns_obj), INTENT(IN)       :: trial_fns
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_trial_fns_retain', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    CPPrecondition(ASSOCIATED(trial_fns%obj), cp_failure_level, routineP, error, failure)
-    IF (.NOT. failure) THEN
-       CPPreconditionNoFail(trial_fns%obj%ref_count>0, cp_failure_level, routineP, error)
-       trial_fns%obj%ref_count = trial_fns%obj%ref_count + 1
-    END IF
+    CPASSERT(ASSOCIATED(trial_fns%obj))
+    CPASSERT(trial_fns%obj%ref_count>0)
+    trial_fns%obj%ref_count = trial_fns%obj%ref_count + 1
   END SUBROUTINE fb_trial_fns_retain
 
 
@@ -90,36 +84,27 @@ CONTAINS
 !> \brief releases given object
 !> \brief ...
 !> \param trial_fns : the fb_trial_fns object in question
-!> \param error : cp2k error container
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
-  SUBROUTINE fb_trial_fns_release(trial_fns, error)
+  SUBROUTINE fb_trial_fns_release(trial_fns)
     TYPE(fb_trial_fns_obj), INTENT(INOUT)    :: trial_fns
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_trial_fns_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
     IF (ASSOCIATED(trial_fns%obj)) THEN
-       CPPreconditionNoFail(trial_fns%obj%ref_count>0, cp_failure_level, routineP, error)
+       CPASSERT(trial_fns%obj%ref_count>0)
        trial_fns%obj%ref_count = trial_fns%obj%ref_count - 1
        IF (trial_fns%obj%ref_count == 0) THEN
           trial_fns%obj%ref_count = 1
           IF (ASSOCIATED(trial_fns%obj%nfunctions)) THEN
-             DEALLOCATE(trial_fns%obj%nfunctions, STAT=stat)
-             CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+             DEALLOCATE(trial_fns%obj%nfunctions)
           END IF
           IF (ASSOCIATED(trial_fns%obj%functions)) THEN
-             DEALLOCATE(trial_fns%obj%functions, STAT=stat)
-             CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+             DEALLOCATE(trial_fns%obj%functions)
           END IF
           trial_fns%obj%ref_count = 0
-          DEALLOCATE(trial_fns%obj, STAT=stat)
-          CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+          DEALLOCATE(trial_fns%obj)
        END IF
     ELSE
        NULLIFY(trial_fns%obj)
@@ -180,63 +165,42 @@ CONTAINS
 ! *****************************************************************************
 !> \brief creates an fb_trial_fns object and initialises it
 !> \param trial_fns : the fb_trial_fns object in question
-!> \param error : cp2k error container
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
-  SUBROUTINE fb_trial_fns_create(trial_fns, error)
+  SUBROUTINE fb_trial_fns_create(trial_fns)
     TYPE(fb_trial_fns_obj), INTENT(INOUT)    :: trial_fns
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_trial_fns_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    CPPrecondition(.NOT.ASSOCIATED(trial_fns%obj), cp_failure_level, routineP, error, failure)
-    IF (.NOT. failure) THEN
-       ALLOCATE(trial_fns%obj, STAT=stat)
-       CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-       NULLIFY(trial_fns%obj%nfunctions)
-       NULLIFY(trial_fns%obj%functions)
-       trial_fns%obj%ref_count = 1
-       trial_fns%obj%id_nr = last_fb_trial_fns_id + 1
-       last_fb_trial_fns_id = trial_fns%obj%id_nr
-    END IF
+    CPASSERT(.NOT.ASSOCIATED(trial_fns%obj))
+    ALLOCATE(trial_fns%obj)
+    NULLIFY(trial_fns%obj%nfunctions)
+    NULLIFY(trial_fns%obj%functions)
+    trial_fns%obj%ref_count = 1
+    trial_fns%obj%id_nr = last_fb_trial_fns_id + 1
+    last_fb_trial_fns_id = trial_fns%obj%id_nr
   END SUBROUTINE fb_trial_fns_create
 
 
 ! *****************************************************************************
 !> \brief initialises an fb_trial_fns object
 !> \param trial_fns : the fb_trial_fns object in question
-!> \param error : cp2k error container
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
-  SUBROUTINE fb_trial_fns_init(trial_fns, error)
+  SUBROUTINE fb_trial_fns_init(trial_fns)
     TYPE(fb_trial_fns_obj), INTENT(INOUT)    :: trial_fns
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_trial_fns_init', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    CPPrecondition(ASSOCIATED(trial_fns%obj), cp_failure_level, routineP, error, failure)
-    IF (.NOT. failure) THEN
-       ! if halo_atoms are associated, then deallocate and de-associate
-       IF (ASSOCIATED(trial_fns%obj%nfunctions)) THEN
-          DEALLOCATE(trial_fns%obj%nfunctions, STAT=stat)
-          CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-          NULLIFY(trial_fns%obj%nfunctions)
-       END IF
-       IF (ASSOCIATED(trial_fns%obj%functions)) THEN
-          DEALLOCATE(trial_fns%obj%functions, STAT=stat)
-          CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-          NULLIFY(trial_fns%obj%functions)
-       END IF
+    CPASSERT(ASSOCIATED(trial_fns%obj))
+    ! if halo_atoms are associated, then deallocate and de-associate
+    IF (ASSOCIATED(trial_fns%obj%nfunctions)) THEN
+       DEALLOCATE(trial_fns%obj%nfunctions)
+    END IF
+    IF (ASSOCIATED(trial_fns%obj%functions)) THEN
+       DEALLOCATE(trial_fns%obj%functions)
     END IF
   END SUBROUTINE fb_trial_fns_init
 
@@ -246,30 +210,22 @@ CONTAINS
 !> \param trial_fns  : the fb_trial_fns object in question
 !> \param nfunctions : outputs pointer to trial_fns%obj%nfunctions
 !> \param functions  : outputs pointer to trial_fns%obj%functions
-!> \param error : cp2k error container
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
   SUBROUTINE fb_trial_fns_get(trial_fns, &
                               nfunctions, &
-                              functions, &
-                              error)
+                              functions)
     TYPE(fb_trial_fns_obj), INTENT(IN)       :: trial_fns
     INTEGER, DIMENSION(:), OPTIONAL, POINTER :: nfunctions
     INTEGER, DIMENSION(:, :), OPTIONAL, &
       POINTER                                :: functions
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_trial_fns_get', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    CPPrecondition(ASSOCIATED(trial_fns%obj), cp_failure_level, routineP, error, failure)
-    IF (.NOT. failure) THEN
-       IF (PRESENT(nfunctions)) nfunctions => trial_fns%obj%nfunctions
-       IF (PRESENT(functions)) functions => trial_fns%obj%functions
-    END IF
+    CPASSERT(ASSOCIATED(trial_fns%obj))
+    IF (PRESENT(nfunctions)) nfunctions => trial_fns%obj%nfunctions
+    IF (PRESENT(functions)) functions => trial_fns%obj%functions
   END SUBROUTINE fb_trial_fns_get
 
 
@@ -278,42 +234,31 @@ CONTAINS
 !> \param trial_fns  : the fb_trial_fns object in question
 !> \param nfunctions : associates trial_fns%obj%nfunctions to this pointer
 !> \param functions  : associates trial_fns%obj%nfunctions to this pointer
-!> \param error : cp2k error container
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
   SUBROUTINE fb_trial_fns_set(trial_fns, &
                               nfunctions, &
-                              functions, &
-                              error)
+                              functions)
     TYPE(fb_trial_fns_obj), INTENT(INOUT)    :: trial_fns
     INTEGER, DIMENSION(:), OPTIONAL, POINTER :: nfunctions
     INTEGER, DIMENSION(:, :), OPTIONAL, &
       POINTER                                :: functions
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_trial_fns_set', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    CPPrecondition(ASSOCIATED(trial_fns%obj), cp_failure_level, routineP, error, failure)
-    IF (.NOT. failure) THEN
-       IF (PRESENT(nfunctions)) THEN
-          IF (ASSOCIATED(trial_fns%obj%nfunctions)) THEN
-             DEALLOCATE(trial_fns%obj%nfunctions, STAT=stat)
-             CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-          END IF
-          trial_fns%obj%nfunctions => nfunctions
+    CPASSERT(ASSOCIATED(trial_fns%obj))
+    IF (PRESENT(nfunctions)) THEN
+       IF (ASSOCIATED(trial_fns%obj%nfunctions)) THEN
+          DEALLOCATE(trial_fns%obj%nfunctions)
        END IF
-       IF (PRESENT(functions)) THEN
-          IF (ASSOCIATED(trial_fns%obj%functions)) THEN
-             DEALLOCATE(trial_fns%obj%functions, STAT=stat)
-             CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-          END IF
-          trial_fns%obj%functions => functions
+       trial_fns%obj%nfunctions => nfunctions
+    END IF
+    IF (PRESENT(functions)) THEN
+       IF (ASSOCIATED(trial_fns%obj%functions)) THEN
+          DEALLOCATE(trial_fns%obj%functions)
        END IF
+       trial_fns%obj%functions => functions
     END IF
   END SUBROUTINE fb_trial_fns_set
 

@@ -52,13 +52,13 @@ PROGRAM cp2k_shell
   USE machine,                         ONLY: &
        default_output_unit, m_chdir, m_flush, m_getarg, m_getcwd, m_getlog, &
        m_getpid, m_hostnm, m_iargc
-  USE message_passing,                 ONLY: mp_abort,&
-                                             mp_bcast
+  USE message_passing,                 ONLY: mp_bcast
   USE physcon,                         ONLY: angstrom,&
                                              evolt
   USE string_utilities,                ONLY: compress,&
                                              uppercase
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -67,7 +67,6 @@ PROGRAM cp2k_shell
                                               shift2,env_id,last_env_id,&
                                               n_atom,stat,n_atom2,pid,n_lines
   INTEGER                                  :: sout, file_unit
-  TYPE(cp_error_type)                      :: error
   TYPE(cp_para_env_type), POINTER          :: para_env
   TYPE(cp_logger_type), POINTER            :: logger
   CHARACTER(LEN=default_path_length)       :: cmdStr, inp_filename, out_filename
@@ -133,7 +132,7 @@ PROGRAM cp2k_shell
   IF(m_iargc()>0) THEN
      CALL m_getarg(1, out_filename)
      IF(m_iargc()>1 .OR. out_filename(:16) /= "--redirect-comm=") &
-       STOP "Usage: cp2k_shell [--redirect-comm=filename]"
+       CPABORT("Usage: cp2k_shell [--redirect-comm=filename]")
      ! Redirect shell-output away from stdout into a seperate file/pipe.
      ! This is used e.g. by the ASE calculator.
      CALL open_file(file_name=TRIM(out_filename(17:)), unit_number=sout,&
@@ -144,10 +143,10 @@ PROGRAM cp2k_shell
   END IF
 
   CALL init_cp2k(init_mpi=.TRUE.,ierr=ierr)
-  IF (ierr/=0) CALL mp_abort('init_cp2k failure')
+  IF (ierr/=0) CPABORT('init_cp2k failure')
 
   NULLIFY(input_declaration)
-  CALL create_cp2k_root_section(input_declaration, error)
+  CALL create_cp2k_root_section(input_declaration)
 
   pos_fact=1.0_dp
   e_fact=1.0_dp
@@ -155,8 +154,7 @@ PROGRAM cp2k_shell
   harsh=.FALSE.
   failure=.FALSE.
 
-  CALL cp_error_init(error)
-  logger => cp_error_get_logger(error)
+  logger => cp_get_default_logger()
   para_env => logger%para_env
 
   eof=.FALSE.
@@ -202,7 +200,7 @@ PROGRAM cp2k_shell
         IF (para_env%source==para_env%mepos) THEN
             DO i=1,SIZE(helpMsg)
                 WRITE(sout,'(a)',iostat=iostat) TRIM(helpMsg(i))
-                IF (iostat/=0) CALL mp_abort('writing help')
+                IF (iostat/=0) CPABORT('writing help')
             END DO
             CALL m_flush(sout)
         END IF
@@ -215,33 +213,33 @@ PROGRAM cp2k_shell
        ! Queried by ASE. Increase version after bug-fixing or behavior changes.
         IF (para_env%source==para_env%mepos) THEN
             WRITE(sout,'(a)',iostat=iostat) "CP2K Shell Version: 2.0"
-            IF (iostat/=0) CALL mp_abort('writing version')
+            IF (iostat/=0) CPABORT('writing version')
         END IF
      CASE('WRITE_FILE')
         IF (para_env%mepos==para_env%source) THEN
            READ (*,'(a)',iostat=iostat) out_filename
-           IF (iostat/=0) CALL mp_abort('WRITE_FILE bad filename')
+           IF (iostat/=0) CPABORT('WRITE_FILE bad filename')
            READ (*,*,iostat=iostat) n_lines
-           IF (iostat/=0) CALL mp_abort('WRITE_FILE bad number of lines')
+           IF (iostat/=0) CPABORT('WRITE_FILE bad number of lines')
 
            CALL open_file(file_name=TRIM(out_filename), unit_number=file_unit,&
                 file_status="UNKNOWN",file_form="FORMATTED",file_action="WRITE")
 
            DO i=1, n_lines
               READ(*,'(a)',iostat=iostat) line
-              IF (iostat/=0) CALL mp_abort('WRITE_FILE read error')
+              IF (iostat/=0) CPABORT('WRITE_FILE read error')
               WRITE(file_unit,'(a)',iostat=iostat) TRIM(line)
-              IF (iostat/=0) CALL mp_abort('WRITE_FILE write error')
+              IF (iostat/=0) CPABORT('WRITE_FILE write error')
            END DO
            READ(*,'(a)',iostat=iostat) line
-           IF (iostat/=0) CALL mp_abort('WRITE_FILE read error')
-           IF (TRIM(line) /= "*END") CALL mp_abort('WRITE_FILE bad end delimiter')
+           IF (iostat/=0) CPABORT('WRITE_FILE read error')
+           IF (TRIM(line) /= "*END") CPABORT('WRITE_FILE bad end delimiter')
            CALL close_file(unit_number=file_unit)
         ENDIF
      CASE('LAST_ENV_ID')
         IF (para_env%source==para_env%mepos) THEN
            WRITE (sout,'(i10)',iostat=iostat) last_env_id
-           IF (iostat/=0) CALL mp_abort(cmd//' failed writing last_env_id')
+           IF (iostat/=0) CPABORT(cmd//' failed writing last_env_id')
            CALL m_flush(sout)
         END IF
      CASE('BG_LOAD','BGLOAD')
@@ -294,7 +292,7 @@ PROGRAM cp2k_shell
         IF (ierr/=0) last_env_id=-1
         IF (para_env%source==para_env%mepos) THEN
            WRITE (sout,'(i10)',iostat=iostat) last_env_id
-           IF (iostat/=0) CALL mp_abort(cmd//' failed writing last_env_id')
+           IF (iostat/=0) CPABORT(cmd//' failed writing last_env_id')
            CALL m_flush(sout)
         END IF
         IF (last_env_id<=0) failure=.TRUE.
@@ -326,7 +324,7 @@ PROGRAM cp2k_shell
         CALL my_assert(stat==0,cmd//' failed alloc',failure)
         IF (para_env%mepos==para_env%source) THEN
            READ (*,*,iostat=iostat) n_atom2
-           IF (iostat/=0) CALL mp_abort('setpos read n_atom')
+           IF (iostat/=0) CPABORT('setpos read n_atom')
            IF (n_atom2/=SIZE(pos)) THEN
               CALL my_assert(.FALSE.,'setpos invalid number of atoms',failure)
               DO i=1,n_atom
@@ -338,7 +336,7 @@ PROGRAM cp2k_shell
               GOTO 10
            END IF
            READ (*,*,iostat=iostat) pos
-           IF (iostat/=0) CALL mp_abort('setpos read coord')
+           IF (iostat/=0) CPABORT('setpos read coord')
            pos(:) = pos(:)/pos_fact
            READ(*,'(a)',iostat=iostat) cmdStr
            CALL compress(cmdStr,full=.TRUE.)
@@ -354,19 +352,17 @@ PROGRAM cp2k_shell
         DO i=1,SIZE(pos)
            err=MAX(err,ABS(pos(i)-pos2(i)))
         END DO
-        DEALLOCATE(pos,pos2,stat=stat)
-        CALL my_assert(stat==0,'dealloc error',failure)
+        DEALLOCATE(pos,pos2)
         IF (para_env%mepos==para_env%source) THEN
            WRITE (sout,'(ES22.13)') err*pos_fact
         END IF
-        IF (stat/=0) CALL mp_abort('setpos failed dealloc')
      CASE('SETCELL','SET_CELL')
         env_id=parse_env_id(str=cmdStr,startI=shift2+1,default_val=last_env_id)
         CALL my_assert(env_id>0,cmd//' invalid env_id',failure)
         IF (failure) GOTO 10
         IF (para_env%mepos==para_env%source) THEN
            READ (*,*,iostat=iostat) cell
-           IF (iostat/=0) CALL mp_abort('setcell read')
+           IF (iostat/=0) CPABORT('setcell read')
            cell(:,:) = cell(:,:)/pos_fact
         END IF
         CALL mp_bcast(cell,para_env%source,para_env%group)
@@ -380,7 +376,7 @@ PROGRAM cp2k_shell
         cell(:,:) = cell(:,:)*pos_fact
         IF (para_env%mepos==para_env%source) THEN
            WRITE (sout,'(9ES22.13)',iostat=iostat) cell
-           IF (iostat/=0) CALL mp_abort(cmd//' write get_cell')
+           IF (iostat/=0) CPABORT(cmd//' write get_cell')
            CALL m_flush(sout)
         END IF
      CASE('GETSTRESS','GET_STRESS')
@@ -391,7 +387,7 @@ PROGRAM cp2k_shell
         stress_tensor(:,:) = stress_tensor(:,:)*(e_fact/pos_fact**3)
         IF (para_env%mepos==para_env%source) THEN
            WRITE (sout,'(9ES22.13)',iostat=iostat) stress_tensor
-           IF (iostat/=0) CALL mp_abort(cmd//' write get_stress')
+           IF (iostat/=0) CPABORT(cmd//' write get_stress')
            CALL m_flush(sout)
         END IF
      CASE('GETPOS','GET_POS')
@@ -402,21 +398,20 @@ PROGRAM cp2k_shell
         CALL my_assert(ierr==0,cmd//' failed get_natom',failure)
         IF (failure) GOTO 10
         ALLOCATE(pos(3*n_atom),stat=stat)
-        IF (stat/=0) CALL mp_abort(cmd//' failed alloc')
+        IF (stat/=0) CPABORT(cmd//' failed alloc')
         CALL get_pos(env_id, pos=pos, n_el=3*n_atom, ierr=ierr)
         CALL my_assert(ierr==0,'get_pos error',failure)
         pos(:) = pos(:)*pos_fact
         IF (.not.failure.and.para_env%mepos==para_env%source) THEN
            WRITE (sout,'(i10)',iostat=iostat) 3*n_atom
-           IF (iostat/=0) CALL mp_abort(cmd//' write ncoord')
+           IF (iostat/=0) CPABORT(cmd//' write ncoord')
            WRITE (sout,'(3ES22.13)',iostat=iostat) pos
-           IF (iostat/=0) CALL mp_abort(cmd//' write coord')
+           IF (iostat/=0) CPABORT(cmd//' write coord')
            WRITE (sout,'(a)',iostat=iostat) "* END"
-           IF (iostat/=0) CALL mp_abort(cmd//' write coord')
+           IF (iostat/=0) CPABORT(cmd//' write coord')
            CALL m_flush(sout)
         END IF
-        DEALLOCATE(pos,stat=stat)
-        IF (stat/=0) CALL mp_abort(cmd//' failed dealloc')
+        DEALLOCATE(pos)
      CASE('GETE','GET_E')
         env_id=parse_env_id(str=cmdStr,startI=shift2+1,default_val=last_env_id)
         CALL my_assert(env_id>0,cmd//' invalid env_id',failure)
@@ -425,7 +420,7 @@ PROGRAM cp2k_shell
         e_pot=e_pot*e_fact
         IF (para_env%mepos==para_env%source) THEN
            WRITE (sout,'(ES22.13)',iostat=iostat) e_pot
-           IF (iostat/=0) CALL mp_abort(cmd//' write e_pot')
+           IF (iostat/=0) CPABORT(cmd//' write e_pot')
            CALL m_flush(sout)
         END IF
      CASE('EVALE','EVAL_E')
@@ -443,7 +438,7 @@ PROGRAM cp2k_shell
         e_pot=e_pot*e_fact
         IF (para_env%mepos==para_env%source) THEN
            WRITE (sout,'(ES22.13)',iostat=iostat) e_pot
-           IF (iostat/=0) CALL mp_abort(cmd//' write e_pot')
+           IF (iostat/=0) CPABORT(cmd//' write e_pot')
            CALL m_flush(sout)
         END IF
      CASE('EVALEF','EVAL_EF')
@@ -459,21 +454,20 @@ PROGRAM cp2k_shell
         CALL my_assert(ierr==0,cmd//' failed get_natom',failure)
         IF (failure) GOTO 10
         ALLOCATE(pos(3*n_atom),stat=stat)
-        IF (stat/=0) CALL mp_abort(cmd//' failed alloc')
+        IF (stat/=0) CPABORT(cmd//' failed alloc')
         CALL get_force(env_id, frc=pos, n_el=3*n_atom, ierr=ierr)
         CALL my_assert(ierr==0,'get_force error',failure)
         pos(:) = pos(:)*(e_fact/pos_fact)
         IF (.not.failure.and.para_env%mepos==para_env%source) THEN
            WRITE (sout,'(i10)',iostat=iostat) 3*n_atom
-           IF (iostat/=0) CALL mp_abort(cmd//' write nforce')
+           IF (iostat/=0) CPABORT(cmd//' write nforce')
            WRITE (sout,'(3ES22.13)',iostat=iostat) pos
-           IF (iostat/=0) CALL mp_abort(cmd//' write force')
+           IF (iostat/=0) CPABORT(cmd//' write force')
            WRITE (sout,'("* END")',iostat=iostat)
-           IF (iostat/=0) CALL mp_abort(cmd//' write coord')
+           IF (iostat/=0) CPABORT(cmd//' write coord')
            CALL m_flush(sout)
         END IF
-        DEALLOCATE(pos,stat=stat)
-        IF (stat/=0) CALL mp_abort(cmd//' failed dealloc')
+        DEALLOCATE(pos)
      CASE('CALCEF','CALC_EF')
         env_id=parse_env_id(str=cmdStr,startI=shift2+1,default_val=last_env_id)
         CALL my_assert(env_id>0,cmd//' invalid env_id',failure)
@@ -489,23 +483,22 @@ PROGRAM cp2k_shell
         CALL my_assert(ierr==0,cmd//' failed get_natom',failure)
         IF (failure) GOTO 10
         ALLOCATE(pos(3*n_atom),stat=stat)
-        IF (stat/=0) CALL mp_abort(cmd//' failed alloc')
+        IF (stat/=0) CPABORT(cmd//' failed alloc')
         CALL get_force(env_id, frc=pos, n_el=3*n_atom, ierr=ierr)
         CALL my_assert(ierr==0,'get_force error',failure)
         pos(:) = pos(:)*(e_fact/pos_fact)
         IF (.not.failure.and.para_env%mepos==para_env%source) THEN
            WRITE (sout,'(ES22.13)',iostat=iostat) e_pot
-           IF (iostat/=0) CALL mp_abort(cmd//' write e_pot')
+           IF (iostat/=0) CPABORT(cmd//' write e_pot')
            WRITE (sout,'(i10)',iostat=iostat) 3*n_atom
-           IF (iostat/=0) CALL mp_abort(cmd//' write nforce')
+           IF (iostat/=0) CPABORT(cmd//' write nforce')
            WRITE (sout,'(3ES22.13)',iostat=iostat) pos
-           IF (iostat/=0) CALL mp_abort(cmd//' write force')
+           IF (iostat/=0) CPABORT(cmd//' write force')
            WRITE (sout,'("* END")',iostat=iostat)
-           IF (iostat/=0) CALL mp_abort(cmd//' write coord')
+           IF (iostat/=0) CPABORT(cmd//' write coord')
            CALL m_flush(sout)
         END IF
-        DEALLOCATE(pos,stat=stat)
-        IF (stat/=0) CALL mp_abort(cmd//' failed dealloc')
+        DEALLOCATE(pos)
      CASE('UNITS_EVA','UNITS_EV_A')
         e_fact=evolt
         pos_fact=angstrom
@@ -517,7 +510,7 @@ PROGRAM cp2k_shell
      CASE('UNITS')
         IF (para_env%source==para_env%mepos) THEN
            WRITE (sout,'(a)',iostat=iostat) TRIM(units)
-           IF (iostat/=0) CALL mp_abort(cmd//' writing units')
+           IF (iostat/=0) CPABORT(cmd//' writing units')
            CALL m_flush(sout)
         END IF
      CASE('HARSH')
@@ -550,20 +543,20 @@ PROGRAM cp2k_shell
         CALL my_assert(.FALSE.,'unknown command '//cmd,failure)
      END SELECT
 10   IF (failure) THEN
-        IF (harsh) CALL mp_abort('failure')
+        IF (harsh) CPABORT('failure')
         IF (para_env%mepos==para_env%source) THEN
            WRITE(sout,'("* ERROR, type HELP for help")',iostat=iostat)
-           IF (iostat/=0) CALL mp_abort('writing error')
+           IF (iostat/=0) CPABORT('writing error')
            CALL m_flush(sout)
         END IF
         failure=.FALSE.
      END IF
   END DO
 
-  CALL section_release(input_declaration,error=error)
+  CALL section_release(input_declaration)
 
   CALL finalize_cp2k(finalize_mpi=.TRUE.,ierr=ierr)
-  IF (ierr/=0) CALL mp_abort('finalize_cp2k failure')
+  IF (ierr/=0) CPABORT('finalize_cp2k failure')
 
 CONTAINS
 
@@ -579,7 +572,7 @@ CONTAINS
     LOGICAL, INTENT(inout)                   :: failure
 
     IF (.not.tst) THEN
-       IF (harsh) CALL mp_abort(msg)
+       IF (harsh) CPABORT(msg)
        IF (para_env%mepos==para_env%source) THEN
           WRITE(sout,'("* ERROR ",a)') msg
        END IF
@@ -697,7 +690,7 @@ CONTAINS
        END DO
        eof_stat=stat_n
        IF (eof_stat >= 0) THEN
-          STOP 'ERROR,cp_files:get_eof_stat failed identification of EOF IOSTAT'
+          CPABORT("ERROR,cp_files:get_eof_stat failed identification of EOF IOSTAT")
           eof_stat=-1
        END IF
        CALL close_file(unit,'delete')

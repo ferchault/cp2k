@@ -21,10 +21,8 @@ MODULE mulliken
   USE message_passing,                 ONLY: mp_sum
   USE particle_types,                  ONLY: particle_type
   USE qs_kind_types,                   ONLY: qs_kind_type
-  USE termination,                     ONLY: stop_program
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -59,7 +57,6 @@ CONTAINS
 !> \param order_p ...
 !> \param ks_matrix ...
 !> \param w_matrix ...
-!> \param error ...
 !> \par History
 !>      06.2004 created [Joost VandeVondele]
 !> \note
@@ -68,7 +65,7 @@ CONTAINS
 !>      needed for orbital and ionic forces respectively
 ! *****************************************************************************
   SUBROUTINE mulliken_restraint(mulliken_restraint_control,para_env, &
-                                s_matrix,p_matrix,energy,order_p,ks_matrix,w_matrix,error)
+                                s_matrix,p_matrix,energy,order_p,ks_matrix,w_matrix)
     TYPE(mulliken_restraint_type), &
       INTENT(IN)                             :: mulliken_restraint_control
     TYPE(cp_para_env_type), POINTER          :: para_env
@@ -78,7 +75,6 @@ CONTAINS
     REAL(KIND=dp), OPTIONAL                  :: energy, order_p
     TYPE(cp_dbcsr_p_type), DIMENSION(:), &
       OPTIONAL, POINTER                      :: ks_matrix, w_matrix
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'mulliken_restraint', &
       routineP = moduleN//':'//routineN
@@ -124,8 +120,7 @@ CONTAINS
                   row=iblock_row,col=iblock_col,BLOCK=ks_block,found=found)
 
              IF ( .NOT. (ASSOCIATED(s_block) .AND. ASSOCIATED(ks_block) ) ) THEN
-                CALL stop_program(routineN,moduleN,__LINE__,&
-                                  "Unexpected s / ks structure",para_env)
+                CPABORT("Unexpected s / ks structure")
              END IF
                 mult = 0.5_dp * charges_deriv(iblock_row,ispin) + &
                        0.5_dp * charges_deriv(iblock_col,ispin)
@@ -208,59 +203,6 @@ SUBROUTINE restraint_functional(mulliken_restraint_control,charges, &
        charges_deriv(mulliken_restraint_control%atoms(I),2)= -dum
     ENDDO
 END SUBROUTINE restraint_functional
-
-! *****************************************************************************
-!> \brief checks numerically the analytic derivative in restraint_functional
-!> \param mulliken_restraint_control ...
-!> \param charges (nblock,nspin)
-!> \par History
-!>      06.2004 created [Joost VandeVondele]
-!> \note
-!>       for testing only, uncomment the call in mulliken restraint
-! *****************************************************************************
-SUBROUTINE rf_deriv_check(mulliken_restraint_control,charges)
-    TYPE(mulliken_restraint_type), &
-      INTENT(IN)                             :: mulliken_restraint_control
-    REAL(KIND=dp), DIMENSION(:, :), POINTER  :: charges
-
-    REAL(KIND=dp), PARAMETER                 :: stepsize = 0.00001_dp
-
-    INTEGER                                  :: I, J
-    REAL(KIND=dp)                            :: dum, energy1, energy2
-    REAL(KIND=dp), DIMENSION(:, :), POINTER  :: charges_deriv, charges_local, &
-                                                deriv_num
-
-    ALLOCATE(charges_local(1:SIZE(charges,1),1:SIZE(charges,2)))
-    ALLOCATE(charges_deriv(1:SIZE(charges,1),1:SIZE(charges,2)))
-    ALLOCATE(deriv_num(1:SIZE(charges,1),1:SIZE(charges,2)))
-
-    ! finite difference check
-    charges_local=charges
-    do_i: DO I=1,SIZE(charges,1)
-      do_j: DO J=1,SIZE(charges,2)
-         ! x+dx
-         charges_local(I,J)=charges_local(I,J)+stepsize
-         CALL restraint_functional(mulliken_restraint_control,charges_local, &
-                                   charges_deriv,energy1,dum)
-         charges_local(I,J)=charges_local(I,J)-stepsize ! back to orig
-         ! x-dx
-         charges_local(I,J)=charges_local(I,J)-stepsize
-         CALL restraint_functional(mulliken_restraint_control,charges_local, &
-                                   charges_deriv,energy2,dum)
-         charges_local(I,J)=charges_local(I,J)+stepsize ! back to orig
-         ! num deriv
-         deriv_num(I,J)=(energy1-energy2)/(2*stepsize)
-      ENDDO do_j
-    ENDDO do_i
-    ! analytic results vs deriv_num
-    CALL restraint_functional(mulliken_restraint_control,charges, &
-                                   charges_deriv,energy2,dum)
-    WRITE(*,*) "deriv check : max abs diff, max abs", MAXVAL(ABS(charges_deriv-deriv_num)), &
-                                                      MAXVAL(ABS(charges_deriv))
-
-    DEALLOCATE(charges_local,charges_deriv,deriv_num)
-
-END SUBROUTINE rf_deriv_check
 
 ! *****************************************************************************
 !> \brief compute the mulliken charges
@@ -389,12 +331,11 @@ END SUBROUTINE rf_deriv_check
 !> \param qs_kind_set ...
 !> \param scr unit for output
 !> \param title ...
-!> \param error ...
 !> \par History
 !>      06.2004 adapted to remove explicit matrix multiply [Joost VandeVondele]
 ! *****************************************************************************
   SUBROUTINE mulliken_charges_a(p_matrix,s_matrix,para_env,particle_set, &
-                                qs_kind_set,scr,title,error)
+                                qs_kind_set,scr,title)
 
     TYPE(cp_dbcsr_p_type), DIMENSION(:), &
       POINTER                                :: p_matrix
@@ -406,32 +347,27 @@ END SUBROUTINE rf_deriv_check
       POINTER                                :: qs_kind_set
     INTEGER                                  :: scr
     CHARACTER(LEN=*)                         :: title
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'mulliken_charges_a', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: handle, istat, nblock, nspin
-    LOGICAL                                  :: failure
+    INTEGER                                  :: handle, nblock, nspin
     REAL(KIND=dp), DIMENSION(:, :), POINTER  :: charges
 
     CALL timeset(routineN,handle)
 
-    failure = .FALSE.
-    CPPrecondition(ASSOCIATED(p_matrix),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(s_matrix),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(p_matrix))
+    CPASSERT(ASSOCIATED(s_matrix))
     ! here we get the numbers for charges
     nspin=SIZE(p_matrix)
     CALL cp_dbcsr_get_info(s_matrix,nblkrows_total=nblock)
-    ALLOCATE(charges(nblock,nspin),STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(charges(nblock,nspin))
 
     CALL compute_charges(p_matrix,s_matrix,charges,para_env)
 
     CALL print_atomic_charges(particle_set,qs_kind_set,scr,title,electronic_charges=charges)
 
-    DEALLOCATE(charges,STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(charges)
 
     CALL timestop(handle)
 
@@ -443,16 +379,14 @@ END SUBROUTINE rf_deriv_check
 !> \param s_matrix ...
 !> \param para_env ...
 !> \param mcharge ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE mulliken_charges_b(p_matrix,s_matrix,para_env,mcharge,error)
+  SUBROUTINE mulliken_charges_b(p_matrix,s_matrix,para_env,mcharge)
 
     TYPE(cp_dbcsr_p_type), DIMENSION(:), &
       POINTER                                :: p_matrix
     TYPE(cp_dbcsr_type), POINTER             :: s_matrix
     TYPE(cp_para_env_type), POINTER          :: para_env
     REAL(KIND=dp), DIMENSION(:, :), POINTER  :: mcharge
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'mulliken_charges_b', &
       routineP = moduleN//':'//routineN
@@ -476,15 +410,13 @@ END SUBROUTINE rf_deriv_check
 !> \param para_env ...
 !> \param mcharge ...
 !> \param dmcharge ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE mulliken_charges_c(p_matrix,s_matrix,para_env,mcharge,dmcharge,error)
+  SUBROUTINE mulliken_charges_c(p_matrix,s_matrix,para_env,mcharge,dmcharge)
 
     TYPE(cp_dbcsr_p_type), DIMENSION(:), &
       POINTER                                :: p_matrix, s_matrix
     TYPE(cp_para_env_type), POINTER          :: para_env
     REAL(KIND=dp), DIMENSION(:, :), POINTER  :: mcharge, dmcharge
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'mulliken_charges_c', &
       routineP = moduleN//':'//routineN
@@ -510,12 +442,11 @@ END SUBROUTINE rf_deriv_check
 !> \param qs_kind_set ...
 !> \param scr unit for output
 !> \param title ...
-!> \param error ...
 !> \par History
 !>      06.2004 adapted to remove explicit matrix multiply [Joost VandeVondele]
 ! *****************************************************************************
   SUBROUTINE mulliken_charges_akp(p_matrix_kp,s_matrix_kp,para_env,particle_set, &
-                                  qs_kind_set,scr,title,error)
+                                  qs_kind_set,scr,title)
 
     TYPE(cp_dbcsr_p_type), DIMENSION(:, :), &
       POINTER                                :: p_matrix_kp, s_matrix_kp
@@ -526,14 +457,11 @@ END SUBROUTINE rf_deriv_check
       POINTER                                :: qs_kind_set
     INTEGER                                  :: scr
     CHARACTER(LEN=*)                         :: title
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'mulliken_charges_akp', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: handle, ic, istat, nblock, &
-                                                nspin
-    LOGICAL                                  :: failure
+    INTEGER                                  :: handle, ic, nblock, nspin
     REAL(KIND=dp), DIMENSION(:, :), POINTER  :: charges, charges_im
     TYPE(cp_dbcsr_p_type), DIMENSION(:), &
       POINTER                                :: p_matrix
@@ -541,14 +469,12 @@ END SUBROUTINE rf_deriv_check
 
     CALL timeset(routineN,handle)
 
-    failure = .FALSE.
-    CPPrecondition(ASSOCIATED(p_matrix_kp),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(s_matrix_kp),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(p_matrix_kp))
+    CPASSERT(ASSOCIATED(s_matrix_kp))
 
     nspin=SIZE(p_matrix)
     CALL cp_dbcsr_get_info(s_matrix,nblkrows_total=nblock)
-    ALLOCATE(charges(nblock,nspin),charges_im(nblock,nspin),STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(charges(nblock,nspin),charges_im(nblock,nspin))
     charges = 0.0_dp
 
     DO ic=1,SIZE(s_matrix_kp,2)
@@ -562,8 +488,7 @@ END SUBROUTINE rf_deriv_check
 
     CALL print_atomic_charges(particle_set,qs_kind_set,scr,title,electronic_charges=charges)
 
-    DEALLOCATE(charges,charges_im,STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(charges,charges_im)
 
     CALL timestop(handle)
 
@@ -575,22 +500,18 @@ END SUBROUTINE rf_deriv_check
 !> \param s_matrix_kp ...
 !> \param para_env ...
 !> \param mcharge ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE mulliken_charges_bkp(p_matrix_kp,s_matrix_kp,para_env,mcharge,error)
+  SUBROUTINE mulliken_charges_bkp(p_matrix_kp,s_matrix_kp,para_env,mcharge)
 
     TYPE(cp_dbcsr_p_type), DIMENSION(:, :), &
       POINTER                                :: p_matrix_kp, s_matrix_kp
     TYPE(cp_para_env_type), POINTER          :: para_env
     REAL(KIND=dp), DIMENSION(:, :), POINTER  :: mcharge
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'mulliken_charges_bkp', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: handle, ic, istat, natom, &
-                                                nspin
-    LOGICAL                                  :: failure
+    INTEGER                                  :: handle, ic, natom, nspin
     REAL(KIND=dp), DIMENSION(:, :), POINTER  :: mcharge_im
     TYPE(cp_dbcsr_p_type), DIMENSION(:), &
       POINTER                                :: p_matrix
@@ -598,14 +519,12 @@ END SUBROUTINE rf_deriv_check
 
     CALL timeset(routineN,handle)
 
-    failure = .FALSE.
     IF(ASSOCIATED(p_matrix_kp) .AND. ASSOCIATED(s_matrix_kp)) THEN
 
        mcharge = 0.0_dp
        natom = SIZE(mcharge,1)
        nspin = SIZE(mcharge,2)
-       ALLOCATE(mcharge_im(natom,nspin),STAT=istat)
-       CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+       ALLOCATE(mcharge_im(natom,nspin))
 
        DO ic=1,SIZE(s_matrix_kp,2)
           NULLIFY(p_matrix,s_matrix)
@@ -617,8 +536,7 @@ END SUBROUTINE rf_deriv_check
           END IF
        END DO
 
-       DEALLOCATE(mcharge_im,STAT=istat)
-       CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE(mcharge_im)
 
     END IF
 
@@ -633,30 +551,25 @@ END SUBROUTINE rf_deriv_check
 !> \param para_env ...
 !> \param mcharge ...
 !> \param dmcharge ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE mulliken_charges_ckp(p_matrix_kp,s_matrix_kp,para_env,&
-                                  mcharge,dmcharge,error)
+                                  mcharge,dmcharge)
 
     TYPE(cp_dbcsr_p_type), DIMENSION(:, :), &
       POINTER                                :: p_matrix_kp, s_matrix_kp
     TYPE(cp_para_env_type), POINTER          :: para_env
     REAL(KIND=dp), DIMENSION(:, :), POINTER  :: mcharge, dmcharge
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'mulliken_charges_ckp', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: handle, ic, istat, natom, &
-                                                nder, nspin
-    LOGICAL                                  :: failure
+    INTEGER                                  :: handle, ic, natom, nder, nspin
     REAL(KIND=dp), DIMENSION(:, :), POINTER  :: dmcharge_im, mcharge_im
     TYPE(cp_dbcsr_p_type), DIMENSION(:), &
       POINTER                                :: p_matrix, s_matrix
 
     CALL timeset(routineN,handle)
 
-    failure = .FALSE.
     IF(ASSOCIATED(p_matrix_kp) .AND. ASSOCIATED(s_matrix_kp)) THEN
 
        mcharge = 0.0_dp
@@ -664,8 +577,7 @@ END SUBROUTINE rf_deriv_check
        natom = SIZE(mcharge,1)
        nspin = SIZE(mcharge,2)
        nder  = SIZE(dmcharge,2)
-       ALLOCATE(mcharge_im(natom,nspin),dmcharge_im(natom,nder),STAT=istat)
-       CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+       ALLOCATE(mcharge_im(natom,nspin),dmcharge_im(natom,nder))
 
        DO ic=1,SIZE(s_matrix_kp,2)
           NULLIFY(p_matrix,s_matrix)
@@ -678,8 +590,7 @@ END SUBROUTINE rf_deriv_check
           END IF
        END DO
 
-       DEALLOCATE(mcharge_im,dmcharge_im,STAT=istat)
-       CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE(mcharge_im,dmcharge_im)
 
     END IF
 

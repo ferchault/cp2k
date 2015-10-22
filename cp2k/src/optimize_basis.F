@@ -54,9 +54,8 @@ MODULE optimize_basis
                                              qs_environment_type
   USE qs_ks_types,                     ONLY: qs_ks_env_type
   USE qs_neighbor_lists,               ONLY: build_qs_neighbor_lists
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -72,32 +71,26 @@ CONTAINS
 !> \param input_declaration ...
 !> \param root_section ...
 !> \param para_env ...
-!> \param error ...
 !> \author Florian Schiffmann
 ! *****************************************************************************
-  SUBROUTINE run_optimize_basis(input_declaration,root_section,para_env,error)
+  SUBROUTINE run_optimize_basis(input_declaration,root_section,para_env)
     TYPE(section_type), POINTER              :: input_declaration
     TYPE(section_vals_type), POINTER         :: root_section
     TYPE(cp_para_env_type), POINTER          :: para_env
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'run_optimize_basis', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle
     TYPE(basis_optimization_type)            :: opt_bas
-    TYPE(cp_logger_type), POINTER            :: logger
 
     CALL timeset(routineN,handle)
-    logger => cp_get_default_logger()
-    CALL cp_error_init(error, logger=logger)
 
-    CALL optimize_basis_init_read_input(opt_bas,root_section,para_env,error)
+    CALL optimize_basis_init_read_input(opt_bas,root_section,para_env)
 
-    CALL driver_para_opt_basis(opt_bas,input_declaration,para_env,error)
+    CALL driver_para_opt_basis(opt_bas,input_declaration,para_env)
 
     CALL deallocate_basis_optimization_type(opt_bas)
-    CALL cp_error_dealloc_ref(error)
     CALL timestop(handle)
 
 
@@ -108,15 +101,13 @@ CONTAINS
 !> \param opt_bas ...
 !> \param input_declaration ...
 !> \param para_env ...
-!> \param error ...
 !> \author Florian Schiffmann
 ! *****************************************************************************
 
-  SUBROUTINE driver_para_opt_basis(opt_bas,input_declaration,para_env,error)
+  SUBROUTINE driver_para_opt_basis(opt_bas,input_declaration,para_env)
     TYPE(basis_optimization_type)            :: opt_bas
     TYPE(section_type), POINTER              :: input_declaration
     TYPE(cp_para_env_type), POINTER          :: para_env
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'driver_para_opt_basis', &
       routineP = moduleN//':'//routineN
@@ -133,7 +124,7 @@ CONTAINS
          n_subgroups=SIZE(opt_bas%group_partition),group_partition=opt_bas%group_partition)
     opt_bas%opt_id = group_distribution(para_env%mepos)+1
 
-    CALL driver_optimization_para_low(opt_bas,input_declaration,para_env,opt_group,error)
+    CALL driver_optimization_para_low(opt_bas,input_declaration,para_env,opt_group)
 
     CALL mp_comm_free(opt_group)
     CALL timestop(handle)
@@ -147,16 +138,14 @@ CONTAINS
 !> \param input_declaration ...
 !> \param para_env_top ...
 !> \param mpi_comm_opt ...
-!> \param top_error ...
 !> \author Florian Schiffmann
 ! *****************************************************************************
 
-  SUBROUTINE driver_optimization_para_low(opt_bas,input_declaration,para_env_top,mpi_comm_opt,top_error)
+  SUBROUTINE driver_optimization_para_low(opt_bas,input_declaration,para_env_top,mpi_comm_opt)
     TYPE(basis_optimization_type)            :: opt_bas
     TYPE(section_type), POINTER              :: input_declaration
     TYPE(cp_para_env_type), POINTER          :: para_env_top
     INTEGER                                  :: mpi_comm_opt
-    TYPE(cp_error_type), INTENT(INOUT)       :: top_error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'driver_optimization_para_low', &
       routineP = moduleN//':'//routineN
@@ -164,9 +153,8 @@ CONTAINS
     INTEGER                                  :: handle, icalc, iopt, mp_id, &
                                                 stat
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: f_env_id
-    LOGICAL                                  :: failure, write_basis
+    LOGICAL                                  :: write_basis
     REAL(KIND=dp), ALLOCATABLE, DIMENSION(:) :: tot_time
-    TYPE(cp_error_type)                      :: error
     TYPE(cp_fm_p_type), ALLOCATABLE, &
       DIMENSION(:)                           :: matrix_S_inv
     TYPE(cp_para_env_type), POINTER          :: para_env
@@ -175,7 +163,6 @@ CONTAINS
     NULLIFY(f_env)
 
     CALL timeset(routineN,handle)
-    failure=.FALSE.
 
     ! ======  initialize the f_env and precompute some matrices ===== 
     mp_id=opt_bas%opt_id
@@ -184,29 +171,28 @@ CONTAINS
     ALLOCATE(tot_time(opt_bas%ncombinations*opt_bas%ntraining_sets))
     ALLOCATE(matrix_s_inv(SIZE(opt_bas%comp_group(mp_id)%member_list)))
 
-    CALL cp_error_init(error)
     CALL cp_para_env_create(para_env, group=mpi_comm_opt,&
-         owns_group=.FALSE.,error=error)
+         owns_group=.FALSE.)
 
 
-    CALL init_training_force_envs(opt_bas,f_env_id,input_declaration,matrix_s_inv,para_env,mpi_comm_opt,error)
+    CALL init_training_force_envs(opt_bas,f_env_id,input_declaration,matrix_s_inv,para_env,mpi_comm_opt)
  
-    CALL init_free_vars(opt_bas,error)
+    CALL init_free_vars(opt_bas)
     tot_time=0.0_dp
     
     ! ======= The real optimization loop  =======
     DO iopt=0,opt_bas%powell_param%maxfun
       CALL compute_residuum_vectors(opt_bas,f_env_id,matrix_S_inv,tot_time,&
-                                    para_env_top,para_env,iopt,error,top_error)
+                                    para_env_top,para_env,iopt)
       IF(para_env_top%ionode)&
       CALL powell_optimize (opt_bas%powell_param%nvar, opt_bas%x_opt , opt_bas%powell_param)
       IF(.NOT.para_env_top%ionode)opt_bas%x_opt=0.0_dp
       CALL mp_bcast(opt_bas%powell_param%state,para_env_top%source,para_env_top%group)
       CALL mp_sum(opt_bas%x_opt,para_env_top%group)
-      CALL update_free_vars(opt_bas,error)
+      CALL update_free_vars(opt_bas)
       write_basis=MOD(iopt,opt_bas%write_frequency)==0
       CALL update_derived_basis_sets(opt_bas,write_basis,opt_bas%output_basis_file,&
-                                       para_env_top,top_error)
+                                       para_env_top)
       IF(opt_bas%powell_param%state==-1)EXIT
     END DO
  
@@ -218,20 +204,19 @@ CONTAINS
  
     IF(.NOT.para_env_top%ionode)opt_bas%x_opt=0.0_dp
     CALL mp_sum(opt_bas%x_opt,para_env_top%group)
-    CALL update_free_vars(opt_bas,error)
+    CALL update_free_vars(opt_bas)
     CALL update_derived_basis_sets(opt_bas,.TRUE.,opt_bas%output_basis_file,&
-                                         para_env_top,top_error)
+                                         para_env_top)
  
      ! ======  get rid of the f_env again =====          
     
      DO icalc=SIZE(opt_bas%comp_group(mp_id)%member_list),1,-1
-        CALL f_env_get_from_id(f_env_id(icalc),f_env,error)
+        CALL f_env_get_from_id(f_env_id(icalc),f_env)
         CALL destroy_force_env(f_env_id(icalc), stat)
-        CALL cp_fm_release(matrix_s_inv(icalc)%matrix,error)
+        CALL cp_fm_release(matrix_s_inv(icalc)%matrix)
      END DO
      DEALLOCATE(f_env_id); DEALLOCATE(tot_time); DEALLOCATE(matrix_S_inv) 
-     CALL cp_para_env_release(para_env,error=error)
-     CALL cp_error_dealloc_ref(error)   
+     CALL cp_para_env_release(para_env)
      CALL timestop(handle)
  
   END SUBROUTINE driver_optimization_para_low
@@ -247,20 +232,16 @@ CONTAINS
 !> \param para_env_top ...
 !> \param para_env ...
 !> \param iopt ...
-!> \param error ...
-!> \param top_error ...
-!>\author Florian Schiffmann
 ! *****************************************************************************
 
   SUBROUTINE compute_residuum_vectors(opt_bas,f_env_id,matrix_S_inv,tot_time,&
-                                      para_env_top,para_env,iopt,error,top_error)
+                                      para_env_top,para_env,iopt)
     TYPE(basis_optimization_type)            :: opt_bas
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: f_env_id
     TYPE(cp_fm_p_type), DIMENSION(:)         :: matrix_S_inv
     REAL(KIND=dp), DIMENSION(:)              :: tot_time
     TYPE(cp_para_env_type), POINTER          :: para_env_top, para_env
     INTEGER                                  :: iopt
-    TYPE(cp_error_type)                      :: error, top_error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'compute_residuum_vectors', &
       routineP = moduleN//':'//routineN
@@ -293,25 +274,24 @@ CONTAINS
         start_time(icalc)=m_walltime()
  
         CALL get_set_and_basis_id(opt_bas%comp_group(mp_id)%member_list(icalc),opt_bas,set_id,bas_id)
-        CALL f_env_get_from_id(f_env_id(icalc),f_env,error)
+        CALL f_env_get_from_id(f_env_id(icalc),f_env)
         force_env => f_env%force_env
-        CALL force_env_get(force_env,qs_env=qs_env,error=error)
-        CALL get_qs_env(qs_env, ks_env=ks_env, error=error)
-        CALL update_basis_set(opt_bas,set_id,bas_id,qs_env,error)
-        CALL build_qs_neighbor_lists(qs_env,para_env,molecular=.FALSE.,force_env_section=qs_env%input,error=error)
-        CALL calculate_overlap(ks_env,"S_AB_AUX",error)
+        CALL force_env_get(force_env,qs_env=qs_env)
+        CALL get_qs_env(qs_env, ks_env=ks_env)
+        CALL update_basis_set(opt_bas,bas_id,qs_env)
+        CALL build_qs_neighbor_lists(qs_env,para_env,molecular=.FALSE.,force_env_section=qs_env%input)
+        CALL calculate_overlap(ks_env,"S_AB_AUX")
         CALL get_qs_env(qs_env,&
                         matrix_ks=matrix_ks,&
                         matrix_s_aux_fit_vs_orb=matrix_s_aux_fit_vs_orb,&
-                        matrix_s_aux_fit=matrix_s_aux_fit,&
-                        error=error)
+                        matrix_s_aux_fit=matrix_s_aux_fit)
         CALL admm_fit_mo_coeffs(qs_env%admm_env, matrix_s_aux_fit,&
                                 matrix_s_aux_fit_vs_orb, qs_env%mos, qs_env%mos_aux_fit,&
-                                geometry_did_change=.TRUE. , error=error)
+                                geometry_did_change=.TRUE.)
         CALL evaluate_fval(qs_env%mos,qs_env%mos_aux_fit,matrix_s_aux_fit_vs_orb(1)%matrix,&
-                           matrix_s_aux_fit(1)%matrix,qs_env%admm_env,f_vec(my_id),cond_vec(my_id),error)
+                           matrix_s_aux_fit(1)%matrix,qs_env%admm_env,f_vec(my_id),cond_vec(my_id))
         CALL evaluate_energy(qs_env%mos_aux_fit,matrix_ks,matrix_s_inv(icalc)%matrix,qs_env%admm_env%Q,&
-                             qs_env%admm_env%work_aux_aux,energy(my_id),error)
+                             qs_env%admm_env%work_aux_aux,energy(my_id))
  
         my_time(my_id)=m_walltime()-start_time(icalc)
         IF(.NOT.para_env%ionode)THEN
@@ -335,7 +315,7 @@ CONTAINS
      CALL mp_sync(para_env_top%group)
 
      ! output info if required 
-     CALL output_opt_info(f_vec,cond_vec,my_time,tot_time,opt_bas,iopt,para_env_top,top_error)
+     CALL output_opt_info(f_vec,cond_vec,my_time,tot_time,opt_bas,iopt,para_env_top)
      DEALLOCATE(f_vec); DEALLOCATE(my_time); DEALLOCATE(cond_vec); DEALLOCATE(energy)
 
      CALL timestop(handle)
@@ -350,11 +330,9 @@ CONTAINS
 !> \param matrix_s_inv ...
 !> \param para_env ...
 !> \param mpi_comm_opt ...
-!> \param error ...
-!>\author Florian Schiffmann
 ! *****************************************************************************
 
-  SUBROUTINE init_training_force_envs(opt_bas,f_env_id,input_declaration,matrix_s_inv,para_env,mpi_comm_opt,error)
+  SUBROUTINE init_training_force_envs(opt_bas,f_env_id,input_declaration,matrix_s_inv,para_env,mpi_comm_opt)
 
     TYPE(basis_optimization_type)            :: opt_bas
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: f_env_id
@@ -362,7 +340,6 @@ CONTAINS
     TYPE(cp_fm_p_type), DIMENSION(:)         :: matrix_S_inv
     TYPE(cp_para_env_type), POINTER          :: para_env
     INTEGER                                  :: mpi_comm_opt
-    TYPE(cp_error_type)                      :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'init_training_force_envs', &
       routineP = moduleN//':'//routineN
@@ -374,8 +351,6 @@ CONTAINS
     TYPE(cp_blacs_env_type), POINTER         :: blacs_env
     TYPE(cp_dbcsr_p_type), DIMENSION(:), &
       POINTER                                :: matrix_s
-    TYPE(cp_error_type), ALLOCATABLE, &
-      DIMENSION(:)                           :: suberror
     TYPE(f_env_type), POINTER                :: f_env
     TYPE(force_env_type), POINTER            :: force_env
     TYPE(qs_environment_type), POINTER       :: qs_env
@@ -383,11 +358,12 @@ CONTAINS
     TYPE(section_vals_type), POINTER         :: input_file
 
     CALL timeset(routineN,handle)
+
+    failure = .FALSE.
     NULLIFY(matrix_s, blacs_env, ks_env)
 
     mp_id=opt_bas%opt_id
     CALL m_getcwd(main_dir)
-    ALLOCATE(suberror(SIZE(opt_bas%comp_group(mp_id)%member_list)))
 
     ! ======= Create f_env for all calculations in MPI group =======
     DO icalc=1,SIZE(opt_bas%comp_group(mp_id)%member_list)
@@ -395,13 +371,13 @@ CONTAINS
        ! parse the input of the training sets
        CALL get_set_and_basis_id(opt_bas%comp_group(mp_id)%member_list(icalc),opt_bas,set_id,bas_id)
        CALL m_chdir(TRIM(opt_bas%training_dir(set_id)),ierr)
-       CPPostcondition(ierr==0,cp_failure_level,routineP,error,failure)
+       CPASSERT(ierr==0)
        input_file => read_input(input_declaration,&
                                 opt_bas%training_input(set_id),&
                                 initial_variables=empty_initial_variables, &
-                                para_env=para_env,error=error)
+                                para_env=para_env)
 
-       CALL modify_input_settings(opt_bas,bas_id,input_file,error)
+       CALL modify_input_settings(opt_bas,bas_id,input_file)
        CALL create_force_env(f_env_id(icalc), &
                              input_declaration=input_declaration,&
                              input_path=opt_bas%training_input(set_id),&
@@ -412,26 +388,25 @@ CONTAINS
 
        ! some weirdness with the default stacks defaults have to be addded to get the 
        ! correct default program name this causes trouble with the timer stack if kept
-       CALL f_env_add_defaults(f_env_id(icalc), f_env, suberror(icalc), failure)
+       CALL f_env_add_defaults(f_env_id(icalc), f_env, failure)
        force_env => f_env%force_env
-       CALL force_env_get(force_env,qs_env=qs_env,error=error)
-       CALL allocate_mo_sets(qs_env,error)
-       CALL f_env_rm_defaults(f_env, suberror(icalc),stat)
-       CALL get_qs_env(qs_env, ks_env=ks_env, error=error)
+       CALL force_env_get(force_env,qs_env=qs_env)
+       CALL allocate_mo_sets(qs_env)
+       CALL f_env_rm_defaults(f_env,stat)
+       CALL get_qs_env(qs_env, ks_env=ks_env)
        CALL build_qs_neighbor_lists(qs_env,para_env,molecular=.FALSE.,&
-                                    force_env_section=qs_env%input,error=error)
-       CALL calculate_overlap(ks_env,"S_AB",error)
-       CALL get_qs_env(qs_env, matrix_s=matrix_s, blacs_env=blacs_env, error=error)
+                                    force_env_section=qs_env%input)
+       CALL calculate_overlap(ks_env,"S_AB")
+       CALL get_qs_env(qs_env, matrix_s=matrix_s, blacs_env=blacs_env)
        CALL calculate_overlap_inverse(matrix_s(1)%matrix,matrix_s_inv(icalc)%matrix,&
-                                      para_env,blacs_env,error)
-       CALL calculate_ks_matrix(qs_env,suberror(icalc))
+                                      para_env,blacs_env)
+       CALL calculate_ks_matrix(qs_env)
 
-       CALL create_opt_admm_env(qs_env,error)
-       CALL section_vals_release(input_file,error=error)
+       CALL create_opt_admm_env(qs_env)
+       CALL section_vals_release(input_file)
        CALL m_chdir(TRIM(ADJUSTL(main_dir)),ierr)
     END DO
 
-    DEALLOCATE(suberror)
 
     CALL timestop(handle)
 
@@ -440,13 +415,11 @@ CONTAINS
 ! *****************************************************************************
 !> \brief variable update from the powell vector for all sets
 !> \param opt_bas ...
-!> \param error ...
 !> \author Florian Schiffmann
 ! *****************************************************************************
 
-  SUBROUTINE update_free_vars(opt_bas,error)
+  SUBROUTINE update_free_vars(opt_bas)
     TYPE(basis_optimization_type)            :: opt_bas
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'update_free_vars', &
       routineP = moduleN//':'//routineN
@@ -457,7 +430,7 @@ CONTAINS
     ix=0
     DO ikind=1,opt_bas%nkind
        DO iset=1,opt_bas%kind_basis(ikind)%flex_basis(0)%nsets
-          CALL update_subset_freevars(opt_bas%kind_basis(ikind)%flex_basis(0)%subset(iset),ix,opt_bas%x_opt,error)
+          CALL update_subset_freevars(opt_bas%kind_basis(ikind)%flex_basis(0)%subset(iset),ix,opt_bas%x_opt)
        END DO
     END DO
     CALL timestop(handle)
@@ -469,15 +442,13 @@ CONTAINS
 !> \param subset ...
 !> \param ix ...
 !> \param x ...
-!> \param error ...
 !> \author Florian Schiffmann
 ! *****************************************************************************
 
-  SUBROUTINE update_subset_freevars(subset,ix,x,error)
+  SUBROUTINE update_subset_freevars(subset,ix,x)
     TYPE(subset_type)                        :: subset
     INTEGER                                  :: ix
     REAL(KIND=dp), DIMENSION(:)              :: x
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'update_subset_freevars', &
       routineP = moduleN//':'//routineN
@@ -532,13 +503,11 @@ CONTAINS
 ! *****************************************************************************
 !> \brief variable initialization for the powell vector for all sets
 !> \param opt_bas ...
-!> \param error ...
 !> \author Florian Schiffmann
 ! *****************************************************************************
 
-  SUBROUTINE init_free_vars(opt_bas,error)
+  SUBROUTINE init_free_vars(opt_bas)
     TYPE(basis_optimization_type)            :: opt_bas
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'init_free_vars', &
       routineP = moduleN//':'//routineN
@@ -549,7 +518,7 @@ CONTAINS
     ix=0
     DO ikind=1,opt_bas%nkind
        DO iset=1,opt_bas%kind_basis(ikind)%flex_basis(0)%nsets
-          CALL init_subset_freevars(opt_bas%kind_basis(ikind)%flex_basis(0)%subset(iset),ix,opt_bas%x_opt,error)
+          CALL init_subset_freevars(opt_bas%kind_basis(ikind)%flex_basis(0)%subset(iset),ix,opt_bas%x_opt)
        END DO
     END DO
     CALL timestop(handle)
@@ -562,15 +531,13 @@ CONTAINS
 !> \param subset ...
 !> \param ix ...
 !> \param x ...
-!> \param error ...
 !> \author Florian Schiffmann
 ! *****************************************************************************
 
-    SUBROUTINE init_subset_freevars(subset,ix,x,error)
+    SUBROUTINE init_subset_freevars(subset,ix,x)
     TYPE(subset_type)                        :: subset
     INTEGER                                  :: ix
     REAL(KIND=dp), DIMENSION(:)              :: x
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'init_subset_freevars', &
       routineP = moduleN//':'//routineN
@@ -615,17 +582,15 @@ CONTAINS
 !> \param opt_bas ...
 !> \param iopt ...
 !> \param para_env_top ...
-!> \param error ...
 !> \author Florian Schiffmann
 ! *****************************************************************************
 
-   SUBROUTINE  output_opt_info(f_vec,cond_vec,my_time,tot_time,opt_bas,iopt,para_env_top,error)
+   SUBROUTINE  output_opt_info(f_vec,cond_vec,my_time,tot_time,opt_bas,iopt,para_env_top)
     REAL(KIND=dp), DIMENSION(:)              :: f_vec, cond_vec, my_time, &
                                                 tot_time
     TYPE(basis_optimization_type)            :: opt_bas
     INTEGER                                  :: iopt
     TYPE(cp_para_env_type), POINTER          :: para_env_top
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'output_opt_info', &
       routineP = moduleN//':'//routineN
@@ -635,7 +600,7 @@ CONTAINS
     TYPE(cp_logger_type), POINTER            :: logger
 
     CALL timeset(routineN,handle)
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
     
     tot_time=tot_time+my_time
 

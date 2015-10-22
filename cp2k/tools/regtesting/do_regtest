@@ -168,7 +168,6 @@ done
 ###################################################################################
 cp2k_version=${cp2k_version:-sopt}
 dir_triplet=${dir_triplet:-Linux-x86-64-gfortran}
-job_max_time=${job_max_time:-600}
 emptycheck=${emptycheck:-"NO"}
 leakcheck=${leakcheck:-"NO"}
 doretest=${doretest:-"no"}
@@ -190,6 +189,14 @@ svndate=${svndat:-"$datum_full"}
 maxtasksdefault=`nproc --all`
 maxtasks=${maxtasks:-${maxtasksdefault}}
 
+if [[ $dir_triplet == *valgrind* ]] ; then
+   valgrindstring="valgrind $VALGRIND_OPTIONS"
+   job_max_time=${job_max_time:-7200}
+else
+   valgrindstring=""
+   job_max_time=${job_max_time:-600}
+fi
+
 if [[ $cp2k_version == p* ]] ; then
     numprocs=${numprocs:-2}
 else
@@ -197,9 +204,9 @@ else
 fi
 
 if [[ $numprocs > 1 ]] ; then
-    cp2k_run_prefix=${cp2k_run_prefix:-"mpiexec -np ${numprocs}"}
+    cp2k_run_prefix=${cp2k_run_prefix:-"mpiexec -np ${numprocs} ${valgrindstring}"}
 else
-    cp2k_run_prefix=${cp2k_run_prefix:-""}
+    cp2k_run_prefix=${cp2k_run_prefix:-"${valgrindstring}"}
 fi
 
 if [[ $cp2k_version == *smp* ]] ; then
@@ -432,7 +439,7 @@ function run_regtest_dir() {
         echo "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" >>${error_description_file}
         echo ${output_file} >>${error_description_file}
         if (( cp2k_exit_status != 43 )); then
-          tail -40 ${output_file} >>${error_description_file}
+          tail -n 100 ${output_file} >>${error_description_file}
           # append an eventual valgrind report to the file
           grep "^==[0-9][0-9]*== " ${output_file} | head -n 20 >> ${error_description_file}
         fi
@@ -446,7 +453,7 @@ function run_regtest_dir() {
         if (( $? )); then
            echo "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" >>${error_description_file}
            echo ${output_file} >>${error_description_file}
-           tail -n 40 ${output_file} >>${error_description_file}
+           tail -n 100 ${output_file} >>${error_description_file}
            # append an eventual valgrind report to the file
            grep "^==[0-9][0-9]*== " ${output_file} | head -n 20 >> ${error_description_file}
            echo "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" >>${error_description_file}
@@ -456,8 +463,8 @@ function run_regtest_dir() {
         else
            # Still running, you must be joking...
            # see if we manage to pass the testing
-           # but only if we can compare
-           if [ -f ${output_last} ] || [ -n "${test_ref_value}" ]; then
+           # but only if we can compare (or don't need to)
+           if [ -f ${output_last} ] || [ -n "${test_ref_value}" ] || [ "${test_type}" == "0" ]; then
               do_test "${test_type}" "${test_tolerance}" "${test_ref_value}" "${output_file}" "${output_last}" "${error_description_file}"
               if (( $? )); then
                  this_test="WRONG RESULT TEST ${test_type}"
@@ -662,16 +669,20 @@ if [[ ${leakcheck} == "YES" ]]; then
    fi
 fi
 
-# Start testing
-echo "*************************** testing started ******************************"
-echo " started on " `date`
-echo " checking version ${svndate} "
-echo " configuration: ${dir_triplet}-${cp2k_version} "
+function file_info() {
 echo " regtesting location summary file: $summary"
 echo " regtesting location error_summary file: $error_description_file"
 echo " regtesting location memory_summary file: $memory_description_file"
 echo " regtesting location output dir: $dir_out"
 echo " regtesting location last dir: $dir_last"
+}
+
+# Start testing
+echo "*************************** testing started ******************************"
+echo " started on " `date`
+echo " checking version ${svndate} "
+echo " configuration: ${dir_triplet}-${cp2k_version} "
+file_info
 #
 # should include all flags, ideally
 #
@@ -681,6 +692,32 @@ echo "numprocs         = ${numprocs}"
 echo "OMP_NUM_THREADS  = ${OMP_NUM_THREADS}"
 echo "cp2k_run_prefix  = ${cp2k_run_prefix}"
 echo "cp2k_run_postfix = ${cp2k_run_postfix}"
+echo "cp2k_prefix      = ${cp2k_prefix}"
+echo "cp2k_postfix     = ${cp2k_postfix}"
+echo "cp2k_version     = ${cp2k_version}"
+echo "dir_triplet      = ${dir_triplet}"
+echo "job_max_time     = ${job_max_time}"
+echo "emptycheck       = ${emptycheck}"
+echo "leakcheck        = ${leakcheck}"
+echo "doretest         = ${doretest}"
+echo "nosvn            = ${nosvn}"
+echo "nobuild          = ${nobuild}"
+echo "quick            = ${quick}"
+echo "noreset          = ${noreset}"
+echo "skiptest         = ${skiptest}"
+echo "do_unit_test     = ${do_unit_test}"
+echo "farming          = ${farming}"
+echo "svndate          = ${svndate}"
+t=1
+while [ $t -le ${ndirstoskip} ]; do
+ echo "skip_dirs        = ${skip_dirs[t]}"
+ let t=t+1
+done
+t=1
+while [ $t -le ${ndirstorestrict} ]; do
+ echo "restrict_dirs    = ${restrict_dirs[t]}"
+ let t=t+1
+done
 echo "--------------------------- SVN ------------------------------------------"
 
 if [[ ${nosvn} != "nosvn" ]]; then
@@ -776,7 +813,7 @@ if [[ ${nobuild} != "nobuild" ]]; then
    ${make} toolversions ${ARCH_SPEC} VERSION=${cp2k_version}
    echo "---------------------------- Modules -------------------------------------"
    if [ "`type -t module`" = 'function' ]; then
-      module list
+      module list 2>&1
    else
       echo "Module system not installed."
    fi
@@ -842,6 +879,11 @@ if [[ ${skiptest} != "skiptest" ]]; then
    n_correct=0
    n_tests=0
    n_new=0
+
+   echo "------------------------- dynamic libraries linked -----------------------"
+   echo "ldd  ${dir_base}/${cp2k_dir}/exe/${dir_triplet}/cp2k.${cp2k_version} : "
+   ldd  ${dir_base}/${cp2k_dir}/exe/${dir_triplet}/cp2k.${cp2k_version}
+   echo "--------------------------------------------------------------------------"
    
    printf "Copying tests into working directory ... "
    
@@ -936,10 +978,17 @@ if [[ ${skiptest} != "skiptest" ]]; then
      features_required=`cat ${dir_out}/tests/TEST_DIRS | grep -v "#" | awk -v dir="$dir" '{if ($1==dir) for(i=2;i<=NF;i++) printf("%s ",$i)}'`
      for fr in $features_required
      do
-        echo $cp2kflags | grep $fr >& /dev/null 
+        # allow a specification on the mpiranks needed e.g. fr="mpiranks>2&&mpiranks<6"
+        echo $fr | grep mpiranks >& /dev/null
         if [[ "$?" == "1" ]]; then
+          echo $cp2kflags | grep $fr >& /dev/null 
+          res=$?
+        else
+          res=`echo "" | awk -v mpiranks=$numprocs "{print !($fr)}"`
+        fi
+        if [[ "$res" == "1" ]]; then
            featurematch="no"
-           echo "Skipping $dir : missing required feature in cp2kflags : $fr" 
+           echo "Skipping $dir : missing required feature : $fr" 
         fi
      done
    
@@ -1003,6 +1052,11 @@ EOF
    printf "&END FARMING\n" >> ${dir_out}/farming.inp
    echo "Running farming for $ijob jobs"
    ${cp2k_prefix} ${dir_base}/${cp2k_dir}/exe/${dir_triplet}/cp2k.${cp2k_version} farming.inp ${cp2k_postfix} >& farming.out
+   if [[ $? ]]; then # on failed farming, provide info
+      echo "==================== Farming terminated with an error, dumping output  ========================"
+      cat farming.out    
+      echo "==============================================================================================="
+   fi
    fi
 
    #
@@ -1061,6 +1115,8 @@ EOF
    
    echo "--------------------------------------------------------------------------"
    cat "${error_description_file}"
+   echo "--------------------------------------------------------------------------"
+   file_info 
    echo "--------------------------------- Summary --------------------------------"
    if [[ ${quick} != "quick" ]]; then
       printf "Number of COMPILE warns %d\n" ${compile_warnings} | tee -a ${summary}

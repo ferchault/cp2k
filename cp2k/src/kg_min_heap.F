@@ -118,41 +118,25 @@ CONTAINS
 !> \brief ...
 !> \param heap ...
 !> \param n ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE heap_new (heap, n, error)
+  SUBROUTINE heap_new (heap, n)
     TYPE(heap_t), INTENT(OUT)                :: heap
     INTEGER, INTENT(IN)                      :: n
-    LOGICAL, INTENT(OUT)                     :: error
 
-    INTEGER                                  :: stat
-
-!
-
-    heap%n = n 
-    ALLOCATE (heap%index(n), stat=stat)
-    ALLOCATE (heap%nodes(n), stat=stat)
-    error = (stat /= 0)
+    heap%n = n
+    ALLOCATE (heap%index(n))
+    ALLOCATE (heap%nodes(n))
   END SUBROUTINE heap_new
 
 ! *****************************************************************************
 !> \brief ...
 !> \param heap ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE heap_release (heap, error)
+  SUBROUTINE heap_release (heap)
     TYPE(heap_t), INTENT(INOUT)              :: heap
-    LOGICAL, INTENT(OUT)                     :: error
 
-    INTEGER                                  :: stat
-
-!
-
-    DEALLOCATE (heap%index, stat=stat)
-    DEALLOCATE (heap%nodes, stat=stat)
-    error = (stat /= 0)
-    NULLIFY (heap%index)
-    NULLIFY (heap%nodes)
+    DEALLOCATE (heap%index)
+    DEALLOCATE (heap%nodes)
     heap%n = 0
   END SUBROUTINE heap_release
 
@@ -501,41 +485,5 @@ CONTAINS
     ENDDO
     new_pos = e
   END SUBROUTINE bubble_up
-
-! *****************************************************************************
-!> \brief ...
-!> \param heap ...
-!> \param error ...
-! *****************************************************************************
-  SUBROUTINE heap_check (heap, error)
-    TYPE(heap_t), INTENT(in)                 :: heap
-    LOGICAL, INTENT(out)                     :: error
-
-    INTEGER                                  :: i, n
-    INTEGER(kind=valt)                       :: left_child_value, my_value, &
-                                                right_child_value
-
-!
-
-    error = .FALSE.
-    n = heap%n
-    DO i = 1, n
-       my_value = get_value (heap, i)
-       IF (get_left_child (i) .LE. n) THEN
-          left_child_value = get_value (heap, get_left_child(i))
-          IF (left_child_value .LT. my_value) THEN
-             error = .TRUE.
-             WRITE(*,*)"Error at",i
-          ENDIF
-       ENDIF
-       IF (get_right_child (i) .LE. n) THEN
-          right_child_value = get_value (heap, get_right_child(i))
-          IF (right_child_value .LT. my_value) THEN
-             error = .TRUE.
-             WRITE(*,*)"Error at",i
-          ENDIF
-       ENDIF
-    ENDDO
-  END SUBROUTINE heap_check
 
 END MODULE kg_min_heap

@@ -9,6 +9,7 @@ MODULE farming_types
   USE kinds,                           ONLY: default_path_length,&
                                              dp
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -43,6 +44,7 @@ MODULE farming_types
      INTEGER                                                     :: restart_n  ! where to start
      INTEGER                                                     :: max_steps  ! max number of steps,
                                                                                ! results in max_steps*Ngroup jobs being run
+     INTEGER                                                     :: stride     ! for creating slave groups.
      TYPE(job_type), DIMENSION(:), POINTER                       :: job        ! a list of jobs
      REAL(KIND=dp) :: wait_time
   END TYPE farming_env_type

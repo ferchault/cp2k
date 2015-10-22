@@ -15,6 +15,7 @@ MODULE molden_utils
   USE kinds,                           ONLY: dp
   USE particle_types,                  ONLY: particle_type
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -34,11 +35,11 @@ CONTAINS
 !> \param intensities ...
 !> \param calc_intens ...
 !> \param dump_only_positive ...
-!> \param error ...
+!> \param logger ...
 !> \author Florian Schiffmann 11.2007
 ! *****************************************************************************
   SUBROUTINE molden_out(input,particles,freq,eigen_vec,intensities,calc_intens,&
-             dump_only_positive,error)
+             dump_only_positive,logger)
 
     TYPE(section_vals_type), POINTER         :: input
     TYPE(particle_type), DIMENSION(:), &
@@ -48,25 +49,21 @@ CONTAINS
     REAL(KIND=dp), DIMENSION(:), POINTER     :: intensities
     LOGICAL                                  :: calc_intens, &
                                                 dump_only_positive
-    TYPE(cp_error_type), INTENT(inout)       :: error
+    TYPE(cp_logger_type), POINTER            :: logger
 
     CHARACTER(len=*), PARAMETER :: routineN = 'molden_out', &
       routineP = moduleN//':'//routineN
 
     CHARACTER(LEN=2)                         :: element_symbol
     INTEGER                                  :: i, iw, j, k, l
-    LOGICAL                                  :: failure
-    TYPE(cp_logger_type), POINTER            :: logger
 
-    NULLIFY(logger)
-    logger => cp_error_get_logger(error)
     iw=cp_print_key_unit_nr(logger,input,"VIBRATIONAL_ANALYSIS%PRINT%MOLDEN_VIB",&
-            extension=".mol",file_status='REPLACE',error=error)
+            extension=".mol",file_status='REPLACE')
 
     IF(iw.GT.0)THEN
-       CPPostcondition(MOD(SIZE(eigen_vec,1),3)==0,cp_failure_level,routineP,error,failure)
-       CPPostcondition(SIZE(particles)==SIZE(eigen_vec,1)/3,cp_failure_level,routineP,error,failure)
-       CPPostcondition(SIZE(freq,1)==SIZE(eigen_vec,2),cp_failure_level,routineP,error,failure)
+       CPASSERT(MOD(SIZE(eigen_vec,1),3)==0)
+       CPASSERT(SIZE(particles)==SIZE(eigen_vec,1)/3)
+       CPASSERT(SIZE(freq,1)==SIZE(eigen_vec,2))
        WRITE(iw,'(T2,A)')"[Molden Format]"
        WRITE(iw,'(T2,A)')"[FREQ]"
        DO i=1,SIZE(freq,1)
@@ -98,7 +95,7 @@ CONTAINS
           END DO
        END IF
     END IF
-    CALL cp_print_key_finished_output(iw,logger,input,"VIBRATIONAL_ANALYSIS%PRINT%MOLDEN_VIB",error=error)
+    CALL cp_print_key_finished_output(iw,logger,input,"VIBRATIONAL_ANALYSIS%PRINT%MOLDEN_VIB")
   END SUBROUTINE molden_out
 
 END MODULE molden_utils

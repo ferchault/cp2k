@@ -24,8 +24,7 @@ MODULE pw_env_types
   USE pw_pool_types,                   ONLY: pw_pool_p_type,&
                                              pw_pool_release,&
                                              pw_pool_type,&
-                                             pw_pools_dealloc,&
-                                             pw_pools_flush_cache
+                                             pw_pools_dealloc
   USE realspace_grid_types,            ONLY: realspace_grid_desc_p_type,&
                                              realspace_grid_desc_type,&
                                              realspace_grid_p_type,&
@@ -33,6 +32,7 @@ MODULE pw_env_types
                                              rs_grid_release,&
                                              rs_grid_release_descriptor
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -108,16 +108,13 @@ CONTAINS
 !> \param vdw_pw_pool ...
 !> \param poisson_env ...
 !> \param interp_section ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
-!>      For the other see the attributes of pw_env_type
 !> \par History
 !>      10.2002 created [fawzi]
 !> \author Fawzi Mohamed
 ! *****************************************************************************
 SUBROUTINE pw_env_get(pw_env, pw_pools, cube_info, gridlevel_info,&
      auxbas_pw_pool,auxbas_grid,auxbas_rs_desc,auxbas_rs_grid,rs_descs,rs_grids,lgrid,&
-     xc_pw_pool, vdw_pw_pool, poisson_env, interp_section, error)
+     xc_pw_pool, vdw_pw_pool, poisson_env, interp_section)
     TYPE(pw_env_type), POINTER               :: pw_env
     TYPE(pw_pool_p_type), DIMENSION(:), &
       OPTIONAL, POINTER                      :: pw_pools
@@ -140,170 +137,115 @@ SUBROUTINE pw_env_get(pw_env, pw_pools, cube_info, gridlevel_info,&
     TYPE(pw_poisson_type), OPTIONAL, POINTER :: poisson_env
     TYPE(section_vals_type), OPTIONAL, &
       POINTER                                :: interp_section
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'pw_env_get', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-  failure=.FALSE.
-
-  CPPrecondition(ASSOCIATED(pw_env),cp_failure_level,routineP,error,failure)
-  CPPrecondition(pw_env%ref_count>0,cp_failure_level,routineP,error,failure)
-  IF (.NOT. failure) THEN
-     IF (PRESENT(pw_pools)) pw_pools => pw_env%pw_pools
-     IF (PRESENT(rs_descs)) rs_descs => pw_env%rs_descs
-     IF (PRESENT(rs_grids)) rs_grids => pw_env%rs_grids
-     IF (PRESENT(lgrid)) lgrid => pw_env%lgrid
-     IF (PRESENT(cube_info)) cube_info => pw_env%cube_info
-     IF (PRESENT(gridlevel_info)) gridlevel_info => pw_env%gridlevel_info
-     IF (PRESENT(auxbas_pw_pool)) THEN
-        auxbas_pw_pool => pw_env%pw_pools(pw_env%auxbas_grid)%pool
-     END IF
-     IF (PRESENT(auxbas_rs_desc)) THEN
-        auxbas_rs_desc => pw_env%rs_descs(pw_env%auxbas_grid)%rs_desc
-     END IF
-     IF (PRESENT(auxbas_rs_grid)) THEN
-        auxbas_rs_grid => pw_env%rs_grids(pw_env%auxbas_grid)%rs_grid
-     END IF
-     IF (PRESENT(auxbas_grid)) auxbas_grid = pw_env%auxbas_grid
-     IF (PRESENT(xc_pw_pool)) xc_pw_pool => pw_env%xc_pw_pool
-     IF (PRESENT(vdw_pw_pool)) vdw_pw_pool => pw_env%vdw_pw_pool
-     IF (PRESENT(poisson_env)) poisson_env => pw_env%poisson_env
-     IF (PRESENT(interp_section)) interp_section => pw_env%interp_section
+  CPASSERT(ASSOCIATED(pw_env))
+  CPASSERT(pw_env%ref_count>0)
+  IF (PRESENT(pw_pools)) pw_pools => pw_env%pw_pools
+  IF (PRESENT(rs_descs)) rs_descs => pw_env%rs_descs
+  IF (PRESENT(rs_grids)) rs_grids => pw_env%rs_grids
+  IF (PRESENT(lgrid)) lgrid => pw_env%lgrid
+  IF (PRESENT(cube_info)) cube_info => pw_env%cube_info
+  IF (PRESENT(gridlevel_info)) gridlevel_info => pw_env%gridlevel_info
+  IF (PRESENT(auxbas_pw_pool)) THEN
+     auxbas_pw_pool => pw_env%pw_pools(pw_env%auxbas_grid)%pool
   END IF
+  IF (PRESENT(auxbas_rs_desc)) THEN
+     auxbas_rs_desc => pw_env%rs_descs(pw_env%auxbas_grid)%rs_desc
+  END IF
+  IF (PRESENT(auxbas_rs_grid)) THEN
+     auxbas_rs_grid => pw_env%rs_grids(pw_env%auxbas_grid)%rs_grid
+  END IF
+  IF (PRESENT(auxbas_grid)) auxbas_grid = pw_env%auxbas_grid
+  IF (PRESENT(xc_pw_pool)) xc_pw_pool => pw_env%xc_pw_pool
+  IF (PRESENT(vdw_pw_pool)) vdw_pw_pool => pw_env%vdw_pw_pool
+  IF (PRESENT(poisson_env)) poisson_env => pw_env%poisson_env
+  IF (PRESENT(interp_section)) interp_section => pw_env%interp_section
 END SUBROUTINE pw_env_get
 
 ! *****************************************************************************
 !> \brief retains the pw_env (see doc/ReferenceCounting.html)
 !> \param pw_env the pw_env to retain
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      10.2002 created [fawzi]
 !> \author Fawzi Mohamed
 ! *****************************************************************************
-SUBROUTINE pw_env_retain(pw_env,error)
+SUBROUTINE pw_env_retain(pw_env)
     TYPE(pw_env_type), POINTER               :: pw_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'pw_env_retain', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-  failure=.FALSE.
-
-  CPPrecondition(ASSOCIATED(pw_env),cp_failure_level,routineP,error,failure)
-  IF (.NOT. failure) THEN
-     CPPrecondition(pw_env%ref_count>0,cp_failure_level,routineP,error,failure)
-     pw_env%ref_count=pw_env%ref_count+1
-  END IF
+  CPASSERT(ASSOCIATED(pw_env))
+  CPASSERT(pw_env%ref_count>0)
+  pw_env%ref_count=pw_env%ref_count+1
 END SUBROUTINE pw_env_retain
 
 ! *****************************************************************************
 !> \brief releases the given pw_env (see doc/ReferenceCounting.html)
 !> \param pw_env the pw_env to release
 !> \param kg ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      10.2002 created [fawzi]
 !> \author Fawzi Mohamed
 ! *****************************************************************************
-SUBROUTINE pw_env_release(pw_env, kg, error)
+SUBROUTINE pw_env_release(pw_env, kg)
     TYPE(pw_env_type), POINTER               :: pw_env
     LOGICAL, OPTIONAL                        :: kg
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'pw_env_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, igrid_level, stat
-    LOGICAL                                  :: failure, my_kg
+    INTEGER                                  :: i, igrid_level
+    LOGICAL                                  :: my_kg
 
-  failure=.FALSE.
   my_kg = .FALSE.
   IF(PRESENT(kg)) my_kg = kg
   IF (ASSOCIATED(pw_env)) THEN
-     CPPrecondition(pw_env%ref_count>0,cp_failure_level,routineP,error,failure)
+     CPASSERT(pw_env%ref_count>0)
      pw_env%ref_count=pw_env%ref_count-1
      IF (pw_env%ref_count<1) THEN
-        CALL pw_poisson_release(pw_env%poisson_env, error=error)
-        CALL pw_pools_dealloc(pw_env%pw_pools,error=error)
+        CALL pw_poisson_release(pw_env%poisson_env)
+        CALL pw_pools_dealloc(pw_env%pw_pools)
         IF (ASSOCIATED(pw_env%gridlevel_info)) THEN
            IF(my_kg) THEN
-             DEALLOCATE (pw_env%gridlevel_info%cutoff,STAT=stat)
-             CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
-             CALL section_vals_release(pw_env%gridlevel_info%print_section,error=error)
-             DEALLOCATE (pw_env%gridlevel_info%count,STAT=stat)
-             CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+             DEALLOCATE (pw_env%gridlevel_info%cutoff)
+             CALL section_vals_release(pw_env%gridlevel_info%print_section)
+             DEALLOCATE (pw_env%gridlevel_info%count)
            ELSE
-             CALL destroy_gaussian_gridlevel(pw_env%gridlevel_info, error=error)
+             CALL destroy_gaussian_gridlevel(pw_env%gridlevel_info)
            END IF
-           DEALLOCATE(pw_env%gridlevel_info,stat=stat)
-           CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+           DEALLOCATE(pw_env%gridlevel_info)
         END IF
         IF (ASSOCIATED(pw_env%cube_info)) THEN
            DO igrid_level=1,SIZE(pw_env%cube_info)
               CALL destroy_cube_info(pw_env%cube_info(igrid_level))
            END DO
-           DEALLOCATE(pw_env%cube_info,stat=stat)
-           CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+           DEALLOCATE(pw_env%cube_info)
         END IF
-        CALL pw_pool_release(pw_env%xc_pw_pool,error=error)
-        CALL pw_pool_release(pw_env%vdw_pw_pool,error=error)
+        CALL pw_pool_release(pw_env%xc_pw_pool)
+        CALL pw_pool_release(pw_env%vdw_pw_pool)
         IF (ASSOCIATED(pw_env%rs_descs)) THEN
           DO i=1, SIZE(pw_env%rs_descs)
-            CALL rs_grid_release_descriptor(pw_env%rs_descs(i)%rs_desc, error=error)
+            CALL rs_grid_release_descriptor(pw_env%rs_descs(i)%rs_desc)
           END DO
-          DEALLOCATE(pw_env%rs_descs, stat=stat)
-          CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+          DEALLOCATE(pw_env%rs_descs)
         END IF
         IF (ASSOCIATED(pw_env%rs_grids)) THEN
           DO i=1, SIZE(pw_env%rs_grids)
-            CALL rs_grid_release(pw_env%rs_grids(i)%rs_grid, error=error)
+            CALL rs_grid_release(pw_env%rs_grids(i)%rs_grid)
           END DO
-          DEALLOCATE(pw_env%rs_grids, stat=stat)
-          CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+          DEALLOCATE(pw_env%rs_grids)
         END IF
         IF (ASSOCIATED(pw_env%lgrid)) THEN
-          CALL lgrid_release(pw_env%lgrid,error)
+          CALL lgrid_release(pw_env%lgrid)
         END IF
-        DEALLOCATE(pw_env, stat=stat)
-        CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+        DEALLOCATE(pw_env)
     END IF
   END IF
   NULLIFY(pw_env)
 END SUBROUTINE pw_env_release
-
-! *****************************************************************************
-!> \brief flushes the cached pws
-!> \param pw_env the pw_env to be flushed
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
-!> \par History
-!>      11.2002 created [fawzi]
-!> \author Fawzi Mohamed
-! *****************************************************************************
-SUBROUTINE pw_env_flush_cache(pw_env,error)
-    TYPE(pw_env_type), POINTER               :: pw_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
-
-    CHARACTER(len=*), PARAMETER :: routineN = 'pw_env_flush_cache', &
-      routineP = moduleN//':'//routineN
-
-    LOGICAL                                  :: failure
-
-  failure=.FALSE.
-
-  CPPrecondition(ASSOCIATED(pw_env),cp_failure_level,routineP,error,failure)
-  IF (.NOT. failure) THEN
-     IF (ASSOCIATED(pw_env%pw_pools)) THEN
-        CALL pw_pools_flush_cache(pw_env%pw_pools,error=error)
-     END IF
-  END IF
-END SUBROUTINE pw_env_flush_cache
 
 END MODULE pw_env_types

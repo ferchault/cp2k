@@ -23,8 +23,8 @@ MODULE semi_empirical_par_utils
                                              int_onec2el
   USE semi_empirical_types,            ONLY: get_se_param,&
                                              semi_empirical_type
-  USE termination,                     ONLY: stop_program
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -206,24 +206,21 @@ CONTAINS
 !>         number of atomic orbitals for that specific element
 !> \param sep ...
 !> \param extended_basis_set ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE valence_electrons(sep, extended_basis_set, error)
+  SUBROUTINE valence_electrons(sep, extended_basis_set)
     TYPE(semi_empirical_type), POINTER       :: sep
     LOGICAL, INTENT(IN)                      :: extended_basis_set
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'valence_electrons', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: natorb, z
-    LOGICAL                                  :: check, failure, use_p_orbitals
+    LOGICAL                                  :: check, use_p_orbitals
     REAL(KIND=dp)                            :: zeff
 
-    failure        = .FALSE.
     use_p_orbitals = .TRUE.
     z              = sep%z
-    CPPostcondition(z>=0, cp_failure_level, routineP, error, failure)
+    CPASSERT(z>=0)
     ! Special case for Hydrogen.. If requested allow p-orbitals on it..
     SELECT CASE (z)
     CASE (0,2)
@@ -237,11 +234,11 @@ CONTAINS
     natorb = 0
     IF (nqs(z)>0)                                        natorb = natorb+1
     IF((nqp(z)>0).OR.use_p_orbitals)                     natorb = natorb+3
-    IF (extended_basis_set.AND.element_has_d(sep,error)) natorb = natorb+5
-    IF (extended_basis_set.AND.element_has_f(sep,error)) natorb = natorb+7
+    IF (extended_basis_set.AND.element_has_d(sep)) natorb = natorb+5
+    IF (extended_basis_set.AND.element_has_f(sep)) natorb = natorb+7
     ! Check and assignemnt
     check = (natorb<=4).OR.(extended_basis_set)
-    CPPostcondition(check, cp_failure_level, routineP, error, failure)
+    CPASSERT(check)
     sep%natorb             = natorb
     sep%extended_basis_set = extended_basis_set
     ! Determine the Z eff
@@ -253,23 +250,18 @@ CONTAINS
 !> \brief  Gives back the number of basis function for each l
 !> \param sep ...
 !> \param l ...
-!> \param error ...
 !> \retval n ...
 ! *****************************************************************************
-  FUNCTION get_se_basis(sep,l,error) RESULT(n)
+  FUNCTION get_se_basis(sep,l) RESULT(n)
     TYPE(semi_empirical_type), POINTER       :: sep
     INTEGER, INTENT(IN)                      :: l
-    TYPE(cp_error_type), INTENT(inout)       :: error
     INTEGER                                  :: n
 
     CHARACTER(len=*), PARAMETER :: routineN = 'get_se_basis', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
     IF ( sep%z < 0 .OR. sep%z > nelem ) THEN
-       CALL stop_program(routineN,moduleN,__LINE__,"Invalid atomic number !")
+       CPABORT("Invalid atomic number !")
     ELSE
        IF     ( l==0 ) THEN
           n = nqs(sep%z)
@@ -285,10 +277,10 @@ CONTAINS
        ELSEIF ( l==3 ) THEN
           n = nqf(sep%z)
        ELSE
-          CALL stop_program(routineN,moduleN,__LINE__,"Invalid l quantum number !")
+          CPABORT("Invalid l quantum number !")
        END IF
        IF ( n < 0 ) THEN
-          CALL stop_program(routineN,moduleN,__LINE__,"Invalid n quantum number !")
+          CPABORT("Invalid n quantum number !")
        END IF
     END IF
   END FUNCTION get_se_basis
@@ -296,13 +288,11 @@ CONTAINS
 ! *****************************************************************************
 !> \brief  Converts parameter units to internal
 !> \param sep ...
-!> \param error ...
 !> \date   03.2008 [tlaino]
 !> \author Teodoro Laino [tlaino] - University of Zurich
 ! *****************************************************************************
-  SUBROUTINE convert_param_to_cp2k(sep,error)
+  SUBROUTINE convert_param_to_cp2k(sep)
     TYPE(semi_empirical_type), POINTER       :: sep
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'convert_param_to_cp2k', &
       routineP = moduleN//':'//routineN
@@ -341,25 +331,21 @@ CONTAINS
 !> \brief  Calculates missing parameters
 !> \param z ...
 !> \param sep ...
-!> \param error ...
 !> \date   03.2008 [tlaino]
 !> \author Teodoro Laino [tlaino] - University of Zurich
 ! *****************************************************************************
-  SUBROUTINE calpar(z,sep,error)
+  SUBROUTINE calpar(z,sep)
     INTEGER                                  :: z
     TYPE(semi_empirical_type), POINTER       :: sep
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'calpar', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: iod, iop, ios, j, jmax, k, l
-    LOGICAL                                  :: failure
     REAL(KIND=dp) :: ad, am, aq, d1, d2, d3, dd, df, eisol, gdd1, gp2, gp2c, &
       gpp, gppc, gqq, gsp, gspc, gss, gssc, hpp, hpp1, hpp2, hsp, hsp1, hsp2, &
       hspc, p, p4, q1, q2, q3, qf, qn, qq, udd, upp, uss, zp, zs
 
-    failure = .FALSE.
     IF (.NOT.sep%defined) RETURN
     uss = sep%uss
     upp = sep%upp
@@ -405,7 +391,7 @@ CONTAINS
 
     ! Principal quantum number
     qn = REAL(nqs(z),KIND=dp)
-    CPPostcondition(qn>0, cp_failure_level, routineP, error, failure)
+    CPASSERT(qn>0)
 
     ! Charge separation evaluation
     dd = (2.0_dp*qn + 1)*(4.0_dp*zs*zp)**(qn + 0.5_dp)/(zs+zp)**(2.0_dp*qn + 2)/SQRT(3.0_dp)
@@ -456,7 +442,7 @@ CONTAINS
     IF (ABS(sep%aq)    < EPSILON(0.0_dp)) sep%aq = aq
     ! Proceed with d-orbitals and fill the Kolpman-Ohno and Charge Separation
     ! arrays
-    CALL calpar_d(sep,error)
+    CALL calpar_d(sep)
   END SUBROUTINE calpar
 
 ! *****************************************************************************
@@ -464,28 +450,25 @@ CONTAINS
 !>         parameters for d-orbitals
 !>
 !> \param sep ...
-!> \param error ...
 !> \date   03.2008 [tlaino]
 !> \author Teodoro Laino [tlaino] - University of Zurich
 ! *****************************************************************************
-  SUBROUTINE calpar_d(sep,error)
+  SUBROUTINE calpar_d(sep)
     TYPE(semi_empirical_type), POINTER       :: sep
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'calpar_d', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
     REAL(KIND=dp), DIMENSION(6)              :: amn
 
-    failure = .FALSE.
-    ! Determine if this element owns d-orbitals (only if the parametrization
-    ! supports the d-orbitals)
-    IF (sep%extended_basis_set) sep%dorb = element_has_d(sep,error)
+! Determine if this element owns d-orbitals (only if the parametrization
+! supports the d-orbitals)
+
+    IF (sep%extended_basis_set) sep%dorb = element_has_d(sep)
     IF (sep%dorb) THEN
-       CALL amn_l(sep, amn, error)
-       CALL eval_1c_2el_spd(sep, error)
-       CALL eval_cs_ko(sep, amn, error)
+       CALL amn_l(sep, amn)
+       CALL eval_1c_2el_spd(sep)
+       CALL eval_cs_ko(sep, amn)
     END IF
     IF (.NOT.sep%dorb) THEN
        ! Use the old integral module
@@ -518,14 +501,12 @@ CONTAINS
 !> \brief  Determines if the elements has d-orbitals
 !>
 !> \param sep ...
-!> \param error ...
 !> \retval res ...
 !> \date   05.2008 [tlaino]
 !> \author Teodoro Laino [tlaino] - University of Zurich
 ! *****************************************************************************
-  FUNCTION element_has_d(sep, error) RESULT(res)
+  FUNCTION element_has_d(sep) RESULT(res)
     TYPE(semi_empirical_type), POINTER       :: sep
-    TYPE(cp_error_type), INTENT(inout)       :: error
     LOGICAL                                  :: res
 
     CHARACTER(len=*), PARAMETER :: routineN = 'element_has_d', &
@@ -538,14 +519,12 @@ CONTAINS
 !> \brief  Determines if the elements has f-orbitals
 !>
 !> \param sep ...
-!> \param error ...
 !> \retval res ...
 !> \date   05.2008 [tlaino]
 !> \author Teodoro Laino [tlaino] - University of Zurich
 ! *****************************************************************************
-  FUNCTION element_has_f(sep, error) RESULT(res)
+  FUNCTION element_has_f(sep) RESULT(res)
     TYPE(semi_empirical_type), POINTER       :: sep
-    TYPE(cp_error_type), INTENT(inout)       :: error
     LOGICAL                                  :: res
 
     CHARACTER(len=*), PARAMETER :: routineN = 'element_has_f', &
@@ -560,46 +539,42 @@ CONTAINS
 !>
 !> \param sep ...
 !> \param amn ...
-!> \param error ...
 !> \date   03.2008 [tlaino]
 !> \par    Notation Index: 1 (SS), 2 (SP), 3 (SD), 4 (PP), 5 (PD), 6 (DD)
 !>
 !> \author Teodoro Laino [tlaino] - University of Zurich
 ! *****************************************************************************
-  SUBROUTINE amn_l1 (sep, amn, error)
+  SUBROUTINE amn_l1 (sep, amn)
     TYPE(semi_empirical_type), POINTER       :: sep
     REAL(KIND=dp), DIMENSION(6), INTENT(OUT) :: amn
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'amn_l1', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: nd, nsp
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: z1, z2, z3
 
-    failure = .FALSE.
     z1 = sep%sto_exponents(0)
     z2 = sep%sto_exponents(1)
     z3 = sep%sto_exponents(2)
-    CALL cp_assert(z1>0.0_dp,cp_fatal_level,cp_assertion_failed,routineP,&
-         "Trying to use s-orbitals, but the STO exponents is set to 0. "//&
-         "Please check if your parameterization supports the usage of s orbitals! "//&
-CPSourceFileRef)
+    IF(z1<=0.0_dp)&
+       CALL cp_abort(__LOCATION__,&
+            "Trying to use s-orbitals, but the STO exponents is set to 0. "//&
+            "Please check if your parameterization supports the usage of s orbitals! ")
     amn = 0.0_dp
     nsp = nqs(sep%z)
     IF (sep%natorb>=4) THEN
-       CALL cp_assert(z2>0.0_dp,cp_fatal_level,cp_assertion_failed,routineP,&
-            "Trying to use p-orbitals, but the STO exponents is set to 0. "//&
-            "Please check if your parameterization supports the usage of p orbitals! "//&
-CPSourceFileRef)
+       IF(z2<=0.0_dp)&
+          CALL cp_abort(__LOCATION__,&
+               "Trying to use p-orbitals, but the STO exponents is set to 0. "//&
+               "Please check if your parameterization supports the usage of p orbitals! ")
        amn(2) = amn_l_low(z1, z2, nsp, nsp, 1)
        amn(3) = amn_l_low(z2, z2, nsp, nsp, 2)
        IF (sep%dorb) THEN
-          CALL cp_assert(z3>0.0_dp,cp_fatal_level,cp_assertion_failed,routineP,&
-               "Trying to use d-orbitals, but the STO exponents is set to 0. "//&
-               "Please check if your parameterization supports the usage of d orbitals! "//&
-CPSourceFileRef)
+          IF(z3<=0.0_dp)&
+             CALL cp_abort(__LOCATION__,&
+                  "Trying to use d-orbitals, but the STO exponents is set to 0. "//&
+                  "Please check if your parameterization supports the usage of d orbitals! ")
           nd     = nqd(sep%z)
           amn(4) = amn_l_low(z1, z3, nsp, nd, 2)
           amn(5) = amn_l_low(z2, z3, nsp, nd, 1)
@@ -614,40 +589,36 @@ CPSourceFileRef)
 !>
 !> \param sep ...
 !> \param amn ...
-!> \param error ...
 !> \date   09.2008 [tlaino]
 !> \par
 !>
 !> \author Teodoro Laino [tlaino] - University of Zurich
 ! *****************************************************************************
-  SUBROUTINE amn_l2 (sep, amn, error)
+  SUBROUTINE amn_l2 (sep, amn)
     TYPE(semi_empirical_type), POINTER       :: sep
     REAL(KIND=dp), DIMENSION(6, 0:2), &
       INTENT(OUT)                            :: amn
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'amn_l2', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: nd, nsp
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: z1, z2, z3
 
-    failure = .FALSE.
     z1 = sep%sto_exponents(0)
     z2 = sep%sto_exponents(1)
     z3 = sep%sto_exponents(2)
-    CPPostcondition(z1>0.0_dp, cp_failure_level, routineP, error, failure)
+    CPASSERT(z1>0.0_dp)
     amn = 0.0_dp
     nsp = nqs(sep%z)
     amn(1,0) = amn_l_low(z1, z1, nsp, nsp, 0)
     IF (sep%natorb>=4) THEN
-       CPPostcondition(z2>0.0_dp, cp_failure_level, routineP, error, failure)
+       CPASSERT(z2>0.0_dp)
        amn(2,1) = amn_l_low(z1, z2, nsp, nsp, 1)
        amn(3,0) = amn_l_low(z2, z2, nsp, nsp, 0)
        amn(3,2) = amn_l_low(z2, z2, nsp, nsp, 2)
        IF (sep%dorb) THEN
-          CPPostcondition(z3>0.0_dp, cp_failure_level, routineP, error, failure)
+          CPASSERT(z3>0.0_dp)
           nd     = nqd(sep%z)
           amn(4,2) = amn_l_low(z1, z3, nsp, nd, 2)
           amn(5,1) = amn_l_low(z2, z3, nsp, nd, 1)
@@ -684,7 +655,6 @@ CPSourceFileRef)
 !>         the two-center two-electron integrals with d-orbitals
 !> \param sep ...
 !> \param amn ...
-!> \param error ...
 !> \date   03.2008 [tlaino]
 !> \par    Notation
 !>         -) Charge separations [sep%cs(1:6)]  [see equations (12)-(16) of TCA]
@@ -694,53 +664,51 @@ CPSourceFileRef)
 !>            of the core-electron attractions and core-core repulsions
 !> \author Teodoro Laino [tlaino] - University of Zurich
 ! *****************************************************************************
-  SUBROUTINE eval_cs_ko (sep,amn,error)
+  SUBROUTINE eval_cs_ko (sep,amn)
     TYPE(semi_empirical_type), POINTER       :: sep
     REAL(KIND=dp), DIMENSION(6), INTENT(IN)  :: amn
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'eval_cs_ko', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: d, fg
 
-    failure = .FALSE.
-    ! SS term
+! SS term
+
     fg = sep%gss
-    sep%ko(1) = ko_ij (0, 1.0_dp, fg, error)
+    sep%ko(1) = ko_ij (0, 1.0_dp, fg)
     IF (sep%natorb>= 4) THEN
        ! Other terms for SP basis
        ! SP
        d  = amn(2)/SQRT(3.0_dp)
        fg = sep%hsp
        sep%cs(2) = d
-       sep%ko(2) = ko_ij(1, d, fg, error)
+       sep%ko(2) = ko_ij(1, d, fg)
        ! PP
        sep%ko(7) = sep%ko(1)
        d  = SQRT(amn(3)*2.0_dp/5.0_dp)
        fg = 0.5_dp*(sep%gpp-sep%gp2)
        sep%cs(3) = d
-       sep%ko(3) = ko_ij(2, d, fg, error)
+       sep%ko(3) = ko_ij(2, d, fg)
        ! Terms involving d-orbitals
        IF (sep%dorb) THEN
           ! SD
           d  = SQRT(amn(4)*2.0_dp/SQRT(15.0_dp))
           fg = sep%onec2el(19)
           sep%cs(4) = d
-          sep%ko(4) = ko_ij(2, d, fg, error)
+          sep%ko(4) = ko_ij(2, d, fg)
           ! PD
           d  = amn(5)/SQRT(5.0_dp)
           fg = sep%onec2el(23) - 1.8_dp * sep%onec2el(35)
           sep%cs(5) = d
-          sep%ko(5) = ko_ij(1, d, fg, error)
+          sep%ko(5) = ko_ij(1, d, fg)
           ! DD
           fg = 0.2_dp * (sep%onec2el(29)+2.0_dp*sep%onec2el(30)+2.0_dp*sep%onec2el(31))
-          sep%ko(8) = ko_ij (0, 1.0_dp, fg, error)
+          sep%ko(8) = ko_ij (0, 1.0_dp, fg)
           d  = SQRT(amn(6)*2.0_dp/7.0_dp)
           fg = sep%onec2el(44) - (20.0_dp/35.0_dp) * sep%onec2el(52)
           sep%cs(6) = d
-          sep%ko(6) = ko_ij(2, d, fg, error)
+          sep%ko(6) = ko_ij(2, d, fg)
        END IF
     END IF
   END SUBROUTINE eval_cs_ko
@@ -748,23 +716,19 @@ CPSourceFileRef)
 ! *****************************************************************************
 !> \brief  Computes the 1 center two-electrons integrals for a SPD basis
 !> \param sep ...
-!> \param error ...
 !> \date   03.2008 [tlaino]
 !> \author Teodoro Laino [tlaino] - University of Zurich
 ! *****************************************************************************
-  SUBROUTINE eval_1c_2el_spd(sep,error)
+  SUBROUTINE eval_1c_2el_spd(sep)
     TYPE(semi_empirical_type), POINTER       :: sep
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'eval_1c_2el_spd', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: r016, r036, r066, r125, r155, &
                                                 r234, r236, r244, r246, r266, &
                                                 r355, r466, s15, s3, s5
 
-    failure = .FALSE.
     IF (sep%dorb) THEN
        s3  = SQRT(3.0_dp)
        s5  = SQRT(5.0_dp)
@@ -772,7 +736,7 @@ CPSourceFileRef)
 
        ! We evaluate now the Slater-Condon parameters (Rlij)
        CALL sc_param(sep, r066, r266, r466, r016, r244, r036, r236, r155, r355, r125,&
-            r234, r246, error)
+            r234, r246)
 
        IF (ABS(sep%f0sd) > EPSILON(0.0_dp)) THEN
           r016 = sep%f0sd
@@ -780,7 +744,7 @@ CPSourceFileRef)
        IF (ABS(sep%g2sd) > EPSILON(0.0_dp)) THEN
           r244 = sep%g2sd
        END IF
-       CALL eisol_corr(sep, r016, r066, r244, r266, r466, error)
+       CALL eisol_corr(sep, r016, r066, r244, r266, r466)
        sep%onec2el(1)  =  r016
        sep%onec2el(2)  =  2.0_dp/(3.0_dp*s5)*r125
        sep%onec2el(3)  =  1.0_dp/s15*r125
@@ -860,43 +824,39 @@ CPSourceFileRef)
 !> \param r125 ...
 !> \param r234 ...
 !> \param r246 ...
-!> \param error ...
 !> \date   03.2008 [tlaino]
 !> \author Teodoro Laino [tlaino] - University of Zurich
 ! *****************************************************************************
   SUBROUTINE sc_param (sep, r066, r266, r466, r016, r244, r036, r236, r155, r355, &
-       r125, r234, r246, error)
+       r125, r234, r246)
     TYPE(semi_empirical_type), POINTER       :: sep
     REAL(KIND=dp), INTENT(out)               :: r066, r266, r466, r016, r244, &
                                                 r036, r236, r155, r355, r125, &
                                                 r234, r246
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'sc_param', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: nd, ns
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: ed, ep, es
 
-    failure = .FALSE.
     ns = nqs(sep%z)
     nd = nqd(sep%z)
     es = sep%zn(0)
     ep = sep%zn(1)
     ed = sep%zn(2)
-    r016 = sc_param_low (0, ns, es, ns, es, nd, ed, nd, ed, error)
-    r036 = sc_param_low (0, ns, ep, ns, ep, nd, ed, nd, ed, error)
-    r066 = sc_param_low (0, nd, ed, nd, ed, nd, ed, nd, ed, error)
-    r155 = sc_param_low (1, ns, ep, nd, ed, ns, ep, nd, ed, error)
-    r125 = sc_param_low (1, ns, es, ns, ep, ns, ep, nd, ed, error)
-    r244 = sc_param_low (2, ns, es, nd, ed, ns, es, nd, ed, error)
-    r236 = sc_param_low (2, ns, ep, ns, ep, nd, ed, nd, ed, error)
-    r266 = sc_param_low (2, nd, ed, nd, ed, nd, ed, nd, ed, error)
-    r234 = sc_param_low (2, ns, ep, ns, ep, ns, es, nd, ed, error)
-    r246 = sc_param_low (2, ns, es, nd, ed, nd, ed, nd, ed, error)
-    r355 = sc_param_low (3, ns, ep, nd, ed, ns, ep, nd, ed, error)
-    r466 = sc_param_low (4, nd, ed, nd, ed, nd, ed, nd, ed, error)
+    r016 = sc_param_low (0, ns, es, ns, es, nd, ed, nd, ed)
+    r036 = sc_param_low (0, ns, ep, ns, ep, nd, ed, nd, ed)
+    r066 = sc_param_low (0, nd, ed, nd, ed, nd, ed, nd, ed)
+    r155 = sc_param_low (1, ns, ep, nd, ed, ns, ep, nd, ed)
+    r125 = sc_param_low (1, ns, es, ns, ep, ns, ep, nd, ed)
+    r244 = sc_param_low (2, ns, es, nd, ed, ns, es, nd, ed)
+    r236 = sc_param_low (2, ns, ep, ns, ep, nd, ed, nd, ed)
+    r266 = sc_param_low (2, nd, ed, nd, ed, nd, ed, nd, ed)
+    r234 = sc_param_low (2, ns, ep, ns, ep, ns, es, nd, ed)
+    r246 = sc_param_low (2, ns, es, nd, ed, nd, ed, nd, ed)
+    r355 = sc_param_low (3, ns, ep, nd, ed, ns, ep, nd, ed)
+    r466 = sc_param_low (4, nd, ed, nd, ed, nd, ed, nd, ed)
   END SUBROUTINE sc_param
 
 ! *****************************************************************************
@@ -910,7 +870,6 @@ CPSourceFileRef)
 !> \param ec ...
 !> \param nd ...
 !> \param ed ...
-!> \param error ...
 !> \retval res ...
 !> \date   03.2008 [tlaino]
 !> \par    Notation
@@ -921,7 +880,7 @@ CPSourceFileRef)
 !>         -) ec,ed:  Exponents of AO,corresponding to electron 2
 !> \author Teodoro Laino [tlaino] - University of Zurich
 ! *****************************************************************************
-  FUNCTION sc_param_low (k, na, ea, nb, eb, nc, ec, nd, ed, error) RESULT(res)
+  FUNCTION sc_param_low (k, na, ea, nb, eb, nc, ec, nd, ed) RESULT(res)
     INTEGER, INTENT(in)                      :: k, na
     REAL(KIND=dp), INTENT(in)                :: ea
     INTEGER, INTENT(in)                      :: nb
@@ -930,23 +889,20 @@ CPSourceFileRef)
     REAL(KIND=dp), INTENT(in)                :: ec
     INTEGER, INTENT(in)                      :: nd
     REAL(KIND=dp), INTENT(in)                :: ed
-    TYPE(cp_error_type), INTENT(inout)       :: error
     REAL(KIND=dp)                            :: res
 
     CHARACTER(len=*), PARAMETER :: routineN = 'sc_param_low', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: i, m, m1, m2, n, nab, ncd
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: a2, aab, acd, ae, aea, aeb, &
                                                 aec, aed, c, e, eab, ecd, ff, &
                                                 s0, s1, s2, s3, tmp
 
-    failure = .FALSE.
-    CPPostcondition(ea>0.0_dp, cp_failure_level, routineP, error, failure)
-    CPPostcondition(eb>0.0_dp, cp_failure_level, routineP, error, failure)
-    CPPostcondition(ec>0.0_dp, cp_failure_level, routineP, error, failure)
-    CPPostcondition(ed>0.0_dp, cp_failure_level, routineP, error, failure)
+    CPASSERT(ea>0.0_dp)
+    CPASSERT(eb>0.0_dp)
+    CPASSERT(ec>0.0_dp)
+    CPASSERT(ed>0.0_dp)
     aea = LOG(ea)
     aeb = LOG(eb)
     aec = LOG(ec)
@@ -991,7 +947,6 @@ CPSourceFileRef)
 !> \param r244 ...
 !> \param r266 ...
 !> \param r466 ...
-!> \param error ...
 !> \date   03.2008 [tlaino]
 !> \par    Notation
 !>         r016:  <SS|DD>
@@ -1002,17 +957,13 @@ CPSourceFileRef)
 !>
 !> \author Teodoro Laino [tlaino] - University of Zurich
 ! *****************************************************************************
-  SUBROUTINE eisol_corr (sep, r016, r066, r244, r266, r466, error)
+  SUBROUTINE eisol_corr (sep, r016, r066, r244, r266, r466)
     TYPE(semi_empirical_type), POINTER       :: sep
     REAL(KIND=dp), INTENT(in)                :: r016, r066, r244, r266, r466
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'eisol_corr', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
     sep%eisol = sep%eisol + ir016(sep%z) * r016          +&
                             ir066(sep%z) * r066          -&
                             ir244(sep%z) * r244/5.0_dp   -&
@@ -1027,15 +978,13 @@ CPSourceFileRef)
 !> \param l ...
 !> \param d ...
 !> \param fg ...
-!> \param error ...
 !> \retval res ...
 !> \date   03.2008 [tlaino]
 !> \author Teodoro Laino [tlaino] - University of Zurich
 ! *****************************************************************************
-  FUNCTION ko_ij(l, d, fg, error) RESULT(res)
+  FUNCTION ko_ij(l, d, fg) RESULT(res)
     INTEGER, INTENT(in)                      :: l
     REAL(KIND=dp), INTENT(in)                :: d, fg
-    TYPE(cp_error_type), INTENT(inout)       :: error
     REAL(KIND=dp)                            :: res
 
     CHARACTER(len=*), PARAMETER :: routineN = 'ko_ij', &
@@ -1045,12 +994,10 @@ CPSourceFileRef)
                                                 g1 = 0.382_dp, g2 = 0.618_dp
 
     INTEGER                                  :: i
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: a1, a2, delta, dsq, ev4, ev8, &
                                                 f1, f2, y1, y2
 
-    failure = .FALSE.
-    CPPostcondition(fg/=0.0_dp, cp_failure_level, routineP, error, failure)
+    CPASSERT(fg/=0.0_dp)
     ! Term for SS
     IF (l == 0) THEN
        res = 0.5_dp * evolt/fg
@@ -1092,31 +1039,26 @@ CPSourceFileRef)
 !> \brief  Fills the 1 center 2 electron integrals for the construction of the
 !>         one-electron fock matrix
 !> \param sep ...
-!> \param error ...
 !> \date   04.2008 [tlaino]
 !> \author Teodoro Laino [tlaino] - University of Zurich
 ! *****************************************************************************
-  SUBROUTINE setup_1c_2el_int(sep, error)
+  SUBROUTINE setup_1c_2el_int(sep)
     TYPE(semi_empirical_type), POINTER       :: sep
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'setup_1c_2el_int', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: i, ij, ij0, ind, ip, ipx, &
-                                                ipy, ipz, isize, kl, natorb, &
-                                                stat
-    LOGICAL                                  :: defined, failure
+                                                ipy, ipz, isize, kl, natorb
+    LOGICAL                                  :: defined
     REAL(KIND=dp)                            :: gp2, gpp, gsp, gss, hsp
 
-    failure = .FALSE.
     CALL get_se_param(sep, defined=defined, natorb=natorb,&
                       gss=gss, gsp=gsp, gpp=gpp, gp2=gp2, hsp=hsp)
-    CPPostcondition(defined, cp_failure_level, routineP, error, failure)
+    CPASSERT(defined)
 
     isize     = natorb*(natorb+1)/2
-    ALLOCATE(sep%w(isize,isize),stat=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    ALLOCATE(sep%w(isize,isize))
     ! Initialize array
     sep%w = 0.0_dp
     ! Fill the array

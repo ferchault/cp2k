@@ -31,11 +31,11 @@ MODULE util
   END INTERFACE
 
   INTERFACE sort_unique
-     MODULE PROCEDURE sort_unique1, sort_unique2
+     MODULE PROCEDURE sort_unique1
   END INTERFACE
 
   INTERFACE find_boundary
-     MODULE PROCEDURE find_boundary1, find_boundary2, find_boundary3
+     MODULE PROCEDURE find_boundary1, find_boundary2
   END INTERFACE
 
 CONTAINS
@@ -113,37 +113,6 @@ CONTAINS
   END SUBROUTINE sort_unique1
 
 ! *****************************************************************************
-!> \brief Sorts and returns a logical that checks if all elements are unique
-!> \param arr ...
-!> \param unique ...
-!> \par History
-!>      Teodoro Laino - Zurich University [tlaino] 04.2007
-! *****************************************************************************
-  SUBROUTINE sort_unique2( arr, unique)
-    REAL(KIND=dp), DIMENSION(:), &
-      INTENT(INOUT)                          :: arr
-    LOGICAL, INTENT(OUT)                     :: unique
-
-    CHARACTER(LEN=*), PARAMETER :: routineN = 'sort_unique2', &
-      routineP = moduleN//':'//routineN
-
-    INTEGER                                  :: i, n
-    INTEGER, ALLOCATABLE, DIMENSION(:)       :: wrk
-
-    n = SIZE(arr)
-    unique = .TRUE.
-    ALLOCATE(wrk(n))
-    CALL sort( arr, n, wrk)
-    DO i = 2, n
-       IF (arr(i)==arr(i-1)) THEN
-          unique = .FALSE.
-          EXIT
-       END IF
-    END DO
-    DEALLOCATE(wrk)
-  END SUBROUTINE sort_unique2
-
-! *****************************************************************************
 !> \brief Sorts an array of strings
 !> \param arr ...
 !> \param n ...
@@ -160,9 +129,7 @@ CONTAINS
 
     INTEGER                                  :: i, j, max_length
     INTEGER, ALLOCATABLE, DIMENSION(:, :)    :: entries
-    LOGICAL                                  :: failure
 
-    failure    = .FALSE.
     max_length = 0
     DO i = 1, n
       max_length = MAX(max_length,LEN_TRIM(arr(i)))
@@ -206,9 +173,7 @@ CONTAINS
                                                 kstart
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: bck_index, tmp_index, work, &
                                                 work2
-    LOGICAL                                  :: failure
 
-    failure = .FALSE.
 #include "sort_m.f90"
   END SUBROUTINE sort_im
 
@@ -234,9 +199,7 @@ CONTAINS
       ALLOCATABLE, DIMENSION(:)              :: work, work2
     INTEGER                                  :: i, ind, isize, k, kend, kstart
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: bck_index, tmp_index
-    LOGICAL                                  :: failure
 
-    failure = .FALSE.
 #include "sort_m.f90"
   END SUBROUTINE sort_cm
 
@@ -355,57 +318,5 @@ CONTAINS
     END DO
 
   END SUBROUTINE find_boundary2
-
-! *****************************************************************************
-!> \brief finds boundary where element search1 starts and ends in array1 checking
-!>      at the same time search2 in array2 and search3 in array3
-!>      array1:      XXXXXAAAAAAAAAXXDGFSFGWDDDDDDDAAAWE
-!>      array2:      XXXXASDEYYYYASDEFAAAARGASGASRGAWRRR
-!>      array3:      ADFAWRESCXXSQWQWFQGEQGEQRQEHQEHQEHEQ
-!>                            ||
-!>                       start  end  (searching for A and Y and X)
-!> \param num_array1 ...
-!> \param num_array2 ...
-!> \param num_array3 ...
-!> \param ntot ...
-!> \param first ...
-!> \param last ...
-!> \param search1 ...
-!> \param search2 ...
-!> \param search3 ...
-! *****************************************************************************
-  SUBROUTINE find_boundary3(num_array1,num_array2,num_array3,ntot,first,last,&
-       search1,search2,search3)
-    INTEGER, POINTER                         :: num_array1(:), num_array2(:), &
-                                                num_array3(:)
-    INTEGER                                  :: ntot, first, last, search1, &
-                                                search2, search3
-
-    CHARACTER(LEN=*), PARAMETER :: routineN = 'find_boundary3', &
-      routineP = moduleN//':'//routineN
-
-    INTEGER                                  :: i, tfirst, tlast
-    LOGICAL                                  :: found
-
-    found=.FALSE.
-    first=0
-    last=ntot
-    CALL find_boundary2(num_array1,num_array2,ntot,tfirst,tlast,search1,search2)
-    last=tlast
-    DO i=tfirst,tlast
-       IF(num_array3(i)==search3) THEN
-          IF(.NOT.found) THEN
-             first = i
-          END IF
-          found=.TRUE.
-       ELSE
-          IF(found) THEN
-             last = i-1
-             EXIT
-          END IF
-          found=.FALSE.
-       END IF
-    END DO
-  END SUBROUTINE find_boundary3
 
 END MODULE util

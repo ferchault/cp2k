@@ -37,11 +37,10 @@ MODULE qs_dftb_dispersion
                                              neighbor_list_iterator_p_type,&
                                              neighbor_list_iterator_release,&
                                              neighbor_list_set_p_type
-  USE timings,                         ONLY: timeset,&
-                                             timestop
   USE virial_methods,                  ONLY: virial_pair_force
   USE virial_types,                    ONLY: virial_type
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -58,28 +57,24 @@ CONTAINS
 !> \param qs_env ...
 !> \param para_env ...
 !> \param calculate_forces ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE calculate_dftb_dispersion(qs_env,para_env,calculate_forces,error)
+  SUBROUTINE calculate_dftb_dispersion(qs_env,para_env,calculate_forces)
 
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(cp_para_env_type), POINTER          :: para_env
     LOGICAL, INTENT(IN)                      :: calculate_forces
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'calculate_dftb_dispersion', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
     TYPE(dft_control_type), POINTER          :: dft_control
     TYPE(dftb_control_type), POINTER         :: dftb_control
     TYPE(qs_dispersion_type), POINTER        :: dispersion_env
     TYPE(qs_energy_type), POINTER            :: energy
 
-    failure = .FALSE.
     CALL get_qs_env(qs_env=qs_env,&
                     energy=energy,&
-                    dft_control=dft_control,error=error)
+                    dft_control=dft_control)
 
     energy%dispersion = 0._dp
 
@@ -87,13 +82,13 @@ CONTAINS
     IF ( dftb_control%dispersion ) THEN
        SELECT CASE (dftb_control%dispersion_type)
           CASE (dispersion_uff)
-             CALL calculate_dispersion_uff(qs_env,para_env,calculate_forces,error)
+             CALL calculate_dispersion_uff(qs_env,para_env,calculate_forces)
           CASE (dispersion_d3)
-             CALL get_qs_env(qs_env=qs_env,dispersion_env=dispersion_env,error=error)
+             CALL get_qs_env(qs_env=qs_env,dispersion_env=dispersion_env)
              CALL calculate_dispersion_pairpot(qs_env,dispersion_env,&
-                  energy%dispersion,calculate_forces,error)
+                  energy%dispersion,calculate_forces)
           CASE DEFAULT
-             CPPostcondition(.FALSE.,cp_failure_level,routineP,error,failure)
+             CPABORT("")
        END SELECT
     END IF
 
@@ -104,23 +99,21 @@ CONTAINS
 !> \param qs_env ...
 !> \param para_env ...
 !> \param calculate_forces ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE calculate_dispersion_uff(qs_env,para_env,calculate_forces,error)
+  SUBROUTINE calculate_dispersion_uff(qs_env,para_env,calculate_forces)
 
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(cp_para_env_type), POINTER          :: para_env
     LOGICAL, INTENT(IN)                      :: calculate_forces
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'calculate_dispersion_uff', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: atom_a, atom_b, handle, &
-                                                iatom, ikind, istat, jatom, &
-                                                jkind, natom, nkind
+                                                iatom, ikind, jatom, jkind, &
+                                                natom, nkind
     INTEGER, DIMENSION(:), POINTER           :: atom_of_kind
-    LOGICAL                                  :: failure, use_virial
+    LOGICAL                                  :: use_virial
     LOGICAL, ALLOCATABLE, DIMENSION(:)       :: define_kind
     REAL(dp), ALLOCATABLE, DIMENSION(:)      :: rc_kind
     REAL(KIND=dp)                            :: a, b, c, devdw, dij, dr, eij, &
@@ -157,7 +150,7 @@ CONTAINS
                     atomic_kind_set=atomic_kind_set,&
                     qs_kind_set=qs_kind_set,&
                     virial=virial,atprop=atprop,&
-                    dft_control=dft_control,error=error)
+                    dft_control=dft_control)
 
     energy%dispersion = 0._dp
 
@@ -166,23 +159,21 @@ CONTAINS
     IF ( dftb_control%dispersion ) THEN
 
        NULLIFY (dftb_potential)
-       CALL get_qs_env(qs_env=qs_env,dftb_potential=dftb_potential,error=error)
+       CALL get_qs_env(qs_env=qs_env,dftb_potential=dftb_potential)
        IF(calculate_forces) THEN
           NULLIFY (force,particle_set)
           CALL get_qs_env(qs_env=qs_env,&
                           particle_set=particle_set,&
-                          force=force,error=error)
+                          force=force)
           natom = SIZE (particle_set)
-          ALLOCATE (atom_of_kind(natom),STAT=istat)
-          CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+          ALLOCATE (atom_of_kind(natom))
           CALL get_atomic_kind_set(atomic_kind_set=atomic_kind_set,atom_of_kind=atom_of_kind)
           use_virial = virial%pv_availability.AND.(.NOT.virial%pv_numer)
        ELSE
           use_virial = .FALSE.
        END IF
        nkind = SIZE(atomic_kind_set)
-       ALLOCATE (define_kind(nkind),rc_kind(nkind),STAT=istat)
-       CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+       ALLOCATE (define_kind(nkind),rc_kind(nkind))
        DO ikind=1,nkind
           CALL get_qs_kind(qs_kind_set(ikind),dftb_parameter=dftb_kind_a)
           CALL get_dftb_atom_param(dftb_kind_a,defined=define_kind(ikind),rcdisp=rc_kind(ikind))
@@ -191,12 +182,12 @@ CONTAINS
        evdw = 0._dp
 
        IF (atprop%energy) THEN
-          CALL get_qs_env(qs_env=qs_env,particle_set=particle_set,error=error)
+          CALL get_qs_env(qs_env=qs_env,particle_set=particle_set)
           natom = SIZE (particle_set)
-          CALL atprop_array_init(atprop%atevdw,natom,error)
+          CALL atprop_array_init(atprop%atevdw,natom)
        END IF
 
-       CALL get_qs_env(qs_env=qs_env,sab_vdw=sab_vdw,error=error)
+       CALL get_qs_env(qs_env=qs_env,sab_vdw=sab_vdw)
        CALL neighbor_list_iterator_create(nl_iterator,sab_vdw)
        DO WHILE (neighbor_list_iterate(nl_iterator)==0)
           CALL get_iterator_info(nl_iterator,ikind=ikind,jkind=jkind,iatom=iatom,jatom=jatom,r=rij)
@@ -256,10 +247,10 @@ CONTAINS
                 atprop%atevdw(jatom) = atprop%atevdw(jatom) + 0.5_dp*eij
              END IF
              IF(calculate_forces .AND. (dr > 0.001_dp) .AND. use_virial) THEN
-                CALL virial_pair_force ( virial%pv_virial, -1._dp, fdij, rij, error)
+                CALL virial_pair_force ( virial%pv_virial, -1._dp, fdij, rij)
                 IF (atprop%stress) THEN
-                  CALL virial_pair_force(atprop%atstress(:,:,iatom),-0.5_dp,fdij,rij,error)
-                  CALL virial_pair_force(atprop%atstress(:,:,jatom),-0.5_dp,fdij,rij,error)
+                  CALL virial_pair_force(atprop%atstress(:,:,iatom),-0.5_dp,fdij,rij)
+                  CALL virial_pair_force(atprop%atstress(:,:,jatom),-0.5_dp,fdij,rij)
                 END IF
              END IF
           END IF
@@ -267,8 +258,7 @@ CONTAINS
        CALL neighbor_list_iterator_release(nl_iterator)
 
        IF(calculate_forces) THEN
-          DEALLOCATE (atom_of_kind,STAT=istat)
-          CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+          DEALLOCATE (atom_of_kind)
        END IF
 
        ! set dispersion energy

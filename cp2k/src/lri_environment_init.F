@@ -34,6 +34,7 @@ MODULE lri_environment_init
                                              clebsch_gordon_deallocate,&
                                              clebsch_gordon_init
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -55,79 +56,73 @@ CONTAINS
 !> \param qs_env ...
 !> \param force_env_section ...
 !> \param qs_kind_set ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 ! *****************************************************************************
-  SUBROUTINE lri_env_init(qs_env,force_env_section,qs_kind_set,error)
+  SUBROUTINE lri_env_init(qs_env,force_env_section,qs_kind_set)
 
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(section_vals_type), POINTER         :: force_env_section
     TYPE(qs_kind_type), DIMENSION(:), &
       POINTER                                :: qs_kind_set
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'lri_env_init', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: ikind, istat, lmax_ikind_orb, &
+    INTEGER                                  :: ikind, lmax_ikind_orb, &
                                                 lmax_ikind_ri, maxl_orb, &
                                                 maxl_ri, nkind
-    LOGICAL                                  :: failure
     TYPE(atomic_kind_type), DIMENSION(:), &
       POINTER                                :: atomic_kind_set
     TYPE(gto_basis_set_type), POINTER        :: lri_basis_set, orb_basis_set
     TYPE(lri_environment_type), POINTER      :: lri_env
 
     NULLIFY(atomic_kind_set,lri_basis_set,lri_env,orb_basis_set)
-    CALL lri_env_create(lri_env,error)
+    CALL lri_env_create(lri_env)
 
     ! initialize the basic basis sets (orb and ri)
-    CALL get_qs_env(qs_env=qs_env,atomic_kind_set=atomic_kind_set,error=error)
+    CALL get_qs_env(qs_env=qs_env,atomic_kind_set=atomic_kind_set)
     nkind = SIZE(atomic_kind_set)
-    ALLOCATE(lri_env%orb_basis(nkind),lri_env%ri_basis(nkind),STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(lri_env%orb_basis(nkind),lri_env%ri_basis(nkind))
     maxl_orb = 0
     maxl_ri = 0
     DO ikind=1,nkind
        NULLIFY(orb_basis_set,lri_basis_set)
-       CALL get_qs_kind(qs_kind_set(ikind),&
-                        orb_basis_set=orb_basis_set,&
-                        lri_basis_set=lri_basis_set)
+       CALL get_qs_kind(qs_kind_set(ikind),basis_set=orb_basis_set,basis_type="ORB")
+       CALL get_qs_kind(qs_kind_set(ikind),basis_set=lri_basis_set,basis_type="LRI")
        NULLIFY(lri_env%orb_basis(ikind)%gto_basis_set)
        NULLIFY(lri_env%ri_basis(ikind)%gto_basis_set)
        IF (ASSOCIATED(orb_basis_set)) THEN
-          CALL copy_gto_basis_set(orb_basis_set,lri_env%orb_basis(ikind)%gto_basis_set,error)
-          CALL copy_gto_basis_set(lri_basis_set,lri_env%ri_basis(ikind)%gto_basis_set,error)
+          CALL copy_gto_basis_set(orb_basis_set,lri_env%orb_basis(ikind)%gto_basis_set)
+          CALL copy_gto_basis_set(lri_basis_set,lri_env%ri_basis(ikind)%gto_basis_set)
        END IF
        lmax_ikind_orb = MAXVAL(lri_env%orb_basis(ikind)%gto_basis_set%lmax)
        lmax_ikind_ri  = MAXVAL(lri_env%ri_basis(ikind)%gto_basis_set%lmax)
        maxl_orb = MAX(maxl_orb,lmax_ikind_orb)
        maxl_ri  = MAX(maxl_ri,lmax_ikind_ri)
     END DO
-    CALL lri_basis_init(lri_env,error)
+    CALL lri_basis_init(lri_env)
 
     ! CG coefficients needed for lri integrals
     IF(ASSOCIATED(lri_env%cg_shg)) THEN
       CALL get_clebsch_gordon_coefficients(lri_env%cg_shg%cg_coeff,&
                                            lri_env%cg_shg%cg_none0_list,&
                                            lri_env%cg_shg%ncg_none0,&
-                                           maxl_orb,maxl_ri,error)
+                                           maxl_orb,maxl_ri)
     ENDIF
     ! init keywords
 
     ! check for debug (OS scheme)
     CALL section_vals_val_get(force_env_section,"DFT%QS%LRIGPW%DEBUG_LRI_INTEGRALS",&
-                              l_val=lri_env%debug,error=error)
+                              l_val=lri_env%debug)
     ! integrals based on solid harmonic Gaussians
     CALL section_vals_val_get(force_env_section,"DFT%QS%LRIGPW%SHG_LRI_INTEGRALS",&
-                              l_val=lri_env%use_shg_integrals,error=error)
+                              l_val=lri_env%use_shg_integrals)
     ! how to calculate inverse/pseuodinverse of overlap
     CALL section_vals_val_get(force_env_section,"DFT%QS%LRIGPW%LRI_OVERLAP_MATRIX",&
-                              i_val=lri_env%lri_overlap_inv,error=error)
+                              i_val=lri_env%lri_overlap_inv)
     CALL section_vals_val_get(force_env_section,"DFT%QS%LRIGPW%MAX_CONDITION_NUM",&
-                              r_val=lri_env%cond_max,error=error)
+                              r_val=lri_env%cond_max)
     !
-    CALL set_qs_env (qs_env,lri_env=lri_env,error=error)
+    CALL set_qs_env (qs_env,lri_env=lri_env)
 
   END SUBROUTINE lri_env_init
 
@@ -135,17 +130,14 @@ CONTAINS
 !> \brief initializes the lri basis: calculates the norm, self-overlap
 !>        and integral of the ri basis
 !> \param lri_env ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE lri_basis_init(lri_env,error)
+  SUBROUTINE lri_basis_init(lri_env)
     TYPE(lri_environment_type), POINTER      :: lri_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'lri_basis_init', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: ikind, nkind, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: ikind, nkind
     REAL(KIND=dp), DIMENSION(:), POINTER     :: orb_norm_r, ri_int_fbas, &
                                                 ri_norm_r, ri_norm_s
     REAL(KIND=dp), DIMENSION(:, :), POINTER  :: orb_ovlp, ri_ovlp
@@ -153,44 +145,40 @@ CONTAINS
       POINTER                                :: scon_orb, scon_ri
     TYPE(gto_basis_set_type), POINTER        :: orb_basis, ri_basis
 
-    failure=.FALSE.
-
     IF (ASSOCIATED(lri_env)) THEN
        IF (ASSOCIATED(lri_env%orb_basis)) THEN
-          CPPreconditionNoFail(ASSOCIATED(lri_env%ri_basis),cp_warning_level,routineP,error)
+          CPASSERT(ASSOCIATED(lri_env%ri_basis))
           nkind = SIZE(lri_env%orb_basis)
-          CALL deallocate_bas_properties(lri_env,error)
-          ALLOCATE (lri_env%bas_prop(nkind),STAT=stat)
-          CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+          CALL deallocate_bas_properties(lri_env)
+          ALLOCATE (lri_env%bas_prop(nkind))
           DO ikind = 1, nkind
              NULLIFY(orb_basis, ri_basis)
              orb_basis => lri_env%orb_basis(ikind)%gto_basis_set
              IF (ASSOCIATED(orb_basis)) THEN
                 ri_basis => lri_env%ri_basis(ikind)%gto_basis_set
-                CPPreconditionNoFail(ASSOCIATED(ri_basis),cp_warning_level,routineP,error)
+                CPASSERT(ASSOCIATED(ri_basis))
                 NULLIFY(ri_norm_r)
-                CALL basis_norm_radial(ri_basis,ri_norm_r,error)
+                CALL basis_norm_radial(ri_basis,ri_norm_r)
                 NULLIFY(orb_norm_r)
-                CALL basis_norm_radial(orb_basis,orb_norm_r,error)
+                CALL basis_norm_radial(orb_basis,orb_norm_r)
                 NULLIFY(ri_norm_s)
-                CALL basis_norm_s_func(ri_basis,ri_norm_s,error)
+                CALL basis_norm_s_func(ri_basis,ri_norm_s)
                 NULLIFY(ri_int_fbas)
-                CALL basis_int(ri_basis,ri_int_fbas,ri_norm_s,error)
+                CALL basis_int(ri_basis,ri_int_fbas,ri_norm_s)
                 lri_env%bas_prop(ikind)%int_fbas => ri_int_fbas
                 NULLIFY(ri_ovlp)
-                CALL basis_ovlp(ri_basis,ri_ovlp,ri_norm_r,error)
+                CALL basis_ovlp(ri_basis,ri_ovlp,ri_norm_r)
                 lri_env%bas_prop(ikind)%ri_ovlp => ri_ovlp
                 NULLIFY(orb_ovlp)
-                CALL basis_ovlp(orb_basis,orb_ovlp,orb_norm_r,error)
+                CALL basis_ovlp(orb_basis,orb_ovlp,orb_norm_r)
                 lri_env%bas_prop(ikind)%orb_ovlp => orb_ovlp
                 NULLIFY(scon_ri)
-                CALL contraction_matrix_shg(ri_basis,scon_ri,error)
+                CALL contraction_matrix_shg(ri_basis,scon_ri)
                 lri_env%bas_prop(ikind)%scon_ri => scon_ri
                 NULLIFY(scon_orb)
-                CALL contraction_matrix_shg(orb_basis,scon_orb,error)
+                CALL contraction_matrix_shg(orb_basis,scon_orb)
                 lri_env%bas_prop(ikind)%scon_orb => scon_orb
-                DEALLOCATE (orb_norm_r,ri_norm_r,ri_norm_s,STAT=stat)
-                CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+                DEALLOCATE (orb_norm_r,ri_norm_r,ri_norm_s)
              END IF
           END DO
        END IF
@@ -203,27 +191,23 @@ CONTAINS
 !>        spherical = cartesian Gaussian for s-functions
 !> \param basis ...
 !> \param norm ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE basis_norm_s_func(basis,norm,error)
+  SUBROUTINE basis_norm_s_func(basis,norm)
 
     TYPE(gto_basis_set_type), POINTER        :: basis
     REAL(dp), DIMENSION(:), POINTER          :: norm
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'basis_norm_s_func', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: ipgf, iset, isgf, ishell, &
-                                                jpgf, l, nbas, stat
-    LOGICAL                                  :: failure
+                                                jpgf, l, nbas
     REAL(KIND=dp)                            :: aai, aaj, cci, ccj, expa, ppl
 
     NULLIFY(norm)
 
     nbas = basis%nsgf
-    ALLOCATE (norm(nbas),STAT=stat)
-    CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (norm(nbas))
     norm = 0._dp
 
     DO iset=1,basis%nset
@@ -254,27 +238,23 @@ CONTAINS
 !>        functions
 !> \param basis ...
 !> \param norm ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE basis_norm_radial(basis,norm,error)
+  SUBROUTINE basis_norm_radial(basis,norm)
 
     TYPE(gto_basis_set_type), POINTER        :: basis
     REAL(dp), DIMENSION(:), POINTER          :: norm
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'basis_norm_radial', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: ipgf, iset, isgf, ishell, &
-                                                jpgf, l, nbas, stat
-    LOGICAL                                  :: failure
+                                                jpgf, l, nbas
     REAL(KIND=dp)                            :: aai, aaj, cci, ccj, expa, ppl
 
     NULLIFY(norm)
 
     nbas = basis%nsgf
-    ALLOCATE (norm(nbas),STAT=stat)
-    CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (norm(nbas))
     norm = 0._dp
 
     DO iset=1,basis%nset
@@ -303,13 +283,11 @@ CONTAINS
 !> \brief normalization solid harmonic Gaussians (SHG)
 !> \param basis ...
 !> \param norm ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE basis_norm_shg(basis,norm,error)
+  SUBROUTINE basis_norm_shg(basis,norm)
 
     TYPE(gto_basis_set_type), POINTER        :: basis
     REAL(dp), DIMENSION(:, :), POINTER       :: norm
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'basis_norm_shg', &
       routineP = moduleN//':'//routineN
@@ -347,25 +325,21 @@ CONTAINS
 !> \param basis ...
 !> \param int_aux ...
 !> \param norm ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE basis_int(basis,int_aux,norm,error)
+  SUBROUTINE basis_int(basis,int_aux,norm)
 
     TYPE(gto_basis_set_type), POINTER        :: basis
     REAL(dp), DIMENSION(:), POINTER          :: int_aux, norm
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'basis_int', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: ipgf, iset, isgf, ishell, l, &
-                                                nbas, stat
-    LOGICAL                                  :: failure
+                                                nbas
     REAL(KIND=dp)                            :: aa, cc, pp
 
     nbas = basis%nsgf
-    ALLOCATE (int_aux(nbas),STAT=stat)
-    CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (int_aux(nbas))
     int_aux = 0._dp
 
     DO iset=1,basis%nset
@@ -393,29 +367,25 @@ CONTAINS
 !> \param basis ...
 !> \param ovlp ...
 !> \param norm ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE basis_ovlp(basis,ovlp,norm,error)
+  SUBROUTINE basis_ovlp(basis,ovlp,norm)
 
     TYPE(gto_basis_set_type), POINTER        :: basis
     REAL(dp), DIMENSION(:, :), POINTER       :: ovlp
     REAL(dp), DIMENSION(:), POINTER          :: norm
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'basis_ovlp', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: ipgf, iset, isgf, ishell, &
                                                 jpgf, jset, jsgf, jshell, l, &
-                                                li, lj, nbas, stat
-    LOGICAL                                  :: failure
+                                                li, lj, nbas
     REAL(KIND=dp)                            :: aai, aaj, cci, ccj, expa, &
                                                 m_i, m_j, norm_i, norm_j, oo, &
                                                 ppl
 
     nbas = basis%nsgf
-    ALLOCATE (ovlp(nbas,nbas),STAT=stat)
-    CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (ovlp(nbas,nbas))
     ovlp = 0._dp
 
     DO iset=1,basis%nset
@@ -460,22 +430,19 @@ CONTAINS
 !> \brief contraction matrix for SHG integrals
 !> \param basis ...
 !> \param scon_shg contraction matrix
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE contraction_matrix_shg(basis,scon_shg,error)
+  SUBROUTINE contraction_matrix_shg(basis,scon_shg)
 
     TYPE(gto_basis_set_type), POINTER        :: basis
     REAL(KIND=dp), DIMENSION(:, :, :), &
       POINTER                                :: scon_shg
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'contraction_matrix_shg', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: ipgf, iset, ishell, l, &
-                                                maxpgf, maxshell, nset, stat
+                                                maxpgf, maxshell, nset
     INTEGER, DIMENSION(:), POINTER           :: npgf, nshell
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: gcc, norm_w
     REAL(KIND=dp), DIMENSION(:, :), POINTER  :: norm, zet
 
@@ -486,12 +453,10 @@ CONTAINS
 
     maxpgf   = SIZE(basis%gcc,1)
     maxshell = SIZE(basis%gcc,2)
-    ALLOCATE(norm(basis%nset,maxshell),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(scon_shg(maxpgf,maxshell,nset),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(norm(basis%nset,maxshell))
+    ALLOCATE(scon_shg(maxpgf,maxshell,nset))
 
-    CALL basis_norm_shg(basis,norm,error)
+    CALL basis_norm_shg(basis,norm)
 
     DO iset=1,nset
        DO ishell=1,nshell(iset)
@@ -504,8 +469,7 @@ CONTAINS
        END DO
     END DO
    
-   DEALLOCATE(norm,STAT=stat)
-   CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+   DEALLOCATE(norm)
 
   END SUBROUTINE contraction_matrix_shg
 
@@ -517,28 +481,23 @@ CONTAINS
 !> \param ncg_none0 number of none-zero CG coefficients
 !> \param maxl1 maximal l quantum number of 1st spherical function
 !> \param maxl2 maximal l quantum number of 2nd spherical function
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE get_clebsch_gordon_coefficients(my_cg,cg_none0_list,ncg_none0,&
-                                             maxl1,maxl2,error)
+                                             maxl1,maxl2)
 
     REAL(KIND=dp), DIMENSION(:, :, :), &
       POINTER                                :: my_cg
     INTEGER, DIMENSION(:, :, :), POINTER     :: cg_none0_list
     INTEGER, DIMENSION(:, :), POINTER        :: ncg_none0
     INTEGER, INTENT(IN)                      :: maxl1, maxl2
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: &
       routineN = 'get_clebsch_gordon_coefficients', &
       routineP = moduleN//':'//routineN
 
     INTEGER :: il, ilist, iso, iso1, iso2, l1, l1l2, l2, lc1, lc2, lp, m1, &
-      m2, maxl, mm, mp, nlist, nlist_max, nsfunc, nsfunc1, nsfunc2, stat
-    LOGICAL                                  :: failure
+      m2, maxl, mm, mp, nlist, nlist_max, nsfunc, nsfunc1, nsfunc2
     REAL(dp), ALLOCATABLE, DIMENSION(:, :)   :: rga
-
-    failure = .FALSE.
 
     nlist_max = 6
     nsfunc1 = nsoset(maxl1)
@@ -548,18 +507,14 @@ CONTAINS
 
     CALL clebsch_gordon_init(maxl)
    
-    ALLOCATE(my_cg(nsfunc1,nsfunc2,nsfunc),STAT=stat)
-    CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(my_cg(nsfunc1,nsfunc2,nsfunc))
     my_cg =0.0_dp
-    ALLOCATE(ncg_none0(nsfunc1,nsfunc2),STAT=stat)
-    CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(ncg_none0(nsfunc1,nsfunc2))
     ncg_none0 = 0
-    ALLOCATE(cg_none0_list(nsfunc1,nsfunc2,nlist_max),STAT=stat)
-    CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(cg_none0_list(nsfunc1,nsfunc2,nlist_max))
     cg_none0_list = 0
 
-    ALLOCATE(rga(maxl,2),STAT=stat)
-    CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(rga(maxl,2))
     rga = 0.0_dp
     DO lc1 = 0,maxl1
        DO iso1=nsoset(lc1-1)+1,nsoset(lc1)
@@ -616,8 +571,7 @@ CONTAINS
        ENDDO    ! iso1
     ENDDO      ! lc1
 
-    DEALLOCATE(rga,STAT=stat)
-    CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(rga)
     CALL clebsch_gordon_deallocate()
 
   END SUBROUTINE get_clebsch_gordon_coefficients

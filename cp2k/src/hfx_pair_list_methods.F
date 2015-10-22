@@ -31,6 +31,7 @@ MODULE hfx_pair_list_methods
   USE t_c_g0,                          ONLY: t_c_g0_n
   USE t_sh_p_s_c,                      ONLY: trunc_CS_poly_n20
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -288,7 +289,6 @@ MODULE hfx_pair_list_methods
 
   END SUBROUTINE build_pgf_product_list
 
-
 ! *****************************************************************************
 !> \brief ...
 !> \param npgfa ...
@@ -382,6 +382,7 @@ MODULE hfx_pair_list_methods
           list(element_counter)%image_list(nimages(element_counter))%ra = ra
           list(element_counter)%image_list(nimages(element_counter))%rb = im_B
           list(element_counter)%image_list(nimages(element_counter))%rab2 = rab2
+          list(element_counter)%image_list(nimages(element_counter))%bcell = neighbor_cells(i)%cell
         END DO
       END DO
       nelements = MAX(nelements,element_counter)

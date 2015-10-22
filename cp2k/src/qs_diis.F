@@ -51,9 +51,8 @@ MODULE qs_diis
                                              mo_set_p_type
   USE string_utilities,                ONLY: compress
   USE termination,                     ONLY: stop_memory
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -77,43 +76,35 @@ CONTAINS
 !> \brief Allocates an SCF DIIS buffer
 !> \param diis_buffer the buffer to create
 !> \param nbuffer ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      02.2003 created [fawzi]
 !> \author fawzi
 ! *****************************************************************************
-  SUBROUTINE qs_diis_b_create(diis_buffer,nbuffer,error)
+  SUBROUTINE qs_diis_b_create(diis_buffer,nbuffer)
 
     TYPE(qs_diis_buffer_type), POINTER       :: diis_buffer
     INTEGER, INTENT(in)                      :: nbuffer
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'qs_diis_b_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: handle, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: handle
 
 ! -------------------------------------------------------------------------
 
     CALL timeset(routineN,handle)
 
-    failure = .FALSE.
 
-    ALLOCATE(diis_buffer,stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(diis_buffer)
 
-    IF (.NOT. failure) THEN
-      NULLIFY (diis_buffer%b_matrix)
-      NULLIFY (diis_buffer%error)
-      NULLIFY (diis_buffer%parameter)
-      diis_buffer%nbuffer = nbuffer
-      diis_buffer%ncall = 0
-      last_diis_b_id = last_diis_b_id + 1
-      diis_buffer%id_nr = last_diis_b_id
-      diis_buffer%ref_count = 1
-    END IF
+    NULLIFY (diis_buffer%b_matrix)
+    NULLIFY (diis_buffer%error)
+    NULLIFY (diis_buffer%parameter)
+    diis_buffer%nbuffer = nbuffer
+    diis_buffer%ncall = 0
+    last_diis_b_id = last_diis_b_id + 1
+    diis_buffer%id_nr = last_diis_b_id
+    diis_buffer%ref_count = 1
 
     CALL timestop(handle)
 
@@ -126,8 +117,6 @@ CONTAINS
 !> \param matrix_struct the structure for the matrix of the buffer
 !> \param nspin ...
 !> \param scf_section ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      - Creation (07.05.2001, Matthias Krack)
 !>      - Changed to BLACS matrix usage (08.06.2001,MK)
@@ -137,32 +126,29 @@ CONTAINS
 !>      check to allocate matrixes only when needed, using a linked list?
 ! *****************************************************************************
   SUBROUTINE qs_diis_b_check_i_alloc(diis_buffer,matrix_struct,nspin,&
-                                     scf_section,error)
+                                     scf_section)
 
     TYPE(qs_diis_buffer_type), POINTER       :: diis_buffer
     TYPE(cp_fm_struct_type), POINTER         :: matrix_struct
     INTEGER, INTENT(IN)                      :: nspin
     TYPE(section_vals_type), POINTER         :: scf_section
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'qs_diis_b_check_i_alloc', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, ibuffer, ispin, &
                                                 istat, nbuffer, output_unit
-    LOGICAL                                  :: failure
     TYPE(cp_logger_type), POINTER            :: logger
 
 ! -------------------------------------------------------------------------
 
     CALL timeset(routineN,handle)
 
-    failure = .FALSE.
 
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
 
-    CPPrecondition(ASSOCIATED(diis_buffer),cp_failure_level,routineP,error,failure)
-    CPPrecondition(diis_buffer%ref_count>0,cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(diis_buffer))
+    CPASSERT(diis_buffer%ref_count>0)
 
     nbuffer = diis_buffer%nbuffer
 
@@ -180,7 +166,7 @@ CONTAINS
                                  "%error("//&
                                  TRIM(ADJUSTL(cp_to_string(ibuffer)))//","//&
                                  TRIM(ADJUSTL(cp_to_string(ibuffer)))//")",&
-                            matrix_struct=matrix_struct,error=error)
+                            matrix_struct=matrix_struct)
         END DO
       END DO
     END IF
@@ -199,7 +185,7 @@ CONTAINS
                                  "%parameter("//&
                                  TRIM(ADJUSTL(cp_to_string(ibuffer)))//","//&
                                  TRIM(ADJUSTL(cp_to_string(ibuffer)))//")",&
-                            matrix_struct=matrix_struct,error=error)
+                            matrix_struct=matrix_struct)
         END DO
       END DO
     END IF
@@ -211,13 +197,13 @@ CONTAINS
                                        (nbuffer + 1)**2*dp_size)
       diis_buffer%b_matrix = 0.0_dp
       output_unit = cp_print_key_unit_nr(logger,scf_section,"PRINT%DIIS_INFO",&
-                                         extension=".scfLog",error=error)
+                                         extension=".scfLog")
       IF (output_unit > 0) THEN
         WRITE (UNIT=output_unit,FMT="(/,T9,A)")&
           "DIIS | The SCF DIIS buffer was allocated and initialized"
       END IF
       CALL cp_print_key_finished_output(output_unit,logger,scf_section,&
-                                        "PRINT%DIIS_INFO",error=error)
+                                        "PRINT%DIIS_INFO")
     END IF
 
     CALL timestop(handle)
@@ -238,8 +224,6 @@ CONTAINS
 !> \param s_matrix ...
 !> \param scf_section ...
 !> \param roks ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      - Creation (07.05.2001, Matthias Krack)
 !>      - Changed to BLACS matrix usage (08.06.2001, MK)
@@ -248,8 +232,7 @@ CONTAINS
 !> \author Matthias Krack
 ! *****************************************************************************
   SUBROUTINE qs_diis_b_step(diis_buffer,mo_array,kc,sc,delta,error_max,&
-                            diis_step,eps_diis,nmixing,s_matrix,scf_section,roks,&
-                            error)
+                            diis_step,eps_diis,nmixing,s_matrix,scf_section,roks)
 
     TYPE(qs_diis_buffer_type), POINTER       :: diis_buffer
     TYPE(mo_set_p_type), DIMENSION(:), &
@@ -266,7 +249,6 @@ CONTAINS
       OPTIONAL, POINTER                      :: s_matrix
     TYPE(section_vals_type), POINTER         :: scf_section
     LOGICAL, INTENT(IN), OPTIONAL            :: roks
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'qs_diis_b_step', &
       routineP = moduleN//':'//routineN
@@ -278,7 +260,7 @@ CONTAINS
                                                 nb, nb1, nmo, nspin, &
                                                 output_unit
     LOGICAL                                  :: eigenvectors_discarded, &
-                                                failure, mo_uocc, my_roks
+                                                mo_uocc, my_roks
     REAL(KIND=dp)                            :: maxocc, tmp
     REAL(KIND=dp), ALLOCATABLE, DIMENSION(:) :: ev, occ
     REAL(KIND=dp), DIMENSION(:), POINTER     :: occa, occb
@@ -294,7 +276,6 @@ CONTAINS
 
     nspin = SIZE(mo_array)
     diis_step = .FALSE.
-    failure = .FALSE.
 
     IF (PRESENT(roks)) THEN
       my_roks = .TRUE.
@@ -307,7 +288,7 @@ CONTAINS
     IF (PRESENT(nmixing)) my_nmixing = nmixing
 
     NULLIFY (c,new_errors,old_errors,parameters,matrix_struct,a,b,occa,occb)
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
 
     ! Quick return, if no DIIS is requested
 
@@ -317,13 +298,11 @@ CONTAINS
     END IF
 
     CALL cp_fm_get_info(kc(1)%matrix,&
-                        matrix_struct=matrix_struct,&
-                        error=error)
+                        matrix_struct=matrix_struct)
     CALL qs_diis_b_check_i_alloc(diis_buffer,&
                                  matrix_struct=matrix_struct,&
                                  nspin=nspin,&
-                                 scf_section=scf_section,&
-                                 error=error)
+                                 scf_section=scf_section)
 
     error_max = 0.0_dp
 
@@ -347,7 +326,7 @@ CONTAINS
 
       ! Copy the Kohn-Sham matrix K to the DIIS buffer
 
-      CALL cp_fm_to_fm(kc(ispin)%matrix,parameters,error=error)
+      CALL cp_fm_to_fm(kc(ispin)%matrix,parameters)
 
       IF (my_roks) THEN
 
@@ -362,50 +341,49 @@ CONTAINS
           occ(imo) = SQRT(occa(imo) + occb(imo))
         END DO
 
-        CALL cp_fm_to_fm(c,sc,error=error)
+        CALL cp_fm_to_fm(c,sc)
         CALL cp_fm_column_scale(sc,occ(1:homo))
 
         ! KC <- K*C
-        CALL cp_fm_symm("L","U",nao,homo,1.0_dp,parameters,sc,0.0_dp,kc(ispin)%matrix,error=error)
+        CALL cp_fm_symm("L","U",nao,homo,1.0_dp,parameters,sc,0.0_dp,kc(ispin)%matrix)
 
         IF (PRESENT(s_matrix)) THEN
-          CALL copy_dbcsr_to_fm(s_matrix(1)%matrix,new_errors,error=error)
+          CALL copy_dbcsr_to_fm(s_matrix(1)%matrix,new_errors)
           ! SC <- S*C
-          CALL cp_fm_symm("L","U",nao,homo,1.0_dp,new_errors,c,0.0_dp,sc,error=error)
+          CALL cp_fm_symm("L","U",nao,homo,1.0_dp,new_errors,c,0.0_dp,sc)
           CALL cp_fm_column_scale(sc,occ(1:homo))
         END IF
 
         ! new_errors <- KC*(SC)^T - (SC)*(KC)^T = K*P*S - S*P*K
         ! or for an orthogonal basis
         ! new_errors <- KC*C^T - C*(KC)^T = K*P - P*K with S = I
-        CALL cp_gemm("N","T",nao,nao,homo,1.0_dp,sc,kc(ispin)%matrix, 0.0_dp,new_errors,error=error)
-        CALL cp_gemm("N","T",nao,nao,homo,1.0_dp,kc(ispin)%matrix,sc,-1.0_dp,new_errors,error=error)
+        CALL cp_gemm("N","T",nao,nao,homo,1.0_dp,sc,kc(ispin)%matrix, 0.0_dp,new_errors)
+        CALL cp_gemm("N","T",nao,nao,homo,1.0_dp,kc(ispin)%matrix,sc,-1.0_dp,new_errors)
 
-        DEALLOCATE (occ,STAT=istat)
-        IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"occ")
+        DEALLOCATE (occ)
 
       ELSE
 
         ! KC <- K*C
-        CALL cp_fm_symm("L","U",nao,homo,maxocc,parameters,c,0.0_dp,kc(ispin)%matrix,error=error)
+        CALL cp_fm_symm("L","U",nao,homo,maxocc,parameters,c,0.0_dp,kc(ispin)%matrix)
 
         IF (PRESENT(s_matrix)) THEN
           ! I guess that this copy can be avoided for LSD
-          CALL copy_dbcsr_to_fm(s_matrix(1)%matrix,new_errors,error=error)
+          CALL copy_dbcsr_to_fm(s_matrix(1)%matrix,new_errors)
           ! sc <- S*C
-          CALL cp_fm_symm("L","U",nao,homo,2.0_dp,new_errors,c,0.0_dp,sc,error=error)
+          CALL cp_fm_symm("L","U",nao,homo,2.0_dp,new_errors,c,0.0_dp,sc)
           ! new_errors <- KC*(SC)^T - (SC)*(KC)^T = K*P*S - S*P*K
-          CALL cp_gemm("N","T",nao,nao,homo,1.0_dp,sc,kc(ispin)%matrix, 0.0_dp,new_errors,error=error)
-          CALL cp_gemm("N","T",nao,nao,homo,1.0_dp,kc(ispin)%matrix,sc,-1.0_dp,new_errors,error=error)
+          CALL cp_gemm("N","T",nao,nao,homo,1.0_dp,sc,kc(ispin)%matrix, 0.0_dp,new_errors)
+          CALL cp_gemm("N","T",nao,nao,homo,1.0_dp,kc(ispin)%matrix,sc,-1.0_dp,new_errors)
         ELSE
           ! new_errors <- KC*(C)^T - C*(KC)^T = K*P - P*K
-          CALL cp_gemm("N","T",nao,nao,homo,1.0_dp,c,kc(ispin)%matrix, 0.0_dp,new_errors,error=error)
-          CALL cp_gemm("N","T",nao,nao,homo,1.0_dp,kc(ispin)%matrix,c,-1.0_dp,new_errors,error=error)
+          CALL cp_gemm("N","T",nao,nao,homo,1.0_dp,c,kc(ispin)%matrix, 0.0_dp,new_errors)
+          CALL cp_gemm("N","T",nao,nao,homo,1.0_dp,kc(ispin)%matrix,c,-1.0_dp,new_errors)
         END IF
 
       END IF
 
-      CALL cp_fm_maxabsval(new_errors,tmp,error=error)
+      CALL cp_fm_maxabsval(new_errors,tmp)
       error_max = MAX(error_max,tmp)
 
     END DO
@@ -415,7 +393,7 @@ CONTAINS
     diis_step = ((diis_buffer%ncall >= my_nmixing).AND.(delta < eps_diis))
 
     output_unit = cp_print_key_unit_nr(logger,scf_section,"PRINT%DIIS_INFO",&
-                                       extension=".scfLog",error=error)
+                                       extension=".scfLog")
     IF (output_unit > 0) THEN
        WRITE (UNIT=output_unit,FMT="(/,T9,A,I4,/,(T9,A,ES12.3))")&
          "DIIS | Current SCF DIIS buffer size:         ",nb,&
@@ -449,7 +427,7 @@ CONTAINS
         DO ispin=1,nspin
           old_errors => diis_buffer%error(jb,ispin)%matrix
           new_errors => diis_buffer%error(ib,ispin)%matrix
-          CALL cp_fm_trace(old_errors,new_errors,tmp,error=error)
+          CALL cp_fm_trace(old_errors,new_errors,tmp)
           b(jb,ib) = b(jb,ib) + tmp
         END DO
         b(ib,jb) = b(jb,ib)
@@ -487,7 +465,7 @@ CONTAINS
 
       ! Solve the linear DIIS equation system
 
-      CALL diamat_all(b(1:nb1,1:nb1),ev(1:nb1),error=error)
+      CALL diamat_all(b(1:nb1,1:nb1),ev(1:nb1))
 
       a(1:nb1,1:nb1) = b(1:nb1,1:nb1)
 
@@ -523,31 +501,28 @@ CONTAINS
       ! Update Kohn-Sham matrix
 
       DO ispin=1,nspin
-        CALL cp_fm_set_all(kc(ispin)%matrix,0.0_dp,error=error)
+        CALL cp_fm_set_all(kc(ispin)%matrix,0.0_dp)
         DO jb=1,nb
           parameters => diis_buffer%parameter(jb,ispin)%matrix
-          CALL cp_fm_scale_and_add(1.0_dp,kc(ispin)%matrix,-ev(jb),parameters,error=error)
+          CALL cp_fm_scale_and_add(1.0_dp,kc(ispin)%matrix,-ev(jb),parameters)
         END DO
       END DO
 
-      DEALLOCATE (a,STAT=istat)
-      IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"a")
-      DEALLOCATE (b,STAT=istat)
-      IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"b")
-      DEALLOCATE (ev,STAT=istat)
-      IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"ev")
+      DEALLOCATE (a)
+      DEALLOCATE (b)
+      DEALLOCATE (ev)
 
     ELSE
 
       DO ispin=1,nspin
         parameters => diis_buffer%parameter(ib,ispin)%matrix
-        CALL cp_fm_to_fm(parameters,kc(ispin)%matrix,error=error)
+        CALL cp_fm_to_fm(parameters,kc(ispin)%matrix)
       END DO
 
     END IF
 
     CALL cp_print_key_finished_output(output_unit,logger,scf_section,&
-                                      "PRINT%DIIS_INFO",error=error)
+                                      "PRINT%DIIS_INFO")
 
     CALL timestop(handle)
 
@@ -556,35 +531,28 @@ CONTAINS
 ! *****************************************************************************
 !> \brief clears the buffer
 !> \param diis_buffer the buffer to clear
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      02.2003 created [fawzi]
 !> \author fawzi
 ! *****************************************************************************
-  SUBROUTINE qs_diis_b_clear(diis_buffer,error)
+  SUBROUTINE qs_diis_b_clear(diis_buffer)
 
     TYPE(qs_diis_buffer_type), POINTER       :: diis_buffer
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'qs_diis_b_clear', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle
-    LOGICAL                                  :: failure
 
 ! -------------------------------------------------------------------------
 
     CALL timeset(routineN,handle)
 
-    failure = .FALSE.
 
-    CPPrecondition(ASSOCIATED(diis_buffer),cp_failure_level,routineP,error,failure)
-    CPPrecondition(diis_buffer%ref_count>0,cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(diis_buffer))
+    CPASSERT(diis_buffer%ref_count>0)
 
-    IF (.NOT. failure) THEN
-      diis_buffer%ncall = 0
-    END IF
+    diis_buffer%ncall = 0
 
     CALL timestop(handle)
 
@@ -603,15 +571,13 @@ CONTAINS
 !> \param nmixing ...
 !> \param s_matrix ...
 !> \param threshold ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      - Adapted for LS-SCF (10-11-14) from qs_diis_b_step
 !> \author Fredy W. Aquino
 ! *****************************************************************************
 
   SUBROUTINE qs_diis_b_step_4lscf(diis_buffer,qs_env,ls_scf_env,unit_nr,iscf, &
-                                  diis_step,eps_diis,nmixing,s_matrix,threshold,error)
+                                  diis_step,eps_diis,nmixing,s_matrix,threshold)
 ! Note.- Input: ls_scf_env%matrix_p(ispin) , Density Matrix
 !               matrix_ks (from qs_env)    , Kohn-Sham Matrix  (IN/OUT)            
 
@@ -625,7 +591,6 @@ CONTAINS
     INTEGER, INTENT(IN), OPTIONAL            :: nmixing
     TYPE(cp_dbcsr_type), OPTIONAL            :: s_matrix
     REAL(KIND=dp), INTENT(IN)                :: threshold
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'qs_diis_b_step_4lscf', &
       routineP = moduleN//':'//routineN
@@ -650,7 +615,7 @@ CONTAINS
     my_nmixing = 2
     IF (PRESENT(nmixing)) my_nmixing = nmixing
     NULLIFY (new_errors,old_errors,parameters,a,b)
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
     ! Quick return, if no DIIS is requested
     IF (diis_buffer%nbuffer < 1) THEN
       CALL timestop(handle)
@@ -660,29 +625,27 @@ CONTAINS
 ! Getting current Kohn-Sham matrix from qs_env
     CALL get_qs_env(qs_env,              &
                     para_env=para_env,   &
-                    matrix_ks=matrix_ks, &
-                    error=error) 
+                    matrix_ks=matrix_ks)
     CALL qs_diis_b_check_i_alloc_sparse( &
                            diis_buffer,  &
                            ls_scf_env,   &
-                           nspin,        &
-                           error)
+                           nspin)
     error_max = 0.0_dp
 
     ib = MODULO(diis_buffer%ncall,diis_buffer%nbuffer) + 1
     diis_buffer%ncall = diis_buffer%ncall + 1
     nb = MIN(diis_buffer%ncall,diis_buffer%nbuffer)
 ! Create scratch arrays
-    CALL cp_dbcsr_init(matrix_tmp,error=error)
+    CALL cp_dbcsr_init(matrix_tmp)
     CALL cp_dbcsr_create(matrix_tmp, &
                          template=ls_scf_env%matrix_ks(1),&
-                         matrix_type='N',error=error)
-    CALL cp_dbcsr_set(matrix_tmp,0.0_dp,error=error)     ! reset matrix
-    CALL cp_dbcsr_init(matrix_KSerr_t,error=error)
+                         matrix_type='N')
+    CALL cp_dbcsr_set(matrix_tmp,0.0_dp)     ! reset matrix
+    CALL cp_dbcsr_init(matrix_KSerr_t)
     CALL cp_dbcsr_create(matrix_KSerr_t,&
                          template=ls_scf_env%matrix_ks(1),&
-                         matrix_type='N',error=error)
-    CALL cp_dbcsr_set(matrix_KSerr_t,0.0_dp,error=error) ! reset matrix
+                         matrix_type='N')
+    CALL cp_dbcsr_set(matrix_KSerr_t,0.0_dp) ! reset matrix
 
     DO ispin=1,nspin ! ------ Loop-ispin----START
 
@@ -690,8 +653,7 @@ CONTAINS
       parameters => diis_buffer%parameter(ib,ispin)%matrix
       ! Copy the Kohn-Sham matrix K to the DIIS buffer
       CALL cp_dbcsr_copy(parameters,              & ! out
-                         matrix_ks(ispin)%matrix, & ! in
-                         error=error)
+                         matrix_ks(ispin)%matrix) ! in
 
         IF (PRESENT(s_matrix)) THEN ! if-s_matrix ---------- START
 ! Calculate Kohn-Sham error (non-orthogonal)= K*P*S-(K*P*S)^T
@@ -700,22 +662,20 @@ CONTAINS
                    1.0_dp,ls_scf_env%matrix_p(ispin),& 
                           s_matrix,                  &
                    0.0_dp,matrix_tmp,                &
-                   filter_eps=threshold, error=error)    
+                   filter_eps=threshold)    
 ! new_errors= K*P*S    
             CALL cp_dbcsr_multiply("N", "N",         &
                    1.0_dp,matrix_ks(ispin)%matrix,   & 
                           matrix_tmp,                &
                    0.0_dp,new_errors,                &
-                   filter_eps=threshold,error=error) 
+                   filter_eps=threshold) 
 ! matrix_KSerr_t= transpose(K*P*S)        
             CALL cp_dbcsr_transposed(matrix_KSerr_t, &
-                                     new_errors,     &
-                                     error=error)
+                                     new_errors)
 ! new_errors=K*P*S-transpose(K*P*S)
             CALL cp_dbcsr_add(new_errors,       &
                               matrix_KSerr_t,   &
-                              1.0_dp,-1.0_dp,   &
-                              error=error)
+                              1.0_dp,-1.0_dp)
         ELSE   ! if-s_matrix ---------- MID
 ! Calculate Kohn-Sham error (orthogonal)= K*P - P*K
 ! new_errors=K*P
@@ -723,16 +683,14 @@ CONTAINS
                    1.0_dp,matrix_ks(ispin)%matrix,   & 
                           ls_scf_env%matrix_p(ispin),&
                    0.0_dp,new_errors,                &
-                   filter_eps=threshold,error=error)  
+                   filter_eps=threshold)  
 ! matrix_KSerr_t= transpose(K*P)   
             CALL cp_dbcsr_transposed(matrix_KSerr_t, & 
-                                     new_errors,     & 
-                                     error=error)
+                                     new_errors) 
 ! new_errors=K*P-transpose(K*P)
             CALL cp_dbcsr_add(new_errors,            & 
                               matrix_KSerr_t,        &
-                              1.0_dp,-1.0_dp,        &
-                              error=error)
+                              1.0_dp,-1.0_dp)
         END IF ! if-s_matrix ---------- END
 
        tmp=cp_dbcsr_maxabs(new_errors)
@@ -766,8 +724,7 @@ CONTAINS
           new_errors => diis_buffer%error(ib,ispin)%matrix
           CALL cp_dbcsr_trace(old_errors, &
                               new_errors, &
-                              tmp,        & ! out : < f_i | f_j >
-                              error=error)
+                              tmp) ! out : < f_i | f_j >
           b(jb,ib) = b(jb,ib) + tmp
         END DO ! end-loop-ispin
         b(ib,jb) = b(jb,ib)
@@ -794,7 +751,7 @@ CONTAINS
       b(nb1 ,1:nb) = -1.0_dp
       b(nb1 , nb1) =  0.0_dp
       ! Solve the linear DIIS equation system
-      CALL diamat_all(b(1:nb1,1:nb1),ev(1:nb1),error=error)
+      CALL diamat_all(b(1:nb1,1:nb1),ev(1:nb1))
       a(1:nb1,1:nb1) = b(1:nb1,1:nb1)
       DO jb=1,nb1
         IF (ABS(ev(jb)) < eigenvalue_threshold) THEN
@@ -815,34 +772,28 @@ CONTAINS
 
         DO ispin=1,nspin
           CALL cp_dbcsr_set(matrix_ks(ispin)%matrix, & ! reset matrix
-                            0.0_dp,                  &
-                            error=error)  
+                            0.0_dp)
           DO jb=1,nb
              parameters => diis_buffer%parameter(jb,ispin)%matrix
              CALL cp_dbcsr_add(matrix_ks(ispin)%matrix,parameters, &
-                               1.0_dp,-ev(jb),                     &
-                               error=error)
+                               1.0_dp,-ev(jb))
           END DO ! end-loop-jb
         END DO ! end-loop-ispin
       ENDIF ! if-iscf-to-updateKS------ END
 
-      DEALLOCATE (a,STAT=istat)
-      IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"a")
-      DEALLOCATE (b,STAT=istat)
-      IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"b")
-      DEALLOCATE (ev,STAT=istat)
-      IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"ev")
+      DEALLOCATE (a)
+      DEALLOCATE (b)
+      DEALLOCATE (ev)
 
     ELSE
       DO ispin=1,nspin
        parameters => diis_buffer%parameter(ib,ispin)%matrix
        CALL cp_dbcsr_copy(parameters,              & ! out
-                          matrix_ks(ispin)%matrix, & ! in
-                          error=error)
+                          matrix_ks(ispin)%matrix) ! in
       ENDDO ! end-loop-ispin
     END IF
-      CALL cp_dbcsr_release(matrix_tmp    ,error=error)
-      CALL cp_dbcsr_release(matrix_KSerr_t,error=error)
+      CALL cp_dbcsr_release(matrix_tmp)
+      CALL cp_dbcsr_release(matrix_KSerr_t)
       CALL timestop(handle)
 
   END SUBROUTINE qs_diis_b_step_4lscf
@@ -852,8 +803,6 @@ CONTAINS
 !> \param diis_buffer the buffer to initialize
 !> \param ls_scf_env ...
 !> \param nspin ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      - Adapted from qs_diis_b_check_i_alloc for sparse matrices and
 !>        used in LS-SCF module (ls_scf_main) (10-11-14)
@@ -863,13 +812,12 @@ CONTAINS
 ! *****************************************************************************
 
   SUBROUTINE qs_diis_b_check_i_alloc_sparse(diis_buffer,ls_scf_env, &
-                                            nspin,error)
+                                            nspin)
 
     TYPE(qs_diis_buffer_type_sparse), &
       POINTER                                :: diis_buffer
     TYPE(ls_scf_env_type)                    :: ls_scf_env
     INTEGER, INTENT(IN)                      :: nspin
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: &
       routineN = 'qs_diis_b_check_i_alloc_sparse', &
@@ -877,19 +825,17 @@ CONTAINS
 
     INTEGER                                  :: handle, ibuffer, ispin, &
                                                 istat, nbuffer
-    LOGICAL                                  :: failure
     TYPE(cp_logger_type), POINTER            :: logger
 
 ! -------------------------------------------------------------------------
 
     CALL timeset(routineN,handle)
 
-    failure = .FALSE.
 
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
 
-    CPPrecondition(ASSOCIATED(diis_buffer),cp_failure_level,routineP,error,failure)
-    CPPrecondition(diis_buffer%ref_count>0,cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(diis_buffer))
+    CPASSERT(diis_buffer%ref_count>0)
 
     nbuffer = diis_buffer%nbuffer
 
@@ -900,13 +846,12 @@ CONTAINS
 
       DO ispin=1,nspin
         DO ibuffer=1,nbuffer
-          ALLOCATE (diis_buffer%error(ibuffer,ispin)%matrix,STAT=istat)
-          CALL cp_dbcsr_init(diis_buffer%error(ibuffer,ispin)%matrix, &
-                             error=error)
+          ALLOCATE (diis_buffer%error(ibuffer,ispin)%matrix)
+          CALL cp_dbcsr_init(diis_buffer%error(ibuffer,ispin)%matrix)
 
           CALL cp_dbcsr_create(diis_buffer%error(ibuffer,ispin)%matrix, &
                                template=ls_scf_env%matrix_ks(1),&
-                               matrix_type='N',error=error)
+                               matrix_type='N')
         END DO
       END DO
     END IF
@@ -918,12 +863,11 @@ CONTAINS
 
       DO ispin=1,nspin
         DO ibuffer=1,nbuffer
-          ALLOCATE (diis_buffer%parameter(ibuffer,ispin)%matrix,STAT=istat)
-          CALL cp_dbcsr_init(diis_buffer%parameter(ibuffer,ispin)%matrix, &
-                             error=error)
+          ALLOCATE (diis_buffer%parameter(ibuffer,ispin)%matrix)
+          CALL cp_dbcsr_init(diis_buffer%parameter(ibuffer,ispin)%matrix)
           CALL cp_dbcsr_create(diis_buffer%parameter(ibuffer,ispin)%matrix, &
                                template=ls_scf_env%matrix_ks(1),&
-                               matrix_type='N',error=error)
+                               matrix_type='N')
         END DO
       END DO
     END IF
@@ -944,37 +888,30 @@ CONTAINS
 ! *****************************************************************************
 !> \brief clears the DIIS buffer in LS-SCF calculation
 !> \param diis_buffer the buffer to clear
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      10-11-14 created [FA] modified from qs_diis_b_clear
 !> \author Fredy W. Aquino
 ! *****************************************************************************
 
-  SUBROUTINE qs_diis_b_clear_sparse(diis_buffer,error)
+  SUBROUTINE qs_diis_b_clear_sparse(diis_buffer)
 
     TYPE(qs_diis_buffer_type_sparse), &
       POINTER                                :: diis_buffer
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'qs_diis_b_clear_sparse', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle
-    LOGICAL                                  :: failure
 
 ! -------------------------------------------------------------------------
 
     CALL timeset(routineN,handle)
 
-    failure = .FALSE.
 
-    CPPrecondition(ASSOCIATED(diis_buffer),cp_failure_level,routineP,error,failure)
-    CPPrecondition(diis_buffer%ref_count>0,cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(diis_buffer))
+    CPASSERT(diis_buffer%ref_count>0)
 
-    IF (.NOT. failure) THEN
-      diis_buffer%ncall = 0
-    END IF
+    diis_buffer%ncall = 0
 
     CALL timestop(handle)
 
@@ -984,44 +921,36 @@ CONTAINS
 !> \brief Allocates an SCF DIIS buffer for LS-SCF calculation
 !> \param diis_buffer the buffer to create
 !> \param nbuffer ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      10-11-14 created [FA] modified from qs_diis_b_create
 !> \author Fredy W. Aquino
 ! *****************************************************************************
-  SUBROUTINE qs_diis_b_create_sparse(diis_buffer,nbuffer,error)
+  SUBROUTINE qs_diis_b_create_sparse(diis_buffer,nbuffer)
 
     TYPE(qs_diis_buffer_type_sparse), &
       POINTER                                :: diis_buffer
     INTEGER, INTENT(in)                      :: nbuffer
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'qs_diis_b_create_sparse', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: handle, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: handle
 
 ! -------------------------------------------------------------------------
 
     CALL timeset(routineN,handle)
 
-    failure = .FALSE.
 
-    ALLOCATE(diis_buffer,stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(diis_buffer)
 
-    IF (.NOT. failure) THEN
-      NULLIFY (diis_buffer%b_matrix)
-      NULLIFY (diis_buffer%error)
-      NULLIFY (diis_buffer%parameter)
-      diis_buffer%nbuffer = nbuffer
-      diis_buffer%ncall = 0
-      last_diis_b_id = last_diis_b_id + 1
-      diis_buffer%id_nr = last_diis_b_id
-      diis_buffer%ref_count = 1
-    END IF
+    NULLIFY (diis_buffer%b_matrix)
+    NULLIFY (diis_buffer%error)
+    NULLIFY (diis_buffer%parameter)
+    diis_buffer%nbuffer = nbuffer
+    diis_buffer%ncall = 0
+    last_diis_b_id = last_diis_b_id + 1
+    diis_buffer%id_nr = last_diis_b_id
+    diis_buffer%ref_count = 1
 
     CALL timestop(handle)
 

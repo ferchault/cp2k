@@ -20,9 +20,8 @@ MODULE cp_external_control
   USE machine,                         ONLY: m_walltime
   USE message_passing,                 ONLY: mp_bcast,&
                                              mp_probe
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -48,22 +47,18 @@ CONTAINS
 !> \param in_external_master_id ...
 !> \param in_scf_energy_message_tag ...
 !> \param in_exit_tag ...
-!> \param error ...
 !> \author Mandes 02.2013
 ! *****************************************************************************
   SUBROUTINE set_external_comm(comm, in_external_master_id, &
-                               in_scf_energy_message_tag, in_exit_tag, error)
+                               in_scf_energy_message_tag, in_exit_tag)
     INTEGER, INTENT(IN)                      :: comm, in_external_master_id
     INTEGER, INTENT(IN), OPTIONAL            :: in_scf_energy_message_tag, &
                                                 in_exit_tag
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'set_external_comm', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    CPPrecondition(in_external_master_id.GE.0,cp_failure_level,routineP,error,failure)
+    CPASSERT(in_external_master_id.GE.0)
 
     external_comm = comm
     external_master_id = in_external_master_id
@@ -72,7 +67,7 @@ CONTAINS
       scf_energy_message_tag = in_scf_energy_message_tag
     IF(PRESENT(in_exit_tag)) THEN
       ! the exit tag should be different from the mp_probe tag default
-      CPPrecondition(in_exit_tag.NE.-1,cp_failure_level,routineP,error,failure)
+      CPASSERT(in_exit_tag.NE.-1)
       exit_tag = in_exit_tag
     END IF
   END SUBROUTINE set_external_comm
@@ -88,17 +83,15 @@ CONTAINS
 !> \param globenv ...
 !> \param target_time ...
 !> \param start_time ...
-!> \param error ...
 !> \author MI (10.03.2005)
 ! *****************************************************************************
-  SUBROUTINE external_control(should_stop,flag,globenv,target_time,start_time,error)
+  SUBROUTINE external_control(should_stop,flag,globenv,target_time,start_time)
 
     LOGICAL, INTENT(OUT)                     :: should_stop
     CHARACTER(LEN=*), INTENT(IN)             :: flag
     TYPE(global_environment_type), &
       OPTIONAL, POINTER                      :: globenv
     REAL(dp), OPTIONAL                       :: target_time, start_time
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'external_control', &
       routineP = moduleN//':'//routineN
@@ -106,7 +99,7 @@ CONTAINS
     CHARACTER(LEN=default_string_length)     :: exit_fname, exit_fname_level, &
                                                 exit_gname, exit_gname_level
     INTEGER                                  :: handle, i, tag, unit_number
-    LOGICAL                                  :: failure, should_wait
+    LOGICAL                                  :: should_wait
     LOGICAL, SAVE                            :: check_always = .FALSE.
     REAL(KIND=dp)                            :: my_start_time, &
                                                 my_target_time, t1, t2, &
@@ -116,8 +109,7 @@ CONTAINS
 
     CALL timeset(routineN,handle)
 
-    failure=.FALSE.
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
     should_stop = .FALSE.
 
     exit_gname       = "EXIT"
@@ -211,7 +203,7 @@ CONTAINS
           my_start_time=globenv%cp2k_start_time
        ELSE
           ! If none of the two arguments is present abort.. This routine should always check about time.
-          CPPrecondition(.FALSE.,cp_fatal_level,routineP,error,failure)
+          CPABORT("")
        END IF
 
        IF ( (.NOT.should_stop).AND.(my_target_time > 0.0_dp)) THEN

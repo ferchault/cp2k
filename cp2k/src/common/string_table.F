@@ -22,6 +22,7 @@ MODULE string_table
   USE kinds,                           ONLY: default_string_length,&
                                              int_8
 #include "cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -67,7 +68,7 @@ CONTAINS
 !>      id=str2id(s2s("my short string"))
 ! *****************************************************************************
   FUNCTION str2id(str) RESULT(id)
-    CHARACTER(LEN=default_string_length)     :: str
+    CHARACTER(LEN=*)                         :: str
     INTEGER                                  :: id
 
     INTEGER                                  :: index, ipos

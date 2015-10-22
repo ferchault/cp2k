@@ -22,7 +22,6 @@ MODULE lri_ks_methods
                                              cp_print_key_finished_output,&
                                              cp_print_key_should_output,&
                                              cp_print_key_unit_nr
-  USE cp_para_types,                   ONLY: cp_para_env_type
   USE cp_realspace_grid_cube,          ONLY: cp_pw_to_cube
   USE input_section_types,             ONLY: section_get_ivals,&
                                              section_get_lval,&
@@ -55,9 +54,8 @@ MODULE lri_ks_methods
                                              neighbor_list_set_p_type
   USE qs_subsys_types,                 ONLY: qs_subsys_get,&
                                              qs_subsys_type
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -75,12 +73,10 @@ CONTAINS
 !> \param lri_v_int integrals of potential * ri basis set
 !> \param h_matrix KS matrix, on entry containing the core hamiltonian
 !> \param atomic_kind_set ...
-!> \param para_env ...
-!> \param error ...
 !> \note including this in lri_environment_methods?
 ! *****************************************************************************
   SUBROUTINE calculate_lri_ks_matrix(lri_env, lri_v_int, h_matrix, &
-                                     atomic_kind_set, para_env,  error)
+                                     atomic_kind_set)
 
     TYPE(lri_environment_type), POINTER      :: lri_env
     TYPE(lri_kind_type), DIMENSION(:), &
@@ -88,17 +84,15 @@ CONTAINS
     TYPE(cp_dbcsr_type), POINTER             :: h_matrix
     TYPE(atomic_kind_type), DIMENSION(:), &
       POINTER                                :: atomic_kind_set
-    TYPE(cp_para_env_type), POINTER          :: para_env
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(*), PARAMETER :: routineN = 'calculate_lri_ks_matrix', &
       routineP = moduleN//':'//routineN
 
     INTEGER :: atom_a, atom_b, col, handle, i, iac, iatom, ikind, ilist, &
       jatom, jkind, jneighbor, natom, nba, nbb, nfa, nfb, nkind, nlist, nn, &
-      nneighbor, row, stat
+      nneighbor, row
     INTEGER, DIMENSION(:), POINTER           :: atom_of_kind
-    LOGICAL                                  :: failure, found, trans
+    LOGICAL                                  :: found, trans
     REAL(KIND=dp)                            :: dab, rab(3)
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :)                        :: h_work
@@ -109,7 +103,6 @@ CONTAINS
     TYPE(neighbor_list_set_p_type), &
       DIMENSION(:), POINTER                  :: soo_list
 
-    failure = .FALSE.
     CALL timeset(routineN,handle)
     NULLIFY(atom_of_kind, h_block, lrii, nl_iterator, soo_list)
 
@@ -119,8 +112,7 @@ CONTAINS
       nkind = lri_env%lri_ints%nkind
 
       CALL get_atomic_kind_set(atomic_kind_set=atomic_kind_set,natom=natom)
-      ALLOCATE(atom_of_kind(natom),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(atom_of_kind(natom))
       CALL get_atomic_kind_set(atomic_kind_set=atomic_kind_set,&
                                atom_of_kind=atom_of_kind)
       CALL neighbor_list_iterator_create(nl_iterator,soo_list)
@@ -143,8 +135,7 @@ CONTAINS
          nbb = lrii%nbb
          nn=nfa+nfb
 
-         ALLOCATE(h_work(nba,nbb),STAT=stat)
-         CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+         ALLOCATE(h_work(nba,nbb))
          h_work(:,:)=0.0_dp
 
          IF (iatom <= jatom) THEN
@@ -160,7 +151,7 @@ CONTAINS
          NULLIFY(h_block)
          CALL cp_dbcsr_get_block_p(h_matrix,row,col,h_block,found)
          IF (.NOT.ASSOCIATED(h_block)) THEN
-              CALL cp_dbcsr_add_block_node (h_matrix, row, col, h_block ,error=error)
+              CALL cp_dbcsr_add_block_node (h_matrix, row, col, h_block)
          END IF
 
          atom_a = atom_of_kind(iatom)
@@ -188,15 +179,13 @@ CONTAINS
            h_block(1:nba,1:nbb)=h_block(1:nba,1:nbb)+h_work(1:nba,1:nbb)
          ENDIF
  
-         DEALLOCATE(h_work,STAT=stat)
-         CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+         DEALLOCATE(h_work)
       END DO
 
-      CALL cp_dbcsr_finalize(h_matrix, error=error)
+      CALL cp_dbcsr_finalize(h_matrix)
  
       CALL neighbor_list_iterator_release(nl_iterator)
-      DEALLOCATE(atom_of_kind,STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      DEALLOCATE(atom_of_kind)
   
     END IF
 
@@ -210,16 +199,14 @@ CONTAINS
 !> \param qs_env ...
 !> \param lri_rho_g ...
 !> \param skip_nuclear_density ...
-!> \param error ...
 !> \note  routine for testing, to be deleted later
 ! *****************************************************************************
   SUBROUTINE calc_lri_rho_tot_gspace(rho_tot_gspace, qs_env, lri_rho_g,&
-                                     skip_nuclear_density, error)
+                                     skip_nuclear_density)
     TYPE(pw_p_type), INTENT(INOUT)           :: rho_tot_gspace
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(pw_p_type), DIMENSION(:), POINTER   :: lri_rho_g
     LOGICAL, INTENT(IN), OPTIONAL            :: skip_nuclear_density
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(*), PARAMETER :: routineN = 'calc_lri_rho_tot_gspace', &
       routineP = moduleN//':'//routineN
@@ -234,17 +221,16 @@ CONTAINS
     IF (PRESENT(skip_nuclear_density)) my_skip=skip_nuclear_density
     CALL get_qs_env(qs_env=qs_env,&
                     rho_core=rho_core,&
-                    dft_control=dft_control,&
-                    error=error)
+                    dft_control=dft_control)
 
     IF (.NOT.my_skip) THEN
-       CALL pw_copy(rho_core%pw,rho_tot_gspace%pw, error=error)
-       CALL pw_axpy(lri_rho_g(1)%pw,rho_tot_gspace%pw, error=error)
+       CALL pw_copy(rho_core%pw,rho_tot_gspace%pw)
+       CALL pw_axpy(lri_rho_g(1)%pw,rho_tot_gspace%pw)
     ELSE
-       CALL pw_axpy(lri_rho_g(1)%pw, rho_tot_gspace%pw, error=error)
+       CALL pw_axpy(lri_rho_g(1)%pw, rho_tot_gspace%pw)
     END IF
     DO ispin=2, dft_control%nspins
-       CALL pw_axpy(lri_rho_g(ispin)%pw, rho_tot_gspace%pw, error=error)
+       CALL pw_axpy(lri_rho_g(ispin)%pw, rho_tot_gspace%pw)
     END DO
  
   END SUBROUTINE calc_lri_rho_tot_gspace
@@ -253,16 +239,14 @@ CONTAINS
 !> \param qs_env ...
 !> \param rho_r ...
 !> \param lri ...
-!> \param error ...
 !> \note only NSPIN=1!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !> \note routine for testing, to be deleted later
 ! *****************************************************************************
-  SUBROUTINE print_lri_density_cube(qs_env, rho_r, lri, error)
+  SUBROUTINE print_lri_density_cube(qs_env, rho_r, lri)
 
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(pw_p_type), DIMENSION(:), POINTER   :: rho_r
     LOGICAL, INTENT(IN)                      :: lri
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(*), PARAMETER :: routineN = 'print_lri_density_cube', &
       routineP = moduleN//':'//routineN
@@ -277,16 +261,16 @@ CONTAINS
 
     NULLIFY(dft_section, logger, particles, subsys)
 
-    CALL get_qs_env(qs_env=qs_env, input=input, subsys=subsys,  error=error) 
-    logger => cp_error_get_logger(error)
+    CALL get_qs_env(qs_env=qs_env, input=input, subsys=subsys) 
+    logger => cp_get_default_logger()
     output_unit= cp_logger_get_default_io_unit(logger)
-    dft_section => section_vals_get_subs_vals(input,"DFT",error=error)
-    CALL qs_subsys_get(subsys,particles=particles,error=error)
+    dft_section => section_vals_get_subs_vals(input,"DFT")
+    CALL qs_subsys_get(subsys,particles=particles)
  
     IF (BTEST(cp_print_key_should_output(logger%iter_info,input,&
-       "DFT%PRINT%E_DENSITY_CUBE", error=error),cp_p_file)) THEN
+       "DFT%PRINT%E_DENSITY_CUBE"),cp_p_file)) THEN
 
-       append_cube = section_get_lval(input,"DFT%PRINT%E_DENSITY_CUBE%APPEND",error=error)
+       append_cube = section_get_lval(input,"DFT%PRINT%E_DENSITY_CUBE%APPEND")
        my_pos_cube="REWIND"
        IF(append_cube) THEN
          my_pos_cube="APPEND"
@@ -299,13 +283,12 @@ CONTAINS
        ENDIF
        unit_nr=cp_print_key_unit_nr(logger,input,"DFT%PRINT%E_DENSITY_CUBE",&
                extension=".cube",middle_name=TRIM(filename),file_position=my_pos_cube,&
-               log_filename=.FALSE.,error=error)
+               log_filename=.FALSE.)
        CALL cp_pw_to_cube(rho_r(1)%pw,unit_nr,"ELECTRONIC DENSITY",&
             particles=particles,&
-            stride=section_get_ivals(dft_section,"PRINT%E_DENSITY_CUBE%STRIDE",error=error),&
-            error=error)
+            stride=section_get_ivals(dft_section,"PRINT%E_DENSITY_CUBE%STRIDE"))
        CALL cp_print_key_finished_output(unit_nr,logger,input,&
-            "DFT%PRINT%E_DENSITY_CUBE",error=error)
+            "DFT%PRINT%E_DENSITY_CUBE")
     END IF
 
   END SUBROUTINE print_lri_density_cube
@@ -313,15 +296,13 @@ CONTAINS
 !> \brief ...
 !> \param qs_env ...
 !> \param v_rspace_new ...
-!> \param error ...
 !> \note only NSPIN=1!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !> \note routine for testing, to be deleted later
 ! *****************************************************************************
-  SUBROUTINE print_v_xc_cube(qs_env, v_rspace_new, error)
+  SUBROUTINE print_v_xc_cube(qs_env, v_rspace_new)
 
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(pw_p_type)                          :: v_rspace_new
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(*), PARAMETER :: routineN = 'print_v_xc_cube', &
       routineP = moduleN//':'//routineN
@@ -341,43 +322,42 @@ CONTAINS
     NULLIFY(dft_section, logger, particles, subsys)
     NULLIFY(auxbas_pw_pool, pw_env)
 
-    CALL get_qs_env(qs_env=qs_env, input=input, subsys=subsys,  error=error) 
-    logger => cp_error_get_logger(error)
+    CALL get_qs_env(qs_env=qs_env, input=input, subsys=subsys) 
+    logger => cp_get_default_logger()
     output_unit= cp_logger_get_default_io_unit(logger)
-    dft_section => section_vals_get_subs_vals(input,"DFT",error=error)
-    CALL qs_subsys_get(subsys,particles=particles,error=error)
+    dft_section => section_vals_get_subs_vals(input,"DFT")
+    CALL qs_subsys_get(subsys,particles=particles)
  
     IF (BTEST(cp_print_key_should_output(logger%iter_info,input,&
-         "DFT%PRINT%V_HARTREE_CUBE",error=error),cp_p_file)) THEN
+         "DFT%PRINT%V_HARTREE_CUBE"),cp_p_file)) THEN
 
-       CALL get_qs_env(qs_env=qs_env,pw_env=pw_env,error=error)
-       CALL pw_env_get(pw_env, auxbas_pw_pool=auxbas_pw_pool,error=error)
+       CALL get_qs_env(qs_env=qs_env,pw_env=pw_env)
+       CALL pw_env_get(pw_env, auxbas_pw_pool=auxbas_pw_pool)
        CALL pw_pool_create_pw(auxbas_pw_pool,aux_r%pw,&
                                use_data = REALDATA3D,&
-                               in_space = REALSPACE, error=error)
+                               in_space = REALSPACE)
 
-       append_cube = section_get_lval(input,"DFT%PRINT%V_HARTREE_CUBE%APPEND",error=error)
+       append_cube = section_get_lval(input,"DFT%PRINT%V_HARTREE_CUBE%APPEND")
        my_pos_cube="REWIND"
        IF(append_cube) THEN
          my_pos_cube="APPEND"
        END IF
-       CALL get_qs_env(qs_env=qs_env,pw_env=pw_env,error=error)
-       CALL pw_env_get(pw_env, error=error)
+       CALL get_qs_env(qs_env=qs_env,pw_env=pw_env)
+       CALL pw_env_get(pw_env)
        unit_nr=cp_print_key_unit_nr(logger,input,"DFT%PRINT%V_HARTREE_CUBE",&
-            extension=".cube",middle_name="v_xc",file_position=my_pos_cube,error=error)
+            extension=".cube",middle_name="v_xc",file_position=my_pos_cube)
        udvol = 1.0_dp/v_rspace_new%pw%pw_grid%dvol
 
-       CALL pw_copy(v_rspace_new%pw,aux_r%pw, error=error)
-       CALL pw_scale(aux_r%pw,udvol,error=error)
+       CALL pw_copy(v_rspace_new%pw,aux_r%pw)
+       CALL pw_scale(aux_r%pw,udvol)
 
        CALL cp_pw_to_cube(aux_r%pw,unit_nr,"Exchange POTENTIAL",particles=particles,&
             stride=section_get_ivals(dft_section,&
-            "PRINT%V_HARTREE_CUBE%STRIDE",error=error),&
-            error=error)
+            "PRINT%V_HARTREE_CUBE%STRIDE"))
        CALL cp_print_key_finished_output(unit_nr,logger,input,&
-            "DFT%PRINT%V_HARTREE_CUBE",error=error)
+            "DFT%PRINT%V_HARTREE_CUBE")
 
-       CALL pw_pool_give_back_pw(auxbas_pw_pool,aux_r%pw, error=error)
+       CALL pw_pool_give_back_pw(auxbas_pw_pool,aux_r%pw)
     ENDIF
   END SUBROUTINE print_v_xc_cube
 !

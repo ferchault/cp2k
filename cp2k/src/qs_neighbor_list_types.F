@@ -16,11 +16,11 @@ MODULE qs_neighbor_list_types
 
   USE kinds,                           ONLY: dp,&
                                              int_size
-  USE termination,                     ONLY: stop_memory,&
-                                             stop_program
+  USE termination,                     ONLY: stop_memory
   USE util,                            ONLY: locate,&
                                              sort
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -254,7 +254,7 @@ CONTAINS
       routineN = 'neighbor_list_iterator_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: il, istat, mthread
+    INTEGER                                  :: il, mthread
     TYPE(neighbor_list_iterator_type), &
       POINTER                                :: iterator
 
@@ -264,28 +264,19 @@ CONTAINS
     IF (ASSOCIATED(iterator%list_search)) THEN
        DO il=1,SIZE(iterator%list_search)
           IF (iterator%list_search(il)%nlist >= 0) THEN
-             DEALLOCATE (iterator%list_search(il)%atom_list,STAT=istat)
-             IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-                                              "iterator%list_search(il)%atom_list")
-             DEALLOCATE (iterator%list_search(il)%atom_index,STAT=istat)
-             IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-                                              "iterator%list_search(il)%atom_index")
-             DEALLOCATE (iterator%list_search(il)%neighbor_list,STAT=istat)
-             IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-                                              "iterator%list_search(il)%neighbor_list")
+             DEALLOCATE (iterator%list_search(il)%atom_list)
+             DEALLOCATE (iterator%list_search(il)%atom_index)
+             DEALLOCATE (iterator%list_search(il)%neighbor_list)
           END IF
        END DO
-       DEALLOCATE (iterator%list_search,STAT=istat)
-       IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"iterator%list_search")
+       DEALLOCATE (iterator%list_search)
     END IF
 
     mthread = SIZE(iterator_set)
     DO il=0,mthread-1
-       DEALLOCATE (iterator_set(il)%neighbor_list_iterator,STAT=istat)
-       IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"neighbor_list_iterator")
+       DEALLOCATE (iterator_set(il)%neighbor_list_iterator)
     END DO
-    DEALLOCATE (iterator_set,STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"iterator_set")
+    DEALLOCATE (iterator_set)
 
   END SUBROUTINE neighbor_list_iterator_release
 
@@ -330,7 +321,7 @@ CONTAINS
           nnode=0
        END IF
     ELSE
-       STOP
+       CPABORT("")
     END IF
 
     mthread = SIZE(iterator_set)
@@ -486,7 +477,7 @@ CONTAINS
           iterator%inode = iterator%inode + 1
           iterator%neighbor_node => iterator%neighbor_node%next_neighbor_node
        ELSE
-          STOP "wrong"
+          CPABORT("wrong")
        END IF
     ELSE
        ! no list available
@@ -652,8 +643,7 @@ CONTAINS
 
     ELSE
 
-      CALL stop_program(routineN,moduleN,__LINE__,&
-                        "The requested neighbor list set is not associated")
+      CPABORT("The requested neighbor list set is not associated")
 
     END IF
 
@@ -764,8 +754,7 @@ CONTAINS
 
     ELSE
 
-      CALL stop_program(routineN,moduleN,__LINE__,&
-                        "The requested neighbor list is not associated")
+      CPABORT("The requested neighbor list is not associated")
 
     END IF
 
@@ -829,7 +818,6 @@ CONTAINS
     CHARACTER(len=*), PARAMETER :: routineN = 'deallocate_neighbor_list', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: istat
     TYPE(neighbor_node_type), POINTER        :: neighbor_node, &
                                                 next_neighbor_node
 
@@ -839,17 +827,11 @@ CONTAINS
 
       DO WHILE (ASSOCIATED(neighbor_node))
         next_neighbor_node => neighbor_node%next_neighbor_node
-        DEALLOCATE (neighbor_node,STAT=istat)
-        IF (istat /= 0) THEN
-          CALL stop_memory(routineN,moduleN,__LINE__,"neighbor_node")
-        END IF
+        DEALLOCATE (neighbor_node)
         neighbor_node => next_neighbor_node
       END DO
 
-      DEALLOCATE (neighbor_list,STAT=istat)
-      IF (istat /= 0) THEN
-        CALL stop_memory(routineN,moduleN,__LINE__,"neighbor_list")
-      END IF
+      DEALLOCATE (neighbor_list)
 
     END IF
 
@@ -868,7 +850,6 @@ CONTAINS
     CHARACTER(len=*), PARAMETER :: routineN = 'deallocate_neighbor_list_set', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: istat
     TYPE(neighbor_list_type), POINTER        :: neighbor_list, &
                                                 next_neighbor_list
 
@@ -882,10 +863,7 @@ CONTAINS
         neighbor_list => next_neighbor_list
       END DO
 
-      DEALLOCATE (neighbor_list_set,STAT=istat)
-      IF (istat /= 0) THEN
-        CALL stop_memory(routineN,moduleN,__LINE__,"neighbor_list_set")
-      END IF
+      DEALLOCATE (neighbor_list_set)
 
     END IF
 
@@ -949,8 +927,7 @@ CONTAINS
 
     ELSE
 
-      CALL stop_program(routineN,moduleN,__LINE__,&
-                        "The requested neighbor list is not associated")
+      CPABORT("The requested neighbor list is not associated")
 
     END IF
 
@@ -988,8 +965,7 @@ CONTAINS
 
     ELSE
 
-      CALL stop_program(routineN,moduleN,__LINE__,&
-                        "The requested neighbor list set is not associated")
+      CPABORT("The requested neighbor list set is not associated")
 
     END IF
 
@@ -1036,14 +1012,13 @@ CONTAINS
          IF (PRESENT(mic)) mic = neighbor_list_set%mic
          IF (PRESENT(molecular)) molecular = neighbor_list_set%molecular
       ELSE
-         CALL stop_program(routineN,moduleN,__LINE__,&
-                        "No neighbor list set is associated")
+         CALL cp_abort(__LOCATION__,"No neighbor list set is associated. "//&
+              "Did you specify *all* required basis-sets, eg. for ADMM?")
       END IF
 
     ELSE
 
-      CALL stop_program(routineN,moduleN,__LINE__,&
-                        "The requested neighbor list sets are not associated")
+      CPABORT("The requested neighbor list sets are not associated")
 
     END IF
 
@@ -1079,8 +1054,7 @@ CONTAINS
 
     ELSE
 
-      CALL stop_program(routineN,moduleN,__LINE__,&
-                        "The requested neighbor node is not associated")
+      CPABORT("The requested neighbor node is not associated")
 
     END IF
 
@@ -1126,8 +1100,7 @@ CONTAINS
 
     ELSE
 
-      CALL stop_program(routineN,moduleN,__LINE__,&
-                        "The requested neighbor list set is not associated")
+      CPABORT("The requested neighbor list set is not associated")
 
     END IF
 

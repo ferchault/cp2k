@@ -37,11 +37,11 @@ MODULE cp_dbcsr_operations
        dbcsr_distribution_nlocal_cols, dbcsr_distribution_nlocal_rows, &
        dbcsr_distribution_nrows, dbcsr_distribution_obj, &
        dbcsr_distribution_release, dbcsr_distribution_row_clusters, &
-       dbcsr_distribution_row_dist, dbcsr_error_set, dbcsr_error_stop, &
-       dbcsr_error_type, dbcsr_mp_hold, dbcsr_mp_npcols, dbcsr_mp_nprows, &
-       dbcsr_mp_obj, dbcsr_norm_frobenius, dbcsr_type_antisymmetric, &
-       dbcsr_type_complex_8, dbcsr_type_no_symmetry, dbcsr_type_real_4, &
-       dbcsr_type_real_8, dbcsr_type_symmetric
+       dbcsr_distribution_row_dist, dbcsr_mp_hold, dbcsr_mp_npcols, &
+       dbcsr_mp_nprows, dbcsr_mp_obj, dbcsr_norm_frobenius, &
+       dbcsr_type_antisymmetric, dbcsr_type_complex_8, &
+       dbcsr_type_no_symmetry, dbcsr_type_real_4, dbcsr_type_real_8, &
+       dbcsr_type_symmetric
   USE cp_fm_basic_linalg,              ONLY: cp_fm_gemm
   USE cp_fm_struct,                    ONLY: cp_fm_struct_create,&
                                              cp_fm_struct_release,&
@@ -57,12 +57,10 @@ MODULE cp_dbcsr_operations
   USE kinds,                           ONLY: dp,&
                                              real_4,&
                                              sp
-  USE termination,                     ONLY: stop_program
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 
-  !$ USE OMP_LIB
+  !$ USE OMP_LIB, ONLY: omp_get_max_threads, omp_get_thread_num, omp_get_num_threads
 #include "common/cp_common_uses.f90"
+#include "base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -105,11 +103,10 @@ CONTAINS
 !> \param target_start ...
 !> \param para_env ...
 !> \param blacs_env ...
-!> \param error ...
 !> \author vw
 ! *****************************************************************************
   SUBROUTINE cp_dbcsr_copy_columns_hack(matrix_b, matrix_a,&
-       ncol, source_start, target_start, para_env, blacs_env, error)
+       ncol, source_start, target_start, para_env, blacs_env)
 
     TYPE(cp_dbcsr_type), INTENT(INOUT)       :: matrix_b
     TYPE(cp_dbcsr_type), INTENT(IN)          :: matrix_a
@@ -117,7 +114,6 @@ CONTAINS
                                                 target_start
     TYPE(cp_para_env_type), POINTER          :: para_env
     TYPE(cp_blacs_env_type), POINTER         :: blacs_env
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'cp_dbcsr_copy_columns_hack', &
       routineP = moduleN//':'//routineN
@@ -130,25 +126,25 @@ CONTAINS
     NULLIFY(fm_matrix_a, fm_matrix_b, fm_struct)
     CALL cp_dbcsr_get_info(matrix_a,nfullrows_total=nfullrows_total,nfullcols_total=nfullcols_total)
     CALL cp_fm_struct_create(fm_struct,context=blacs_env,nrow_global=nfullrows_total,&
-         ncol_global=nfullcols_total,para_env=para_env,error=error)
-    CALL cp_fm_create(fm_matrix_a,fm_struct,name="fm_matrix_a",error=error)
-    CALL cp_fm_struct_release(fm_struct,error=error)
+         ncol_global=nfullcols_total,para_env=para_env)
+    CALL cp_fm_create(fm_matrix_a,fm_struct,name="fm_matrix_a")
+    CALL cp_fm_struct_release(fm_struct)
 
     CALL cp_dbcsr_get_info(matrix_b,nfullrows_total=nfullrows_total,nfullcols_total=nfullcols_total)
     CALL cp_fm_struct_create(fm_struct,context=blacs_env,nrow_global=nfullrows_total,&
-         ncol_global=nfullcols_total,para_env=para_env,error=error)
-    CALL cp_fm_create(fm_matrix_b,fm_struct,name="fm_matrix_b",error=error)
-    CALL cp_fm_struct_release(fm_struct,error=error)
+         ncol_global=nfullcols_total,para_env=para_env)
+    CALL cp_fm_create(fm_matrix_b,fm_struct,name="fm_matrix_b")
+    CALL cp_fm_struct_release(fm_struct)
 
-    CALL copy_dbcsr_to_fm(matrix_a, fm_matrix_a, error=error)
-    CALL copy_dbcsr_to_fm(matrix_b, fm_matrix_b, error=error)
+    CALL copy_dbcsr_to_fm(matrix_a, fm_matrix_a)
+    CALL copy_dbcsr_to_fm(matrix_b, fm_matrix_b)
 
     CALL cp_fm_to_fm(fm_matrix_a, fm_matrix_b, ncol, source_start, target_start)
 
-    CALL copy_fm_to_dbcsr(fm_matrix_b, matrix_b, error=error)
+    CALL copy_fm_to_dbcsr(fm_matrix_b, matrix_b)
 
-    CALL cp_fm_release(fm_matrix_a, error=error)
-    CALL cp_fm_release(fm_matrix_b, error=error)
+    CALL cp_fm_release(fm_matrix_a)
+    CALL cp_fm_release(fm_matrix_b)
 
   END SUBROUTINE cp_dbcsr_copy_columns_hack
 
@@ -158,18 +154,16 @@ CONTAINS
 !> \param[in] dist2d          distribution_2d
 !> \param[out] dist           DBCSR distribution
 !> \param unit_nr ...
-!> \param[in,out] error       cp2k error
 !> \param mp_obj ...
 !> \par History
 !>    move form dbcsr_operation 01.2010
 ! *****************************************************************************
-  SUBROUTINE cp_dbcsr_dist2d_to_dist(dist2d, dist, unit_nr, error, mp_obj)
+  SUBROUTINE cp_dbcsr_dist2d_to_dist(dist2d, dist, unit_nr,mp_obj)
     TYPE(distribution_2d_type), INTENT(IN), &
       TARGET                                 :: dist2d
     TYPE(dbcsr_distribution_obj), &
       INTENT(OUT)                            :: dist
     INTEGER, INTENT(IN)                      :: unit_nr
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
     TYPE(dbcsr_mp_obj), INTENT(IN), OPTIONAL :: mp_obj
 
     INTEGER                                  :: mypcol, myproc, myprow, &
@@ -185,7 +179,7 @@ CONTAINS
 !   ---------------------------------------------------------------------------
 
     dist2d_p => dist2d
-    CALL distribution_2d_get(dist2d_p, error=error,&
+    CALL distribution_2d_get(dist2d_p,&
          row_distribution=row_dist_data, col_distribution=col_dist_data,&
          blacs_env=blacs_env)
     CALL get_blacs_info(blacs_env, para_env=para_env,&
@@ -213,15 +207,13 @@ CONTAINS
 !> \param[in]  ncol         nbr of columns
 !> \param[in]  alpha        alpha
 !>
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE cp_dbcsr_multiply_local_d(matrix_a, vec_b, vec_c, ncol, alpha, error)
+  SUBROUTINE cp_dbcsr_multiply_local_d(matrix_a, vec_b, vec_c, ncol, alpha)
     TYPE(cp_dbcsr_type), INTENT(IN)          :: matrix_a
     REAL(dp), DIMENSION(:, :), INTENT(IN)    :: vec_b
     REAL(dp), DIMENSION(:, :), INTENT(INOUT) :: vec_c
     INTEGER, INTENT(in), OPTIONAL            :: ncol
     REAL(dp), INTENT(IN), OPTIONAL           :: alpha
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'cp_dbcsr_multiply_local_d', &
       routineP = moduleN//':'//routineN
@@ -304,9 +296,8 @@ CONTAINS
 !> \param vec_c ...
 !> \param ncol ...
 !> \param alpha ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE cp_dbcsr_multiply_local_s(matrix_a, vec_b, vec_c, ncol, alpha, error)
+  SUBROUTINE cp_dbcsr_multiply_local_s(matrix_a, vec_b, vec_c, ncol, alpha)
     TYPE(cp_dbcsr_type), INTENT(IN)          :: matrix_a
     REAL(KIND=real_4), DIMENSION(:, :), &
       INTENT(IN)                             :: vec_b
@@ -314,7 +305,6 @@ CONTAINS
       INTENT(INOUT)                          :: vec_c
     INTEGER, INTENT(in), OPTIONAL            :: ncol
     REAL(KIND=real_4), INTENT(IN), OPTIONAL  :: alpha
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'cp_dbcsr_multiply_local_s', &
       routineP = moduleN//':'//routineN
@@ -382,14 +372,12 @@ CONTAINS
 !> \param[in]  alpha          alpha
 !> \param[in]  beta           beta
 !>
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE cp_dbcsr_sm_fm_multiply(matrix, fm_in, fm_out, ncol, alpha, beta, error)
+  SUBROUTINE cp_dbcsr_sm_fm_multiply(matrix, fm_in, fm_out, ncol, alpha, beta)
     TYPE(cp_dbcsr_type), INTENT(IN)          :: matrix
     TYPE(cp_fm_type), POINTER                :: fm_in, fm_out
     INTEGER, INTENT(IN)                      :: ncol
     REAL(dp), INTENT(IN), OPTIONAL           :: alpha, beta
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'cp_dbcsr_sm_fm_multiply', &
       routineP = moduleN//':'//routineN
@@ -409,9 +397,9 @@ CONTAINS
     IF (PRESENT(alpha)) my_alpha=alpha
     IF (PRESENT(beta)) my_beta=beta
 
-    CALL cp_fm_get_info(fm_out, ncol_global=k_out, error=error)
+    CALL cp_fm_get_info(fm_out, ncol_global=k_out)
 
-    CALL cp_fm_get_info(fm_in, ncol_global=k_in, error=error)
+    CALL cp_fm_get_info(fm_in, ncol_global=k_in)
     !write(*,*)routineN//" -----------------------------------"
     !IF (k_in .NE. k_out) &
     !   WRITE(*,'(3(A,I5,1X),2(A,F5.2,1X))')&
@@ -422,12 +410,12 @@ CONTAINS
        CALL dbcsr_create_dist_r_unrot (dist_right_in, cp_dbcsr_distribution(matrix), k_in, &
             col_blk_size_right_in)
 
-       CALL cp_dbcsr_init(in, error)
+       CALL cp_dbcsr_init(in)
        CALL cp_dbcsr_create(in, "D", dist_right_in, dbcsr_type_no_symmetry, &
             cp_dbcsr_row_block_sizes(matrix), col_blk_size_right_in,&
-            0, 0, error=error)
+            nze=0)
 
-       CALL cp_dbcsr_init(out, error)
+       CALL cp_dbcsr_init(out)
        CALL cp_dbcsr_distribution_new (product_dist,&
             dbcsr_distribution_mp (cp_dbcsr_distribution(matrix)),&
             dbcsr_distribution_row_dist (cp_dbcsr_distribution(matrix)),&
@@ -445,21 +433,21 @@ CONTAINS
 
        CALL cp_dbcsr_create(out, "D", product_dist, dbcsr_type_no_symmetry, &
             cp_dbcsr_row_block_sizes(matrix), col_blk_size_right_out,&
-            0, 0, error=error)
+            nze=0)
 
-       CALL copy_fm_to_dbcsr(fm_in, in, error=error)
+       CALL copy_fm_to_dbcsr(fm_in, in)
        IF(ncol.NE.k_out.OR.my_beta.NE.0.0_dp) &
-            CALL copy_fm_to_dbcsr(fm_out, out, error=error)
+            CALL copy_fm_to_dbcsr(fm_out, out)
 
        CALL timeset(routineN//'_core', timing_handle_mult)
        CALL cp_dbcsr_multiply("N", "N", my_alpha, matrix, in, my_beta, out,&
-            last_column=ncol, match_matrix_sizes=.TRUE., error=error)
+            last_column=ncol, match_matrix_sizes=.TRUE.)
        CALL timestop(timing_handle_mult)
 
-       CALL copy_dbcsr_to_fm(out, fm_out,error)
+       CALL copy_dbcsr_to_fm(out, fm_out)
 
-       CALL cp_dbcsr_release(in, error=error)
-       CALL cp_dbcsr_release(out, error=error)
+       CALL cp_dbcsr_release(in)
+       CALL cp_dbcsr_release(out)
        DEALLOCATE(col_blk_size_right_in,col_blk_size_right_out)
        CALL dbcsr_distribution_release(dist_right_in)
        CALL dbcsr_distribution_release(product_dist)
@@ -485,8 +473,8 @@ CONTAINS
 
     n1 = SIZE(sizes1)
     n2 = SIZE(sizes2)
-    CALL cp_assert (n1 .EQ. n2, cp_fatal_level, cp_caller_error,&
-         "match_col_sizes", "distributions must be equal!")
+    IF(n1 .NE. n2)&
+       CPABORT("distributions must be equal!")
     sizes1(1:n1) = sizes2(1:n1)
     used = SUM (sizes1(1:n1))
     ! If sizes1 does not cover everything, then we increase the
@@ -506,7 +494,7 @@ CONTAINS
     ENDIF
   END SUBROUTINE match_col_sizes
 ! *****************************************************************************
-!> \brief performs the multiplication sparse_matrix*dense_mat*dens_mat^T
+!> \brief performs the multiplication sparse_matrix+dense_mat*dens_mat^T
 !>        if matrix_g is not explicitly given, matrix_v^T will be used
 !>        this can be important to save the necessary redistribute for a 
 !>        different matrix_g and increase performance.
@@ -515,18 +503,17 @@ CONTAINS
 !> \param matrix_g ...
 !> \param ncol ...
 !> \param alpha ...
-!> \param keep_sparsity ...
-!> \param error ...
+!> \param keep_sparsity Determines if the sparsity of sparse_matrix is retained
+!>        by default it is TRUE
 ! *****************************************************************************
   SUBROUTINE cp_dbcsr_plus_fm_fm_t_native(sparse_matrix,matrix_v,matrix_g,ncol,&
-       alpha,keep_sparsity,error)
+       alpha,keep_sparsity)
     TYPE(cp_dbcsr_type), INTENT(INOUT)       :: sparse_matrix
     TYPE(cp_fm_type), POINTER                :: matrix_v
     TYPE(cp_fm_type), OPTIONAL, POINTER      :: matrix_g
     INTEGER, INTENT(IN)                      :: ncol
     REAL(KIND=dp), INTENT(IN), OPTIONAL      :: alpha
     LOGICAL, INTENT(IN), OPTIONAL            :: keep_sparsity
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'cp_dbcsr_plus_fm_fm_t_native', &
       routineP = moduleN//':'//routineN
@@ -554,11 +541,11 @@ CONTAINS
     NULLIFY(col_dist_left)
 
     IF (ncol .GT. 0) THEN
-       CALL cp_assert (cp_dbcsr_valid_index (sparse_matrix), cp_fatal_level,&
-            cp_caller_error, routineN, "sparse_matrix must pre-exist", error)
+       IF(.NOT.cp_dbcsr_valid_index (sparse_matrix))&
+          CPABORT("sparse_matrix must pre-exist")
        !
        ! Setup matrix_v
-       CALL cp_fm_get_info(matrix_v, ncol_global=k, error=error)
+       CALL cp_fm_get_info(matrix_v, ncol_global=k)
        !WRITE(*,*)routineN//'truncated mult k, ncol',k,ncol,' PRESENT (matrix_g)',PRESENT (matrix_g)
        mp = dbcsr_distribution_mp (cp_dbcsr_distribution(sparse_matrix))
        CALL cp_create_bl_distribution (col_dist_left, col_blk_size_left,&
@@ -570,22 +557,22 @@ CONTAINS
             dbcsr_distribution_row_clusters(cp_dbcsr_distribution(sparse_matrix)),&
             col_dist_cluster)
        DEALLOCATE(col_dist_left)
-       CALL cp_dbcsr_init (mat_v, error)
+       CALL cp_dbcsr_init (mat_v)
        CALL cp_dbcsr_create(mat_v, "DBCSR matrix_v", dist_left, dbcsr_type_no_symmetry,&
-            cp_dbcsr_row_block_sizes (sparse_matrix), col_blk_size_left, 0, 0,&
-            cp_dbcsr_get_data_type (sparse_matrix), error=error)
-       CALL copy_fm_to_dbcsr(matrix_v, mat_v, error=error)
-       CALL cp_dbcsr_verify_matrix(mat_v, error)
+            cp_dbcsr_row_block_sizes (sparse_matrix), col_blk_size_left, nze=0,&
+            data_type=cp_dbcsr_get_data_type (sparse_matrix))
+       CALL copy_fm_to_dbcsr(matrix_v, mat_v)
+       CALL cp_dbcsr_verify_matrix(mat_v)
        !
        ! Setup matrix_g
        IF(PRESENT (matrix_g)) THEN
-          CALL cp_dbcsr_init(mat_g, error)
+          CALL cp_dbcsr_init(mat_g)
           CALL cp_dbcsr_create(mat_g, "DBCSR matrix_g", dist_left,&
                dbcsr_type_no_symmetry,&
                cp_dbcsr_row_block_sizes (sparse_matrix),&
                cp_dbcsr_col_block_sizes (mat_v),&
-               data_type=cp_dbcsr_get_data_type (sparse_matrix), error=error)
-          CALL copy_fm_to_dbcsr(matrix_g, mat_g, error=error)
+               data_type=cp_dbcsr_get_data_type (sparse_matrix))
+          CALL copy_fm_to_dbcsr(matrix_g, mat_g)
        ENDIF
        !
        DEALLOCATE (col_blk_size_left)
@@ -594,14 +581,14 @@ CONTAINS
        !
        IF(check_product) THEN
           NULLIFY(fm_matrix)
-          CALL cp_fm_get_info(matrix_v,nrow_global=nao,error=error)
+          CALL cp_fm_get_info(matrix_v,nrow_global=nao)
           CALL cp_fm_struct_create(fm_struct_tmp,context=matrix_v%matrix_struct%context,nrow_global=nao,&
-               ncol_global=nao,para_env=matrix_v%matrix_struct%para_env,error=error)
-          CALL cp_fm_create(fm_matrix,fm_struct_tmp,name="fm matrix",error=error)
-          CALL cp_fm_struct_release(fm_struct_tmp,error=error)
-          CALL copy_dbcsr_to_fm(sparse_matrix,fm_matrix, error=error)
-          CALL cp_dbcsr_init(sparse_matrix3, error)
-          CALL cp_dbcsr_copy(sparse_matrix3,sparse_matrix,error=error)
+               ncol_global=nao,para_env=matrix_v%matrix_struct%para_env)
+          CALL cp_fm_create(fm_matrix,fm_struct_tmp,name="fm matrix")
+          CALL cp_fm_struct_release(fm_struct_tmp)
+          CALL copy_dbcsr_to_fm(sparse_matrix,fm_matrix)
+          CALL cp_dbcsr_init(sparse_matrix3)
+          CALL cp_dbcsr_copy(sparse_matrix3,sparse_matrix)
        ENDIF
        !
        my_alpha = 1.0_dp
@@ -610,33 +597,31 @@ CONTAINS
           CALL cp_dbcsr_multiply("N", "T", my_alpha, mat_v, mat_g,&
                1.0_dp, sparse_matrix,&
                retain_sparsity=my_keep_sparsity,&
-               last_k = ncol,&
-               error=error)
+               last_k = ncol)
        ELSE
           CALL cp_dbcsr_multiply("N", "T", my_alpha, mat_v, mat_v,&
                1.0_dp, sparse_matrix,&
                retain_sparsity=my_keep_sparsity,&
-               last_k = ncol,&
-               error=error)
+               last_k = ncol)
        ENDIF
 
        IF(check_product) THEN
           IF(PRESENT (matrix_g)) THEN
              CALL cp_fm_gemm("N","T",nao,nao,ncol,my_alpha,matrix_v,matrix_g,&
-                  1.0_dp,fm_matrix,error=error)
+                  1.0_dp,fm_matrix)
           ELSE
              CALL cp_fm_gemm("N","T",nao,nao,ncol,my_alpha,matrix_v,matrix_v,&
-                  1.0_dp,fm_matrix,error=error)
+                  1.0_dp,fm_matrix)
           ENDIF
 
-          CALL cp_dbcsr_init(sparse_matrix2, error)
-          CALL cp_dbcsr_copy(sparse_matrix2,sparse_matrix,error=error)
-          CALL cp_dbcsr_scale(sparse_matrix2,alpha_scalar=0.0_dp,error=error)
-          CALL copy_fm_to_dbcsr(fm_matrix,sparse_matrix2,keep_sparsity=my_keep_sparsity, error=error)
+          CALL cp_dbcsr_init(sparse_matrix2)
+          CALL cp_dbcsr_copy(sparse_matrix2,sparse_matrix)
+          CALL cp_dbcsr_scale(sparse_matrix2,alpha_scalar=0.0_dp)
+          CALL copy_fm_to_dbcsr(fm_matrix,sparse_matrix2,keep_sparsity=my_keep_sparsity)
           CALL cp_dbcsr_add(sparse_matrix2,sparse_matrix,alpha_scalar=1.0_dp,&
-               beta_scalar=-1.0_dp,error=error)
+               beta_scalar=-1.0_dp)
           CALL cp_dbcsr_norm(sparse_matrix2,which_norm=dbcsr_norm_frobenius,&
-               norm_scalar=norm,error=error)
+               norm_scalar=norm)
           WRITE(*,*) 'nao=',nao,' k=',k,' ncol=',ncol,' my_alpha=',my_alpha
           WRITE(*,*) 'PRESENT (matrix_g)',PRESENT (matrix_g)
           WRITE(*,*) 'matrix_type=',cp_dbcsr_get_matrix_type(sparse_matrix)
@@ -660,12 +645,12 @@ CONTAINS
              !CALL cp_dbcsr_print(sparse_matrix3,matlab_format=.TRUE.)
              !stop
           ENDIF
-          CALL cp_dbcsr_release(sparse_matrix2, error=error)
-          CALL cp_dbcsr_release(sparse_matrix3, error=error)
-          CALL cp_fm_release(fm_matrix,error=error)
+          CALL cp_dbcsr_release(sparse_matrix2)
+          CALL cp_dbcsr_release(sparse_matrix3)
+          CALL cp_fm_release(fm_matrix)
        ENDIF
-       CALL cp_dbcsr_release (mat_v, error=error)
-       IF(PRESENT (matrix_g)) CALL cp_dbcsr_release (mat_g, error=error)
+       CALL cp_dbcsr_release (mat_v)
+       IF(PRESENT (matrix_g)) CALL cp_dbcsr_release (mat_g)
     ENDIF
     CALL timestop(timing_handle)
 
@@ -682,28 +667,25 @@ CONTAINS
 !> \param[in] beta            (optional) scaling of existing SM
 !> \param[in] keep_sparsity   (optional) retains the sparsity of the input
 !>                            matrix
-!> \param error ...
 !> \date    2009-10-13
 !> \par History
 !>          2009-10-13 rewritten based on copy_dbcsr_to_fm
 !> \author  Urban Borstnik
 !> \version 2.0
 ! *****************************************************************************
-  SUBROUTINE copy_fm_to_dbcsr(fm,matrix,alpha,beta,keep_sparsity,error)
+  SUBROUTINE copy_fm_to_dbcsr(fm,matrix,alpha,beta,keep_sparsity)
     TYPE(cp_fm_type), POINTER                :: fm
     TYPE(cp_dbcsr_type), INTENT(INOUT)       :: matrix
     REAL(kind=dp), INTENT(IN), OPTIONAL      :: alpha, beta
     LOGICAL, INTENT(IN), OPTIONAL            :: keep_sparsity
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'copy_fm_to_dbcsr', &
       routineP = moduleN//':'//routineN
 
-    INTEGER :: blk_p, col, col_l, col_size, error_handler, group, handle, &
-      nblkcols_local, nblkcols_total, nblkrows_local, nblkrows_total, &
-      ncol_block, ncol_global, nfullcols_local, nfullcols_total, &
-      nfullrows_local, nfullrows_total, nrow_block, nrow_global, nze, row, &
-      row_l, row_size
+    INTEGER :: blk_p, col, col_l, col_size, group, handle, nblkcols_local, &
+      nblkcols_total, nblkrows_local, nblkrows_total, ncol_block, &
+      ncol_global, nfullcols_local, nfullcols_total, nfullrows_local, &
+      nfullrows_total, nrow_block, nrow_global, nze, row, row_l, row_size
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: first_col, first_row, &
                                                 last_col, last_row, &
                                                 local_col_sizes, &
@@ -718,20 +700,17 @@ CONTAINS
     TYPE(cp_blacs_env_type), POINTER         :: context
     TYPE(cp_dbcsr_type)                      :: bc_mat
     TYPE(dbcsr_distribution_obj)             :: bc_dist
-    TYPE(dbcsr_error_type)                   :: dbcsr_error
 
 !   ---------------------------------------------------------------------------
 
-    CALL dbcsr_error_set(routineN, error_handler, dbcsr_error)
     CALL timeset(routineN,handle)
 
     NULLIFY(col_blk_size,row_blk_size)
 
     my_beta=0._dp
     IF (PRESENT(beta)) THEN
-       CALL cp_assert (beta .EQ. my_beta, cp_fatal_level,&
-            cp_unimplemented_error_nr, routineN,&
-            "beta not supported, use matrix addition instead")
+       IF(beta .NE. my_beta)&
+          CPABORT("beta not supported, use matrix addition instead")
        my_beta=beta
     ENDIF
     group = fm%matrix_struct%para_env%group
@@ -745,12 +724,10 @@ CONTAINS
          nfullrows_total=nfullrows_total,&
          nfullcols_total=nfullcols_total)
 
-    CALL cp_assert (nrow_global.eq.nfullrows_total,&
-         cp_fatal_level, cp_caller_error, routineN,&
-         "FM and DBCSR matrix sizes do not match in rows")
-    CALL cp_assert (ncol_global.eq.nfullcols_total,&
-         cp_fatal_level, cp_caller_error, routineN,&
-         "FM and DBCSR matrix sizes do not match in columns")
+    IF(nrow_global.NE.nfullrows_total)&
+       CPABORT("FM and DBCSR matrix sizes do not match in rows")
+    IF(ncol_global.NE.nfullcols_total)&
+       CPABORT("FM and DBCSR matrix sizes do not match in columns")
 
     ! Create a block-cyclic distribution compatible with the FM matrix.
     CALL dbcsr_distribution_init (bc_dist)
@@ -761,10 +738,10 @@ CONTAINS
          row_blk_size, col_blk_size)        ! block-cyclic row/col sizes
 
     ! Create the block-cyclic DBCSR matrix
-    CALL cp_dbcsr_init (bc_mat, error)
+    CALL cp_dbcsr_init (bc_mat)
     CALL cp_dbcsr_create (bc_mat, "Block-cyclic "//cp_dbcsr_name(matrix), bc_dist,&
-         cp_dbcsr_get_matrix_type(matrix), row_blk_size, col_blk_size, 0, 0,&
-         reuse_arrays=.TRUE., data_type=cp_dbcsr_get_data_type(matrix),error=error)
+         cp_dbcsr_get_matrix_type(matrix), row_blk_size, col_blk_size, nze=0,&
+         reuse_arrays=.TRUE., data_type=cp_dbcsr_get_data_type(matrix))
 
     !call dbcsr_finalize (bc_mat)
     CALL dbcsr_distribution_release (bc_dist)
@@ -811,7 +788,7 @@ CONTAINS
 
     CALL cp_dbcsr_work_create (bc_mat, nblks_guess=nblkrows_local*nblkcols_local,&
          sizedata_guess=nfullrows_local*nfullcols_local, work_mutable=.FALSE.,&
-         n=1, error=error)
+         n=1)
     blk_p = 1
     bc_rows: DO row_l = 1, nblkrows_local
        row = local_rows (row_l)
@@ -821,7 +798,7 @@ CONTAINS
           col_size = col_blk_size(col)
           nze = row_size*col_size
           !WRITE(*,*)routineN//" Adding block",row,col,"size",nze
-          CALL cp_add_work_coordinate(bc_mat, 1, row, col, blk_p, error=dbcsr_error)
+          CALL cp_add_work_coordinate(bc_mat, 1, row, col, blk_p)
           IF (fm%use_sp) THEN
              !blk_1d_sp => bc_mat%m%wms(1)%data_area%d%r_sp(blk_p:blk_p+nze-1)
              blk_1d_sp => cp_dbcsr_get_data_p (bc_mat, 1,&
@@ -831,9 +808,8 @@ CONTAINS
              blk_1d_dp => cp_dbcsr_get_data_p (bc_mat, 1,&
                   select_data_type=REAL(0.0, KIND=dp), lb=blk_p, ub=blk_p+nze-1)
           ENDIF
-          CALL cp_assert (nze .EQ. (last_row(row)-first_row(row)+1)*(last_col(col)-first_col(col)+1),&
-               cp_fatal_level, cp_internal_error, routineN,&
-               "Block size does not match block row/col sizes")
+          IF(nze .NE. (last_row(row)-first_row(row)+1)*(last_col(col)-first_col(col)+1))&
+             CPABORT("Block size does not match block row/col sizes")
           IF (fm%use_sp) THEN
              blk_1d_sp(1:nze) = RESHAPE(&
                   fm_block_sp(&
@@ -849,19 +825,18 @@ CONTAINS
        ENDDO bc_cols
     ENDDO bc_rows
     CALL cp_set_work_size(bc_mat, 1, blk_p - 1)
-    CALL cp_dbcsr_finalize (bc_mat, reshuffle=.FALSE., error=error)
+    CALL cp_dbcsr_finalize (bc_mat, reshuffle=.FALSE.)
 
     ! Now convert to the desired matrix distribution
     IF (PRESENT (alpha)) THEN
-       CALL stop_program(routineN,moduleN,__LINE__,'no more alpha... clean me')
+       CPABORT('no more alpha... clean me')
     ELSE
        CALL cp_dbcsr_complete_redistribute (bc_mat, matrix,&
-            keep_sparsity=keep_sparsity, error=error)
+            keep_sparsity=keep_sparsity)
     ENDIF
-    CALL cp_dbcsr_release (bc_mat, error=error)
+    CALL cp_dbcsr_release (bc_mat)
 
     CALL timestop(handle)
-    CALL dbcsr_error_stop(error_handler, dbcsr_error)
   END SUBROUTINE copy_fm_to_dbcsr
 
 ! *****************************************************************************
@@ -869,22 +844,20 @@ CONTAINS
 !> \param fm ...
 !> \param bc_mat ...
 !> \param beta ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE copy_fm_to_dbcsr_bc(fm,bc_mat,beta,error)
+  SUBROUTINE copy_fm_to_dbcsr_bc(fm,bc_mat,beta)
     TYPE(cp_fm_type), POINTER                :: fm
     TYPE(cp_dbcsr_type)                      :: bc_mat
     REAL(kind=dp), INTENT(IN), OPTIONAL      :: beta
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'copy_fm_to_dbcsr_bc', &
       routineP = moduleN//':'//routineN
 
-    INTEGER :: blk_p, col, col_l, col_size, data_type, error_handler, group, &
-      handle, my_blk, mypcol, myproc, myprow, nblkcols_local, nblkcols_total, &
-      nblkrows_local, nblkrows_total, ncol_block, ncol_global, &
-      nfullcols_local, nfullcols_total, nfullrows_local, nfullrows_total, &
-      nrow_block, nrow_global, numproc, nze, row, row_l, row_size
+    INTEGER :: blk_p, col, col_l, col_size, data_type, group, handle, my_blk, &
+      mypcol, myproc, myprow, nblkcols_local, nblkcols_total, nblkrows_local, &
+      nblkrows_total, ncol_block, ncol_global, nfullcols_local, &
+      nfullcols_total, nfullrows_local, nfullrows_total, nrow_block, &
+      nrow_global, numproc, nze, row, row_l, row_size
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: first_col, first_row, &
                                                 last_col, last_row, &
                                                 local_col_sizes, &
@@ -900,21 +873,18 @@ CONTAINS
     REAL(kind=sp), DIMENSION(:, :), POINTER  :: fm_block_sp
     TYPE(cp_blacs_env_type), POINTER         :: context
     TYPE(dbcsr_distribution_obj)             :: bc_dist
-    TYPE(dbcsr_error_type)                   :: dbcsr_error
     TYPE(dbcsr_mp_obj)                       :: mp_env
 
 !   ---------------------------------------------------------------------------
 
-    CALL dbcsr_error_set(routineN, error_handler, dbcsr_error)
     CALL timeset(routineN,handle)
 
     NULLIFY(col_blk_size,row_blk_size)
 
     my_beta=0._dp
     IF (PRESENT(beta)) THEN
-       CALL cp_assert (beta .EQ. my_beta, cp_fatal_level,&
-            cp_unimplemented_error_nr, routineN,&
-            "beta not supported, use matrix addition instead")
+       IF(beta.NE.my_beta)&
+          CPABORT("beta not supported, use matrix addition instead")
        my_beta=beta
     ENDIF
     group = fm%matrix_struct%para_env%group
@@ -947,10 +917,10 @@ CONTAINS
     ! Create the block-cyclic DBCSR matrix
     data_type=dbcsr_type_real_8
     IF(fm%use_sp)data_type=dbcsr_type_real_4
-    CALL cp_dbcsr_init (bc_mat, error)
+    CALL cp_dbcsr_init (bc_mat)
     CALL cp_dbcsr_create (bc_mat, "Block-cyclic ", bc_dist,&
-         dbcsr_type_no_symmetry, row_blk_size, col_blk_size, 0, 0,&
-         reuse_arrays=.TRUE., data_type=data_type,error=error)
+         dbcsr_type_no_symmetry, row_blk_size, col_blk_size, nze=0,&
+         reuse_arrays=.TRUE., data_type=data_type)
 
     !call dbcsr_finalize (bc_mat)
     CALL dbcsr_distribution_release (bc_dist)
@@ -999,7 +969,7 @@ CONTAINS
 
     CALL cp_dbcsr_work_create (bc_mat, nblks_guess=nblkrows_local*nblkcols_local,&
          sizedata_guess=nfullrows_local*nfullcols_local, work_mutable=.FALSE.,&
-         n=1, error=error)
+         n=1)
     blk_p = 1
     bc_rows: DO row_l = 1, nblkrows_local
        row = local_rows (row_l)
@@ -1009,7 +979,7 @@ CONTAINS
           col_size = col_blk_size(col)
           my_blk=(row_l-1)*nblkcols_local+col_l-1
           nze = row_size*col_size
-          CALL cp_add_work_coordinate(bc_mat, 1, row, col, blk_map(my_blk), error=dbcsr_error)
+          CALL cp_add_work_coordinate(bc_mat, 1, row, col, blk_map(my_blk))
           blk_map(my_blk+1)=blk_map(my_blk)+nze
        ENDDO bc_cols
     ENDDO bc_rows
@@ -1032,9 +1002,8 @@ CONTAINS
              blk_1d_dp => cp_dbcsr_get_data_p (bc_mat, 1,&
                   select_data_type=REAL(0.0, KIND=dp), lb=blk_map(my_blk), ub=blk_map(my_blk)+nze-1)
           ENDIF
-          CALL cp_assert (nze .EQ. (last_row(row)-first_row(row)+1)*(last_col(col)-first_col(col)+1),&
-               cp_fatal_level, cp_internal_error, routineN,&
-               "Block size does not match block row/col sizes")
+          IF(nze .NE. (last_row(row)-first_row(row)+1)*(last_col(col)-first_col(col)+1))&
+             CPABORT("Block size does not match block row/col sizes")
           IF (fm%use_sp) THEN
              blk_1d_sp(1:nze) = RESHAPE(&
                   fm_block_sp(&
@@ -1050,11 +1019,10 @@ CONTAINS
     ENDDO bc_rows1
 !$OMP END PARALLEL DO
     CALL cp_set_work_size(bc_mat, 1, blk_map(nblkrows_local*nblkcols_local) - 1)
-    CALL cp_dbcsr_finalize (bc_mat, reshuffle=.FALSE., error=error)
+    CALL cp_dbcsr_finalize (bc_mat, reshuffle=.FALSE.)
     DEALLOCATE(blk_map)
 
     CALL timestop(handle)
-    CALL dbcsr_error_stop(error_handler, dbcsr_error)
   END SUBROUTINE copy_fm_to_dbcsr_bc
 ! *****************************************************************************
 !> \brief   Copy a BLACS matrix to a dbcsr matrix.
@@ -1065,18 +1033,16 @@ CONTAINS
 !> \param[out] matrix         DBCSR matrix
 !> \param[in] keep_sparsity   (optional) retains the sparsity of the input
 !>                            matrix
-!> \param error ...
 !> \date    2010
 !> \par History
 !>          2010  copied from copy_dbcsr_to_fm
 !> \author  VW
 !> \version 2.0
 ! *****************************************************************************
-  SUBROUTINE copy_cfm_to_dbcsr(fm,matrix,keep_sparsity,error)
+  SUBROUTINE copy_cfm_to_dbcsr(fm,matrix,keep_sparsity)
     TYPE(cp_cfm_type), POINTER               :: fm
     TYPE(cp_dbcsr_type), INTENT(INOUT)       :: matrix
     LOGICAL, INTENT(IN), OPTIONAL            :: keep_sparsity
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'copy_cfm_to_dbcsr', &
       routineP = moduleN//':'//routineN
@@ -1084,11 +1050,10 @@ CONTAINS
     COMPLEX(KIND=dp), DIMENSION(:), POINTER  :: blk_1d
     COMPLEX(KIND=dp), DIMENSION(:, :), &
       POINTER                                :: fm_block
-    INTEGER :: blk_p, col, col_l, col_size, error_handler, group, handle, &
-      nblkcols_local, nblkcols_total, nblkrows_local, nblkrows_total, &
-      ncol_block, ncol_global, nfullcols_local, nfullcols_total, &
-      nfullrows_local, nfullrows_total, nrow_block, nrow_global, nze, row, &
-      row_l, row_size
+    INTEGER :: blk_p, col, col_l, col_size, group, handle, nblkcols_local, &
+      nblkcols_total, nblkrows_local, nblkrows_total, ncol_block, &
+      ncol_global, nfullcols_local, nfullcols_total, nfullrows_local, &
+      nfullrows_total, nrow_block, nrow_global, nze, row, row_l, row_size
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: first_col, first_row, &
                                                 last_col, last_row, &
                                                 local_col_sizes, &
@@ -1098,11 +1063,9 @@ CONTAINS
     TYPE(cp_blacs_env_type), POINTER         :: context
     TYPE(cp_dbcsr_type)                      :: bc_mat
     TYPE(dbcsr_distribution_obj)             :: bc_dist
-    TYPE(dbcsr_error_type)                   :: dbcsr_error
 
 !   ---------------------------------------------------------------------------
 
-    CALL dbcsr_error_set(routineN, error_handler, dbcsr_error)
     CALL timeset(routineN,handle)
 
     NULLIFY(col_blk_size,row_blk_size)
@@ -1118,12 +1081,10 @@ CONTAINS
          nfullrows_total=nfullrows_total,&
          nfullcols_total=nfullcols_total)
 
-    CALL cp_assert (nrow_global.eq.nfullrows_total,&
-         cp_fatal_level, cp_caller_error, routineN,&
-         "FM and DBCSR matrix sizes do not match in rows")
-    CALL cp_assert (ncol_global.eq.nfullcols_total,&
-         cp_fatal_level, cp_caller_error, routineN,&
-         "FM and DBCSR matrix sizes do not match in columns")
+    IF(nrow_global.NE.nfullrows_total)&
+       CPABORT("FM and DBCSR matrix sizes do not match in rows")
+    IF(ncol_global.NE.nfullcols_total)&
+       CPABORT("FM and DBCSR matrix sizes do not match in columns")
 
     ! Create a block-cyclic distribution compatible with the FM matrix.
     CALL dbcsr_distribution_init (bc_dist)
@@ -1134,10 +1095,10 @@ CONTAINS
          row_blk_size, col_blk_size)        ! block-cyclic row/col sizes
 
     ! Create the block-cyclic DBCSR matrix
-    CALL cp_dbcsr_init (bc_mat, error)
+    CALL cp_dbcsr_init (bc_mat)
     CALL cp_dbcsr_create (bc_mat, "Block-cyclic "//cp_dbcsr_name(matrix), bc_dist,&
-         cp_dbcsr_get_matrix_type(matrix), row_blk_size, col_blk_size, 0, 0,&
-         dbcsr_type_complex_8,reuse_arrays=.TRUE.,error=error) ! type hard coded !
+         cp_dbcsr_get_matrix_type(matrix), row_blk_size, col_blk_size, nze=0,&
+         data_type=dbcsr_type_complex_8,reuse_arrays=.TRUE.) ! type hard coded !
     !call dbcsr_finalize (bc_mat)
     CALL dbcsr_distribution_release (bc_dist)
     NULLIFY(col_blk_size,row_blk_size)
@@ -1181,7 +1142,7 @@ CONTAINS
     fm_block => fm%local_data
     CALL cp_dbcsr_work_create (bc_mat, nblks_guess=nblkrows_local*nblkcols_local,&
          sizedata_guess=nfullrows_local*nfullcols_local, work_mutable=.FALSE.,&
-         n=1, error=error)
+         n=1)
     blk_p = 1
     bc_rows: DO row_l = 1, nblkrows_local
        row = local_rows (row_l)
@@ -1191,13 +1152,12 @@ CONTAINS
           col_size = col_blk_size(col)
           nze = row_size*col_size
           !WRITE(*,*)routineN//" Adding block",row,col,"size",nze
-          CALL cp_add_work_coordinate(bc_mat, 1, row, col, blk_p, error=dbcsr_error)
+          CALL cp_add_work_coordinate(bc_mat, 1, row, col, blk_p)
           !blk_1d => bc_mat%m%wms(1)%data_area%d%c_dp(blk_p:blk_p+nze-1)
           blk_1d => cp_dbcsr_get_data_p (bc_mat, 1,&
                select_data_type=CMPLX(0.0, KIND=dp), lb=blk_p, ub=blk_p+nze-1)
-          CALL cp_assert (nze .EQ. (last_row(row)-first_row(row)+1)*(last_col(col)-first_col(col)+1),&
-               cp_fatal_level, cp_internal_error, routineN,&
-               "Block size does not match block row/col sizes")
+          IF(nze .NE. (last_row(row)-first_row(row)+1)*(last_col(col)-first_col(col)+1))&
+             CPABORT("Block size does not match block row/col sizes")
           blk_1d(1:nze) = RESHAPE(&
                fm_block(&
                first_row(row):last_row(row),first_col(col):last_col(col)&
@@ -1206,36 +1166,32 @@ CONTAINS
        ENDDO bc_cols
     ENDDO bc_rows
     CALL cp_set_work_size(bc_mat, 1, blk_p - 1)
-    CALL cp_dbcsr_finalize (bc_mat, reshuffle=.FALSE., error=error)
+    CALL cp_dbcsr_finalize (bc_mat, reshuffle=.FALSE.)
 
     ! Now convert to the desired matrix distribution
-    CALL cp_dbcsr_complete_redistribute (bc_mat, matrix, keep_sparsity=keep_sparsity,&
-         error=error)
-    CALL cp_dbcsr_release (bc_mat, error=error)
+    CALL cp_dbcsr_complete_redistribute (bc_mat, matrix, keep_sparsity=keep_sparsity)
+    CALL cp_dbcsr_release (bc_mat)
 
     CALL timestop(handle)
-    CALL dbcsr_error_stop(error_handler, dbcsr_error)
 
   END SUBROUTINE copy_cfm_to_dbcsr
 ! *****************************************************************************
 !> \brief   Copy a DBCSR matrix to a BLACS matrix
 !> \param[in] matrix          DBCSR matrix
 !> \param[out] fm             full matrix
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE copy_dbcsr_to_fm(matrix, fm, error)
+  SUBROUTINE copy_dbcsr_to_fm(matrix, fm)
     TYPE(cp_dbcsr_type), INTENT(IN)          :: matrix
     TYPE(cp_fm_type), POINTER                :: fm
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'copy_dbcsr_to_fm', &
       routineP = moduleN//':'//routineN
     LOGICAL, PARAMETER                       :: dbg = .FALSE.
 
-    INTEGER :: col, error_handle, group, handle, mypcol, mype, myprow, &
-      nblkcols_local, nblkcols_total, nblkrows_local, nblkrows_total, &
-      ncol_block, ncol_global, nfullcols_total, nfullrows_total, npcol, npe, &
-      nprow, nrow_block, nrow_global, row
+    INTEGER :: col, group, handle, mypcol, mype, myprow, nblkcols_local, &
+      nblkcols_total, nblkrows_local, nblkrows_total, ncol_block, &
+      ncol_global, nfullcols_total, nfullrows_total, npcol, npe, nprow, &
+      nrow_block, nrow_global, row
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: first_col, first_row, &
                                                 last_col, last_row, &
                                                 local_col_sizes, &
@@ -1248,12 +1204,10 @@ CONTAINS
     TYPE(cp_dbcsr_iterator)                  :: iter
     TYPE(cp_dbcsr_type)                      :: bc_mat
     TYPE(dbcsr_distribution_obj)             :: bc_dist
-    TYPE(dbcsr_error_type)                   :: dbcsr_error
 
 !   ---------------------------------------------------------------------------
 
     CALL timeset(routineN,handle)
-    CALL dbcsr_error_set (routineN, error_handle, error=dbcsr_error)
 
     NULLIFY(col_blk_size,row_blk_size)
 
@@ -1283,14 +1237,14 @@ CONTAINS
          dbcsr_distribution_mp (cp_dbcsr_distribution(matrix)),&
          row_blk_size, col_blk_size)
 
-    CALL cp_dbcsr_init (bc_mat, error)
+    CALL cp_dbcsr_init (bc_mat)
     row_blk_size_tmp => row_blk_size
     col_blk_size_tmp => col_blk_size
     CALL cp_dbcsr_create (bc_mat, "Block-cyclic"//cp_dbcsr_name(matrix), bc_dist,&
-         dbcsr_type_no_symmetry, row_blk_size_tmp, col_blk_size_tmp, 0, 0,&
-         reuse_arrays=.TRUE.,error=error)
+         dbcsr_type_no_symmetry, row_blk_size_tmp, col_blk_size_tmp, nze=0, &
+         reuse_arrays=.TRUE.)
     CALL dbcsr_distribution_release (bc_dist)
-    CALL cp_dbcsr_complete_redistribute (matrix, bc_mat, error=error)
+    CALL cp_dbcsr_complete_redistribute (matrix, bc_mat)
 
     ! Find the local extents of the local blocked rows so that index lookups
     ! into the FM matrix work correctly.
@@ -1357,8 +1311,7 @@ CONTAINS
     ENDDO
     CALL cp_dbcsr_iterator_stop(iter)
 
-    CALL cp_dbcsr_release (bc_mat, error=error)
-    CALL dbcsr_error_stop (error_handle, error=dbcsr_error)
+    CALL cp_dbcsr_release (bc_mat)
 
     CALL timestop(handle)
   END SUBROUTINE copy_dbcsr_to_fm
@@ -1367,12 +1320,10 @@ CONTAINS
 !> \brief   Copy a DBCSR matrix to a BLACS matrix
 !> \param[in] matrix          DBCSR matrix
 !> \param[out] fm             full matrix
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE copy_dbcsr_to_cfm(matrix, fm, error)
+  SUBROUTINE copy_dbcsr_to_cfm(matrix, fm)
     TYPE(cp_dbcsr_type), INTENT(IN)          :: matrix
     TYPE(cp_cfm_type), POINTER               :: fm
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'copy_dbcsr_to_cfm', &
       routineP = moduleN//':'//routineN
@@ -1380,10 +1331,10 @@ CONTAINS
 
     COMPLEX(KIND=dp), DIMENSION(:, :), &
       POINTER                                :: blk_2d, fm_block
-    INTEGER :: col, error_handle, group, handle, mypcol, mype, myprow, &
-      nblkcols_local, nblkcols_total, nblkrows_local, nblkrows_total, &
-      ncol_block, ncol_global, nfullcols_total, nfullrows_total, npcol, npe, &
-      nprow, nrow_block, nrow_global, row
+    INTEGER :: col, group, handle, mypcol, mype, myprow, nblkcols_local, &
+      nblkcols_total, nblkrows_local, nblkrows_total, ncol_block, &
+      ncol_global, nfullcols_total, nfullrows_total, npcol, npe, nprow, &
+      nrow_block, nrow_global, row
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: first_col, first_row, &
                                                 last_col, last_row, &
                                                 local_col_sizes, &
@@ -1394,12 +1345,10 @@ CONTAINS
     TYPE(cp_dbcsr_iterator)                  :: iter
     TYPE(cp_dbcsr_type)                      :: bc_mat
     TYPE(dbcsr_distribution_obj)             :: bc_dist
-    TYPE(dbcsr_error_type)                   :: dbcsr_error
 
 !   ---------------------------------------------------------------------------
 
     CALL timeset(routineN,handle)
-    CALL dbcsr_error_set (routineN, error_handle, error=dbcsr_error)
 
     NULLIFY(col_blk_size,row_blk_size)
 
@@ -1429,14 +1378,14 @@ CONTAINS
          dbcsr_distribution_mp (cp_dbcsr_distribution(matrix)),&
          row_blk_size, col_blk_size)
 
-    CALL cp_dbcsr_init (bc_mat, error)
+    CALL cp_dbcsr_init (bc_mat)
     row_blk_size_tmp => row_blk_size
     col_blk_size_tmp => col_blk_size
     CALL cp_dbcsr_create (bc_mat, "Block-cyclic"//cp_dbcsr_name(matrix), bc_dist,&
-         dbcsr_type_no_symmetry, row_blk_size_tmp, col_blk_size_tmp, 0, 0, cp_dbcsr_get_data_type(matrix),&
-         reuse_arrays=.TRUE.,error=error)
+         dbcsr_type_no_symmetry, row_blk_size_tmp, col_blk_size_tmp, nze=0, data_type=cp_dbcsr_get_data_type(matrix),&
+         reuse_arrays=.TRUE.)
     CALL dbcsr_distribution_release (bc_dist)
-    CALL cp_dbcsr_complete_redistribute (matrix, bc_mat, error=error)
+    CALL cp_dbcsr_complete_redistribute (matrix, bc_mat)
 
     ! Find the local extents of the local blocked rows so that index lookups
     ! into the FM matrix work correctly.
@@ -1493,8 +1442,7 @@ CONTAINS
     ENDDO
     CALL cp_dbcsr_iterator_stop(iter)
 
-    CALL cp_dbcsr_release (bc_mat, error=error)
-    CALL dbcsr_error_stop (error_handle, error=dbcsr_error)
+    CALL cp_dbcsr_release (bc_mat)
 
     CALL timestop(handle)
   END SUBROUTINE copy_dbcsr_to_cfm
@@ -1502,21 +1450,19 @@ CONTAINS
 !> \brief   Copy a DBCSR_BLACS matrix to a BLACS matrix 
 !> \param bc_mat DBCSR matrix
 !> \param[out] fm             full matrix
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE copy_dbcsr_to_fm_bc(bc_mat, fm, error)
+  SUBROUTINE copy_dbcsr_to_fm_bc(bc_mat, fm)
     TYPE(cp_dbcsr_type), INTENT(IN)          :: bc_mat
     TYPE(cp_fm_type), POINTER                :: fm
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'copy_dbcsr_to_fm_bc', &
       routineP = moduleN//':'//routineN
     LOGICAL, PARAMETER                       :: dbg = .FALSE.
 
-    INTEGER :: col, error_handle, group, handle, mypcol, mype, myprow, &
-      nblkcols_local, nblkcols_total, nblkrows_local, nblkrows_total, &
-      ncol_block, ncol_global, nfullcols_total, nfullrows_total, npcol, npe, &
-      nprow, nrow_block, nrow_global, row
+    INTEGER :: col, group, handle, mypcol, mype, myprow, nblkcols_local, &
+      nblkcols_total, nblkrows_local, nblkrows_total, ncol_block, &
+      ncol_global, nfullcols_total, nfullrows_total, npcol, npe, nprow, &
+      nrow_block, nrow_global, row
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: first_col, first_row, &
                                                 last_col, last_row, &
                                                 local_col_sizes, &
@@ -1528,12 +1474,10 @@ CONTAINS
     TYPE(cp_blacs_env_type), POINTER         :: context
     TYPE(cp_dbcsr_iterator)                  :: iter
     TYPE(dbcsr_distribution_obj)             :: bc_dist
-    TYPE(dbcsr_error_type)                   :: dbcsr_error
 
 !   ---------------------------------------------------------------------------
 
     CALL timeset(routineN,handle)
-    CALL dbcsr_error_set (routineN, error_handle, error=dbcsr_error)
 
     NULLIFY(col_blk_size,row_blk_size)
 
@@ -1628,7 +1572,6 @@ CONTAINS
     DEALLOCATE(row_blk_size, col_blk_size)
 
     CALL dbcsr_distribution_release (bc_dist)
-    CALL dbcsr_error_stop (error_handle, error=dbcsr_error)
 
     CALL timestop(handle)
   END SUBROUTINE copy_dbcsr_to_fm_bc
@@ -1642,13 +1585,11 @@ CONTAINS
 !> \param matrix ...
 !> \param fm_in ...
 !> \param template ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE cp_fm_to_dbcsr_row_template(matrix, fm_in, template, error)
+  SUBROUTINE cp_fm_to_dbcsr_row_template(matrix, fm_in, template)
     TYPE(cp_dbcsr_type), INTENT(INOUT)       :: matrix
     TYPE(cp_fm_type), POINTER                :: fm_in
     TYPE(cp_dbcsr_type), INTENT(IN)          :: template
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'cp_fm_to_dbcsr_row_template', &
       routineP = moduleN//':'//routineN
@@ -1657,16 +1598,16 @@ CONTAINS
     INTEGER, DIMENSION(:), POINTER           :: col_blk_size_right_in
     TYPE(dbcsr_distribution_obj)             :: dist_right_in
 
-    CALL cp_fm_get_info(fm_in, ncol_global=k_in, error=error)
+    CALL cp_fm_get_info(fm_in, ncol_global=k_in)
 
     CALL dbcsr_create_dist_r_unrot (dist_right_in, cp_dbcsr_distribution(template), k_in, &
          col_blk_size_right_in)
-    CALL cp_dbcsr_init(matrix, error)
+    CALL cp_dbcsr_init(matrix)
     CALL cp_dbcsr_create(matrix, "D", dist_right_in, dbcsr_type_no_symmetry, &
          cp_dbcsr_row_block_sizes(template), col_blk_size_right_in,&
-         0, 0, cp_dbcsr_get_data_type(template), error=error)
+         nze=0, data_type=cp_dbcsr_get_data_type(template))
 
-    CALL copy_fm_to_dbcsr(fm_in, matrix, error=error)
+    CALL copy_fm_to_dbcsr(fm_in, matrix)
     DEALLOCATE(col_blk_size_right_in)
     CALL dbcsr_distribution_release(dist_right_in)
 
@@ -1683,14 +1624,12 @@ CONTAINS
 !> \param n global col size of output matrix
 !> \param sym ...
 !> \param data_type ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE cp_dbcsr_m_by_n_from_template(matrix,template,m,n,sym,data_type,error)
+  SUBROUTINE cp_dbcsr_m_by_n_from_template(matrix,template,m,n,sym,data_type)
     TYPE(cp_dbcsr_type), INTENT(INOUT)       :: matrix, template
     INTEGER                                  :: m, n
     CHARACTER, OPTIONAL                      :: sym
     INTEGER, OPTIONAL                        :: data_type
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: &
       routineN = 'cp_dbcsr_m_by_n_from_template', &
@@ -1723,8 +1662,8 @@ CONTAINS
          reuse_arrays=.TRUE.)
 
     CALL cp_dbcsr_create(matrix, "m_n_template", dist_m_n, mysym,&
-            row_blk_size, col_blk_size, 0, 0, my_data_type,&
-            reuse_arrays=.TRUE.,error=error)
+            row_blk_size, col_blk_size, nze=0, data_type=my_data_type,&
+            reuse_arrays=.TRUE.)
     CALL dbcsr_distribution_release(dist_m_n)
 
   END SUBROUTINE cp_dbcsr_m_by_n_from_template
@@ -1739,14 +1678,12 @@ CONTAINS
 !> \param n global col size of output matrix
 !> \param sym ...
 !> \param data_type ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE cp_dbcsr_m_by_n_from_row_template(matrix,template,n,sym,data_type,error)
+  SUBROUTINE cp_dbcsr_m_by_n_from_row_template(matrix,template,n,sym,data_type)
     TYPE(cp_dbcsr_type), INTENT(INOUT)       :: matrix, template
     INTEGER                                  :: n
     CHARACTER, OPTIONAL                      :: sym
     INTEGER, OPTIONAL                        :: data_type
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: &
       routineN = 'cp_dbcsr_m_by_n_from_row_template', &
@@ -1774,7 +1711,7 @@ CONTAINS
          col_cluster_dist)
 
     CALL cp_dbcsr_create(matrix, "m_n_template", dist_m_n, mysym,&
-            cp_dbcsr_row_block_sizes(template), col_blk_size, 0, 0, my_data_type, error=error)
+            cp_dbcsr_row_block_sizes(template), col_blk_size, nze=0, data_type=my_data_type)
 
     DEALLOCATE(col_dist,col_blk_size)
     CALL dbcsr_distribution_release(dist_m_n)

@@ -20,10 +20,13 @@ MODULE cp_lbfgs
   USE kinds,                           ONLY: dp
   USE machine,                         ONLY: m_walltime
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
   PRIVATE
+
+  CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'cp_lbfgs'
 
   PUBLIC :: setulb
 
@@ -3732,6 +3735,9 @@ CONTAINS
     INTEGER, INTENT(in)                      :: job
     INTEGER, INTENT(out)                     :: info
 
+    CHARACTER(len=*), PARAMETER :: routineN = 'dtrsl', &
+      routineP = moduleN//':'//routineN
+
     INTEGER                                  :: CASE, j, jj
     REAL(KIND=dp)                            :: ddot, temp
 
@@ -3805,7 +3811,7 @@ CONTAINS
                END DO
             END IF
          CASE DEFAULT
-            STOP "dtrsl: unexpected case"
+            CPABORT("unexpected case")
          END SELECT
 
       RETURN

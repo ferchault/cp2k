@@ -40,6 +40,7 @@ MODULE ai_elec_field
   USE orbital_pointers,                ONLY: coset,&
                                              ncoset
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
   CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'ai_elec_field'
@@ -71,14 +72,13 @@ CONTAINS
 !> \param ldrr1 ...
 !> \param ldrr2 ...
 !> \param rr ...
-!> \param error ...
 !> \date    02.03.2009
 !> \author  VW
 !> \version 1.0
 ! *****************************************************************************
   SUBROUTINE efg(la_max,la_min,npgfa,rpgfa,zeta,&
                  lb_max,lb_min,npgfb,rpgfb,zetb,&
-                 rac,rbc,rab,vab,ldrr1,ldrr2,rr,error)
+                 rac,rbc,rab,vab,ldrr1,ldrr2,rr)
     INTEGER, INTENT(IN)                      :: la_max, la_min, npgfa
     REAL(KIND=dp), DIMENSION(:), INTENT(IN)  :: rpgfa, zeta
     INTEGER, INTENT(IN)                      :: lb_max, lb_min, npgfb
@@ -90,7 +90,6 @@ CONTAINS
     REAL(KIND=dp), &
       DIMENSION(0:ldrr1-1, ldrr2, *), &
       INTENT(INOUT)                          :: rr
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'efg', &
       routineP = moduleN//':'//routineN
@@ -152,7 +151,7 @@ CONTAINS
 
           ! *** Calculate the reccurence relation
 
-          CALL os_rr_coul(rap,la_max+2,rbp,lb_max+2,rcp,zet,ldrr1,ldrr2,rr,error)
+          CALL os_rr_coul(rap,la_max+2,rbp,lb_max+2,rcp,zet,ldrr1,ldrr2,rr)
 
           ! *** Calculate the primitive electric field gradient integrals ***
 

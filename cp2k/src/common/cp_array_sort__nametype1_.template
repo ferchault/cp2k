@@ -27,7 +27,10 @@
 MODULE cp_array_sort_[nametype1]
    
   [USE]
-  
+
+#include "cp_common_uses.f90"
+#include "../base/base_uses.f90"
+
   IMPLICIT NONE
   PRIVATE
 
@@ -57,13 +60,11 @@ subroutine cp_1d_[nametype1]_sort(arr, n, indices)
    integer :: i
    [type1], pointer                   :: tmp_arr(:)
    integer, pointer                   :: tmp_idx(:)
-   integer                            :: stat
    
    if(n == 0) return ! for some reason this is a frequent case in cp2k
    
    ! scratch space used during the merge step
-   allocate(tmp_arr((size(arr)+1)/2), tmp_idx((size(arr)+1)/2), stat=stat)
-   if(stat /= 0) STOP "cp_1d_[nametype1]_sort: allocation failed"
+   allocate(tmp_arr((size(arr)+1)/2), tmp_idx((size(arr)+1)/2))
    
    indices = (/ (i, i = 1, size(arr)) /)
    

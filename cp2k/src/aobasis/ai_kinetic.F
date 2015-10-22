@@ -22,6 +22,7 @@ MODULE ai_kinetic
   USE orbital_pointers,                ONLY: coset,&
                                              ncoset
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -51,13 +52,12 @@ CONTAINS
 !> \param rab    Distance vector between centers A and B
 !> \param kab    Kinetic energy integrals, optional
 !> \param dab    First derivatives of Kinetic energy integrals, optional
-!> \param error  CP2K error reporting
 !> \date    07.07.2014
 !> \author  JGH
 ! *****************************************************************************
   SUBROUTINE kinetic(la_max,la_min,npgfa,rpgfa,zeta,&
                      lb_max,lb_min,npgfb,rpgfb,zetb,&
-                     rab,kab,dab,error)
+                     rab,kab,dab)
     INTEGER, INTENT(IN)                      :: la_max, la_min, npgfa
     REAL(KIND=dp), DIMENSION(:), INTENT(IN)  :: rpgfa, zeta
     INTEGER, INTENT(IN)                      :: lb_max, lb_min, npgfb
@@ -67,17 +67,15 @@ CONTAINS
       INTENT(INOUT), OPTIONAL                :: kab
     REAL(KIND=dp), DIMENSION(:, :, :), &
       INTENT(INOUT), OPTIONAL                :: dab
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'kinetic', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: ax, ay, az, bx, by, bz, coa, &
                                                 cob, ia, ib, idx, idy, idz, &
-                                                ipgf, istat, jpgf, la, lb, &
-                                                ldrr, lma, lmb, ma, mb, na, &
-                                                nb, ofa, ofb
-    LOGICAL                                  :: failure
+                                                ipgf, jpgf, la, lb, ldrr, &
+                                                lma, lmb, ma, mb, na, nb, &
+                                                ofa, ofb
     REAL(KIND=dp)                            :: a, b, dsx, dsy, dsz, dtx, &
                                                 dty, dtz, f0, rab2, tab, xhi, &
                                                 zet
@@ -105,8 +103,7 @@ CONTAINS
     ldrr = MAX(lma,lmb) + 1
 
     ! Allocate space for auxiliary integrals
-    ALLOCATE(rr(0:ldrr-1,0:ldrr-1,3),tt(0:ldrr-1,0:ldrr-1,3),STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(rr(0:ldrr-1,0:ldrr-1,3),tt(0:ldrr-1,0:ldrr-1,3))
 
     ! Number of integrals, check size of arrays
     ofa = ncoset(la_min-1)
@@ -114,13 +111,13 @@ CONTAINS
     na = ncoset(la_max) - ofa
     nb = ncoset(lb_max) - ofb
     IF (PRESENT(kab)) THEN
-       CPPrecondition((SIZE(kab,1) >= na*npgfa),cp_failure_level,routineP,error,failure)
-       CPPrecondition((SIZE(kab,2) >= nb*npgfb),cp_failure_level,routineP,error,failure)
+       CPASSERT((SIZE(kab,1) >= na*npgfa))
+       CPASSERT((SIZE(kab,2) >= nb*npgfb))
     END IF
     IF (PRESENT(dab)) THEN
-       CPPrecondition((SIZE(dab,1) >= na*npgfa),cp_failure_level,routineP,error,failure)
-       CPPrecondition((SIZE(dab,2) >= nb*npgfb),cp_failure_level,routineP,error,failure)
-       CPPrecondition((SIZE(dab,3) >= 3),cp_failure_level,routineP,error,failure)
+       CPASSERT((SIZE(dab,1) >= na*npgfa))
+       CPASSERT((SIZE(dab,2) >= nb*npgfb))
+       CPASSERT((SIZE(dab,3) >= 3))
     END IF
 
     ! Loops over all pairs of primitive Gaussian-type functions
@@ -231,8 +228,7 @@ CONTAINS
        ma = ma + na
     END DO
 
-    DEALLOCATE(rr,tt,STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(rr,tt)
 
   END SUBROUTINE kinetic
 

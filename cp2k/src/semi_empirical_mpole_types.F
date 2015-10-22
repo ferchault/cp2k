@@ -11,6 +11,7 @@ MODULE semi_empirical_mpole_types
   
   USE kinds,                           ONLY: dp
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -70,29 +71,24 @@ CONTAINS
 !> \brief Allocate semi-empirical mpole type
 !> \param mpole ...
 !> \param ndim ...
-!> \param error ...
 !> \author Teodoro Laino [tlaino] - 08.2008 Zurich University
 ! *****************************************************************************
-  SUBROUTINE semi_empirical_mpole_p_create(mpole, ndim, error)
+  SUBROUTINE semi_empirical_mpole_p_create(mpole, ndim)
     TYPE(semi_empirical_mpole_p_type), &
       DIMENSION(:), POINTER                  :: mpole
     INTEGER, INTENT(IN)                      :: ndim
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: &
       routineN = 'semi_empirical_mpole_p_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: i
 
-    failure = .FALSE.
-    CPPrecondition(.NOT.ASSOCIATED(mpole),cp_failure_level,routineP,error,failure)
-    ALLOCATE (mpole(ndim),STAT=stat)
-    CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+    CPASSERT(.NOT.ASSOCIATED(mpole))
+    ALLOCATE (mpole(ndim))
     DO i = 1, ndim
        NULLIFY(mpole(i)%mpole)
-       CALL semi_empirical_mpole_create(mpole(i)%mpole, error=error)
+       CALL semi_empirical_mpole_create(mpole(i)%mpole)
     END DO
 
   END SUBROUTINE semi_empirical_mpole_p_create
@@ -100,28 +96,23 @@ CONTAINS
 ! *****************************************************************************
 !> \brief Deallocate the semi-empirical mpole type
 !> \param mpole ...
-!> \param error ...
 !> \author Teodoro Laino [tlaino] - 08.2008 Zurich University
 ! *****************************************************************************
-  SUBROUTINE semi_empirical_mpole_p_release(mpole, error)
+  SUBROUTINE semi_empirical_mpole_p_release(mpole)
     TYPE(semi_empirical_mpole_p_type), &
       DIMENSION(:), POINTER                  :: mpole
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: &
       routineN = 'semi_empirical_mpole_p_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: i
 
-    failure = .FALSE.
     IF (ASSOCIATED(mpole)) THEN
        DO i = 1, SIZE(mpole)
-          CALL semi_empirical_mpole_release(mpole(i)%mpole,error=error)
+          CALL semi_empirical_mpole_release(mpole(i)%mpole)
        END DO
-       DEALLOCATE (mpole, stat=stat)
-       CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE (mpole)
     END IF
 
   END SUBROUTINE semi_empirical_mpole_p_release
@@ -129,23 +120,16 @@ CONTAINS
 ! *****************************************************************************
 !> \brief Allocate semi-empirical mpole type
 !> \param mpole ...
-!> \param error ...
 !> \author Teodoro Laino [tlaino] - 08.2008 Zurich University
 ! *****************************************************************************
-  SUBROUTINE semi_empirical_mpole_create(mpole, error)
+  SUBROUTINE semi_empirical_mpole_create(mpole)
     TYPE(semi_empirical_mpole_type), POINTER :: mpole
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'semi_empirical_mpole_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    CPPrecondition(.NOT.ASSOCIATED(mpole),cp_failure_level,routineP,error,failure)
-    ALLOCATE (mpole,STAT=stat)
-    CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+    CPASSERT(.NOT.ASSOCIATED(mpole))
+    ALLOCATE (mpole)
     mpole%task = .FALSE.
     mpole%indi = 0
     mpole%indj = 0
@@ -161,23 +145,16 @@ CONTAINS
 ! *****************************************************************************
 !> \brief Deallocate the semi-empirical mpole type
 !> \param mpole ...
-!> \param error ...
 !> \author Teodoro Laino [tlaino] - 08.2008 Zurich University
 ! *****************************************************************************
-  SUBROUTINE semi_empirical_mpole_release(mpole, error)
+  SUBROUTINE semi_empirical_mpole_release(mpole)
     TYPE(semi_empirical_mpole_type), POINTER :: mpole
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'semi_empirical_mpole_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
     IF (ASSOCIATED(mpole)) THEN
-       DEALLOCATE (mpole, stat=stat)
-       CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE (mpole)
     END IF
 
   END SUBROUTINE semi_empirical_mpole_release
@@ -185,23 +162,16 @@ CONTAINS
 ! *****************************************************************************
 !> \brief Allocate NDDO multipole type
 !> \param nddo_mpole ...
-!> \param error ...
 !> \author Teodoro Laino [tlaino] - 08.2008 Zurich University
 ! *****************************************************************************
-  SUBROUTINE nddo_mpole_create(nddo_mpole, error)
+  SUBROUTINE nddo_mpole_create(nddo_mpole)
     TYPE(nddo_mpole_type), POINTER           :: nddo_mpole
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'nddo_mpole_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    CPPrecondition(.NOT.ASSOCIATED(nddo_mpole),cp_failure_level,routineP,error,failure)
-    ALLOCATE (nddo_mpole,STAT=stat)
-    CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+    CPASSERT(.NOT.ASSOCIATED(nddo_mpole))
+    ALLOCATE (nddo_mpole)
     NULLIFY(nddo_mpole%charge)
     NULLIFY(nddo_mpole%dipole)
     NULLIFY(nddo_mpole%quadrupole)
@@ -213,47 +183,34 @@ CONTAINS
 ! *****************************************************************************
 !> \brief Deallocate NDDO multipole type
 !> \param nddo_mpole ...
-!> \param error ...
 !> \author Teodoro Laino [tlaino] - 08.2008 Zurich University
 ! *****************************************************************************
-  SUBROUTINE nddo_mpole_release(nddo_mpole, error)
+  SUBROUTINE nddo_mpole_release(nddo_mpole)
     TYPE(nddo_mpole_type), POINTER           :: nddo_mpole
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'nddo_mpole_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
     IF (ASSOCIATED(nddo_mpole)) THEN
        IF (ASSOCIATED(nddo_mpole%charge)) THEN
-          DEALLOCATE(nddo_mpole%charge,stat=stat)
-          CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+          DEALLOCATE(nddo_mpole%charge)
        END IF
        IF (ASSOCIATED(nddo_mpole%dipole)) THEN
-          DEALLOCATE(nddo_mpole%dipole,stat=stat)
-          CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+          DEALLOCATE(nddo_mpole%dipole)
        END IF
        IF (ASSOCIATED(nddo_mpole%quadrupole)) THEN
-          DEALLOCATE(nddo_mpole%quadrupole,stat=stat)
-          CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+          DEALLOCATE(nddo_mpole%quadrupole)
        END IF
        IF (ASSOCIATED(nddo_mpole%efield0)) THEN
-          DEALLOCATE(nddo_mpole%efield0,stat=stat)
-          CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+          DEALLOCATE(nddo_mpole%efield0)
        END IF
        IF (ASSOCIATED(nddo_mpole%efield1)) THEN
-          DEALLOCATE(nddo_mpole%efield1,stat=stat)
-          CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+          DEALLOCATE(nddo_mpole%efield1)
        END IF
        IF (ASSOCIATED(nddo_mpole%efield2)) THEN
-          DEALLOCATE(nddo_mpole%efield2,stat=stat)
-          CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+          DEALLOCATE(nddo_mpole%efield2)
        END IF
-       DEALLOCATE (nddo_mpole, stat=stat)
-       CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE (nddo_mpole)
     END IF
 
   END SUBROUTINE nddo_mpole_release

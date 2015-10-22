@@ -15,8 +15,8 @@ MODULE mol_force
        do_ff_g96, do_ff_harmonic, do_ff_mixed_bend_stretch, do_ff_mm2, &
        do_ff_mm3, do_ff_mm4, do_ff_morse, do_ff_quartic
   USE kinds,                           ONLY: dp
-  USE termination,                     ONLY: stop_program
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -102,7 +102,7 @@ CONTAINS
        energy  = f12*k(1)*r0*r0*(1.0_dp+disp*(disp-2.0_dp))
        fscalar = k(1)*r0*disp*disp*(1.0_dp-disp) / dij
     CASE DEFAULT
-       CALL stop_program(routineN,moduleN,__LINE__,"Unmatched bond kind")
+       CPABORT("Unmatched bond kind")
     END SELECT
 
   END SUBROUTINE force_bonds
@@ -254,7 +254,7 @@ CONTAINS
        fscalar=1.0_dp
 
     CASE DEFAULT
-       CALL stop_program(routineN,moduleN,__LINE__,"Unmatched bend kind")
+       CPABORT("Unmatched bend kind")
     END SELECT
 
   END SUBROUTINE force_bends
@@ -271,7 +271,6 @@ CONTAINS
 !> \param tm ...
 !> \param tn ...
 !> \param t12 ...
-!> \param t32 ...
 !> \param k ...
 !> \param phi0 ...
 !> \param m ...
@@ -286,11 +285,11 @@ CONTAINS
 !> \author DG
 ! *****************************************************************************
   SUBROUTINE force_torsions (id_type, s32, is32, ism, isn,  dist1, dist2, tm,&
-       tn, t12, t32, k, phi0, m, gt1, gt2, gt3, gt4, energy, fscalar )
+       tn, t12, k, phi0, m, gt1, gt2, gt3, gt4, energy, fscalar )
     INTEGER, INTENT(IN)                      :: id_type
     REAL(KIND=dp), INTENT(IN)                :: s32, is32, ism, isn, dist1, &
                                                 dist2
-    REAL(KIND=dp), DIMENSION(:), INTENT(IN)  :: tm, tn, t12, t32
+    REAL(KIND=dp), DIMENSION(:), INTENT(IN)  :: tm, tn, t12
     REAL(KIND=dp), INTENT(IN)                :: k, phi0
     INTEGER, INTENT(IN)                      :: m
     REAL(KIND=dp), DIMENSION(:), INTENT(OUT) :: gt1, gt2, gt3, gt4
@@ -299,10 +298,8 @@ CONTAINS
     CHARACTER(len=*), PARAMETER :: routineN = 'force_torsions', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: cosphi, phi
 
-    failure = .FALSE.
     cosphi = DOT_PRODUCT ( tm, tn ) * ism * isn
     IF(cosphi >  1.0_dp) cosphi = 1.0_dp
     IF(cosphi < -1.0_dp) cosphi = -1.0_dp
@@ -317,7 +314,7 @@ CONTAINS
        ! compute fscalar
        fscalar = k * m * SIN(m*phi-phi0)
     CASE DEFAULT
-       CALL stop_program(routineN,moduleN,__LINE__,"Unmatched torsion kind")
+       CPABORT("Unmatched torsion kind")
     END SELECT
 
     ! compute the gradients
@@ -339,7 +336,6 @@ CONTAINS
 !> \param tm ...
 !> \param tn ...
 !> \param t12 ...
-!> \param t32 ...
 !> \param k ...
 !> \param phi0 ...
 !> \param gt1 ...
@@ -353,11 +349,11 @@ CONTAINS
 !> \author DG
 ! *****************************************************************************
   SUBROUTINE force_imp_torsions (id_type,s32, is32, ism, isn,  dist1, dist2, tm,&
-       tn, t12, t32, k, phi0, gt1, gt2, gt3, gt4, energy, fscalar )
+       tn, t12, k, phi0, gt1, gt2, gt3, gt4, energy, fscalar )
     INTEGER, INTENT(IN)                      :: id_type
     REAL(KIND=dp), INTENT(IN)                :: s32, is32, ism, isn, dist1, &
                                                 dist2
-    REAL(KIND=dp), DIMENSION(:), INTENT(IN)  :: tm, tn, t12, t32
+    REAL(KIND=dp), DIMENSION(:), INTENT(IN)  :: tm, tn, t12
     REAL(KIND=dp), INTENT(IN)                :: k, phi0
     REAL(KIND=dp), DIMENSION(:), INTENT(OUT) :: gt1, gt2, gt3, gt4
     REAL(KIND=dp), INTENT(OUT)               :: energy, fscalar
@@ -366,11 +362,10 @@ CONTAINS
       routineP = moduleN//':'//routineN
     REAL(KIND=dp), PARAMETER                 :: f12 = 1.0_dp/2.0_dp
 
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: cosphi, phi
 
-    failure = .FALSE.
-    ! define cosphi
+! define cosphi
+
     cosphi = DOT_PRODUCT ( tm, tn ) * ism * isn
     IF(cosphi >  1.0_dp) cosphi = 1.0_dp
     IF(cosphi < -1.0_dp) cosphi = -1.0_dp
@@ -393,7 +388,7 @@ CONTAINS
        fscalar = - k * ( phi - phi0 )
 
     CASE DEFAULT
-       CALL stop_program(routineN,moduleN,__LINE__,"Unmatched improper kind")
+       CPABORT("Unmatched improper kind")
     END SELECT
 
     ! compute the gradients
@@ -437,29 +432,24 @@ CONTAINS
       routineP = moduleN//':'//routineN
     REAL(KIND=dp), PARAMETER                 :: f12 = 1.0_dp/2.0_dp
 
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: b, C, cosphi, D, E, is41, phi
     REAL(KIND=dp), DIMENSION(3)              :: db_dq1, db_dq2, db_dq3, &
                                                 dC_dq1, dC_dq2, dC_dq3, &
                                                 dD_dq1, dD_dq2, dD_dq3, &
                                                 dE_dq1, dE_dq2, dE_dq3
 
-    failure = .FALSE.
+!compute the energy and the gradients of cos(phi), see
+!   "Efficient treatment of out-of-plane bend and improper torsion interactions in
+!   MM2, MM3 and MM4 Molecular mechanicsd calculations.", Robert E. Tuzun, Donald W.Noid,
+!   Bobby G Sumpter, Chemical and Analytical Sciences Division, Oak Ridge National
+!   Laboratory, P.O. Box 2008, Oak Ridge, Tennesse 37831-6497
+!CAUTION: in the paper r_ij = rj - ri
+!in fist_intra_force.F t_ij = ri - rj
+!hence a minus sign needs to be added to convert r_ij vectors in t_ij vectors
+!tm is the normal of the plane 123, tm = t32 x t12 (= w from paper)
+!tn = - t41 x tm (= a from paper, for minus sign see CAUTION above)
+!Computing some necessary variables (see paper)
 
-    !compute the energy and the gradients of cos(phi), see
-    !   "Efficient treatment of out-of-plane bend and improper torsion interactions in
-    !   MM2, MM3 and MM4 Molecular mechanicsd calculations.", Robert E. Tuzun, Donald W.Noid,
-    !   Bobby G Sumpter, Chemical and Analytical Sciences Division, Oak Ridge National
-    !   Laboratory, P.O. Box 2008, Oak Ridge, Tennesse 37831-6497
-
-    !CAUTION: in the paper r_ij = rj - ri
-    !in fist_intra_force.F t_ij = ri - rj
-    !hence a minus sign needs to be added to convert r_ij vectors in t_ij vectors
-
-    !tm is the normal of the plane 123, tm = t32 x t12 (= w from paper)
-    !tn = - t41 x tm (= a from paper, for minus sign see CAUTION above)
-
-    !Computing some necessary variables (see paper)
     E = DOT_PRODUCT(-t41,tm)
     C = DOT_PRODUCT(tm,tm)
     D = E**2/C
@@ -489,7 +479,7 @@ CONTAINS
        fscalar = k * ( phi - phi0 ) * is41
 
     CASE DEFAULT
-       CALL stop_program(routineN,moduleN,__LINE__,"Unmatched opbend kind")
+       CPABORT("Unmatched opbend kind")
     END SELECT
 
 

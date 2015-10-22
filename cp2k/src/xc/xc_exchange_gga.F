@@ -16,9 +16,6 @@ MODULE xc_exchange_gga
   USE cp_array_utils_r,                ONLY: cp_3d_r_p_type
   USE kinds,                           ONLY: dp
   USE mathconstants,                   ONLY: pi
-  USE termination,                     ONLY: stop_program
-  USE timings,                         ONLY: timeset,&
-                                             timestop
   USE xc_derivative_set_types,         ONLY: xc_derivative_set_type,&
                                              xc_dset_get_derivative
   USE xc_derivative_types,             ONLY: xc_derivative_get,&
@@ -36,6 +33,7 @@ MODULE xc_exchange_gga
   USE xc_rho_set_types,                ONLY: xc_rho_set_get,&
                                              xc_rho_set_type
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -66,18 +64,15 @@ CONTAINS
 !> \param needs the components needed by this functional are set to
 !>        true (does not set the unneeded components to false)
 !> \param max_deriv ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author fawzi
 ! *****************************************************************************
-  SUBROUTINE xgga_info(functional,lsd,reference,shortform, needs, max_deriv, error)
+  SUBROUTINE xgga_info(functional,lsd,reference,shortform, needs, max_deriv)
     INTEGER, INTENT(in)                      :: functional
     LOGICAL, INTENT(in)                      :: lsd
     CHARACTER(LEN=*), INTENT(OUT), OPTIONAL  :: reference, shortform
     TYPE(xc_rho_cflags_type), &
       INTENT(inout), OPTIONAL                :: needs
     INTEGER, INTENT(out), OPTIONAL           :: max_deriv
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'xgga_info', &
       routineP = moduleN//':'//routineN
@@ -99,9 +94,7 @@ CONTAINS
        CASE(xgga_ev93)
           reference = "E. Engel and S.H. Vosko, Phys. Rev. B, 47, 13164 (1993)"
        CASE default
-          CALL cp_assert(.FALSE.,cp_failure_level,cp_assertion_failed,routineP,&
-               "Invalid functional requested ("//cp_to_string(functional)//")",&
-               error)
+          CPABORT("Invalid functional requested ("//cp_to_string(functional)//")")
        END SELECT
        IF (.not.lsd) THEN
           IF (LEN_TRIM(reference)+6<LEN(reference)) THEN
@@ -126,9 +119,7 @@ CONTAINS
        CASE(xgga_ev93)
           shortform = "Engel-Vosko exchange energy from virial relation"
        CASE default
-          CALL cp_assert(.FALSE.,cp_failure_level,cp_assertion_failed,routineP,&
-               "Invalid functional requested ("//cp_to_string(functional)//")",&
-               error)
+          CPABORT("Invalid functional requested ("//cp_to_string(functional)//")")
        END SELECT
        IF (.not.lsd) THEN
           IF (LEN_TRIM(shortform)+6<LEN(shortform)) THEN
@@ -159,17 +150,14 @@ CONTAINS
 !> \param deriv_set place where to store the functional derivatives (they are
 !>        added to the derivatives)
 !> \param order ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author fawzi
 ! *****************************************************************************
-  SUBROUTINE xgga_eval(functional,lsd,rho_set,deriv_set,order,error)
+  SUBROUTINE xgga_eval(functional,lsd,rho_set,deriv_set,order)
     INTEGER, INTENT(in)                      :: functional
     LOGICAL, INTENT(in)                      :: lsd
     TYPE(xc_rho_set_type), POINTER           :: rho_set
     TYPE(xc_derivative_set_type), POINTER    :: deriv_set
     INTEGER, INTENT(in)                      :: order
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'xgga_eval', &
       routineP = moduleN//':'//routineN
@@ -177,9 +165,8 @@ CONTAINS
     CHARACTER(len=12), DIMENSION(2)          :: norm_drho_spin_name
     CHARACTER(len=6), DIMENSION(2)           :: rho_spin_name
     INTEGER                                  :: handle, ispin, m, npoints, &
-                                                nspin, stat
+                                                nspin
     INTEGER, DIMENSION(:, :), POINTER        :: bo
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: drho_cutoff, rho_cutoff
     REAL(KIND=dp), ALLOCATABLE, DIMENSION(:) :: s
     REAL(KIND=dp), ALLOCATABLE, &
@@ -191,159 +178,150 @@ CONTAINS
     TYPE(xc_derivative_type), POINTER        :: deriv
 
     CALL timeset(routineN,handle)
-    failure=.FALSE.
     NULLIFY(bo,e_0,e_ndrho, e_ndrho_ndrho, e_ndrho_ndrho_ndrho, e_rho_ndrho_ndrho, &
          e_rho_ndrho, e_rho_rho_ndrho, e_rho, e_rho_rho, e_rho_rho_rho)
     DO ispin=1,2
        NULLIFY(norm_drho(ispin)%array, rho(ispin)%array, rho_1_3(ispin)%array)
     END DO
 
-    CPPrecondition(ASSOCIATED(rho_set),cp_failure_level,routineP,error,failure)
-    CPPrecondition(rho_set%ref_count>0,cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(deriv_set),cp_failure_level,routineP,error,failure)
-    CPPrecondition(deriv_set%ref_count>0,cp_failure_level,routineP,error,failure)
-    IF (.NOT. failure) THEN
-       IF (lsd) THEN
-          CALL xc_rho_set_get(rho_set,rhoa_1_3=rho_1_3(1)%array,&
-               rhob_1_3=rho_1_3(2)%array,rhoa=rho(1)%array,&
-               rhob=rho(2)%array,norm_drhoa=norm_drho(1)%array, &
-               norm_drhob=norm_drho(2)%array,rho_cutoff=rho_cutoff,&
-               drho_cutoff=drho_cutoff, local_bounds=bo, error=error)
-          nspin=2
-          rho_spin_name=(/"(rhoa)","(rhob)"/)
-          norm_drho_spin_name=(/"(norm_drhoa)","(norm_drhob)"/)
-       ELSE
-          CALL xc_rho_set_get(rho_set,rho=rho(1)%array,rho_1_3=rho_1_3(1)%array,&
-               norm_drho=norm_drho(1)%array,local_bounds=bo,rho_cutoff=rho_cutoff,&
-               drho_cutoff=drho_cutoff,error=error)
-          nspin=1
-          rho_spin_name=(/"(rho) ","(---) "/)
-          norm_drho_spin_name=(/"(norm_drho) ","(----_----) "/)
-       END IF
-       npoints=(bo(2,1)-bo(1,1)+1)*(bo(2,2)-bo(1,2)+1)*(bo(2,3)-bo(1,3)+1)
-       m = ABS(order)
-       CALL xgga_init(rho_cutoff)
-
-       ALLOCATE ( s(npoints), STAT=stat )
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       ALLOCATE ( fs(npoints,m+1), STAT=stat )
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-
-       DO ispin=1,nspin
-          IF (lsd) THEN
-             fact = flsd
-             tact = 1.0_dp
-             CALL calc_wave_vector ( "p", rho(ispin)%array, norm_drho(ispin)%array, s )
-          ELSE
-             fact = flda
-             tact = t13
-             CALL calc_wave_vector ( "u", rho(ispin)%array, &
-                  norm_drho(ispin)%array, s )
-          END IF
-
-          SELECT CASE (functional)
-          CASE (xgga_b88)
-             CALL efactor_b88 ( s, fs, m )
-          CASE (xgga_pw86)
-             CALL efactor_pw86 ( s, fs, m )
-          CASE (xgga_pw91)
-
-             !! omp: note this is handled slightly differently to the
-             !! other cases to prevent sprawling scope declarations
-             !! in efactor_pw91()
-
-             !$omp parallel default (none) shared(s, fs, m)
-             CALL efactor_pw91 ( s, fs, m )
-             !$omp end parallel
-
-          CASE (xgga_pbe)
-             tact = t13
-             CALL efactor_pbex ( s, fs, m, 1 )
-             IF (lsd) tact = 1.0_dp
-          CASE (xgga_revpbe)
-             tact = t13
-             CALL efactor_pbex ( s, fs, m, 2 )
-             IF (lsd) tact = 1.0_dp
-          CASE (xgga_opt)
-             CALL efactor_optx ( s, fs, m )
-          CASE (xgga_ev93)
-             tact = t13
-             CALL efactor_ev93 ( s, fs, m )
-             IF (lsd) tact = 1.0_dp
-          CASE DEFAULT
-             CPAssert(.FALSE.,cp_failure_level,routineP,error,failure)
-          END SELECT
-
-          IF ( order>=0 ) THEN
-             deriv => xc_dset_get_derivative(deriv_set,"",&
-                  allocate_deriv=.TRUE., error=error)
-             CALL xc_derivative_get(deriv, deriv_data=e_0,error=error)
-
-             CALL x_p_0 ( rho(ispin)%array, rho_1_3(ispin)%array, fs, e_0,&
-                  npoints, error)
-          END IF
-          IF ( order>=1 .OR. order==-1 ) THEN
-             deriv => xc_dset_get_derivative(deriv_set,rho_spin_name(ispin),&
-                  allocate_deriv=.TRUE.,error=error)
-             CALL xc_derivative_get(deriv,deriv_data=e_rho,error=error)
-             deriv => xc_dset_get_derivative(deriv_set,norm_drho_spin_name(ispin),&
-                  allocate_deriv=.TRUE.,error=error)
-             CALL xc_derivative_get(deriv,deriv_data=e_ndrho,error=error)
-
-             CALL x_p_1 ( rho(ispin)%array, &
-                  rho_1_3(ispin)%array, s, fs, e_rho, e_ndrho, npoints, error )
-          END IF
-          IF ( order>=2 .OR. order==-2 ) THEN
-             deriv => xc_dset_get_derivative(deriv_set,rho_spin_name(ispin)//&
-                  rho_spin_name(ispin),allocate_deriv=.TRUE.,error=error)
-             CALL xc_derivative_get(deriv,deriv_data=e_rho_rho,error=error)
-             deriv => xc_dset_get_derivative(deriv_set,rho_spin_name(ispin)//&
-                  norm_drho_spin_name(ispin),allocate_deriv=.TRUE.,error=error)
-             CALL xc_derivative_get(deriv,deriv_data=e_rho_ndrho,error=error)
-             deriv => xc_dset_get_derivative(deriv_set,norm_drho_spin_name(ispin)//&
-                  norm_drho_spin_name(ispin), allocate_deriv=.TRUE.,error=error)
-             CALL xc_derivative_get(deriv,deriv_data=e_ndrho_ndrho,error=error)
-
-             CALL x_p_2 ( rho(ispin)%array, &
-                  rho_1_3(ispin)%array, s, fs, e_rho_rho, e_rho_ndrho,&
-                  e_ndrho_ndrho, npoints, error )
-          END IF
-          IF ( order>=3 .OR. order==-3 ) THEN
-             deriv => xc_dset_get_derivative(deriv_set,rho_spin_name(ispin)//&
-                  rho_spin_name(ispin)//rho_spin_name(ispin),&
-                  allocate_deriv=.TRUE.,error=error)
-             CALL xc_derivative_get(deriv,deriv_data=e_rho_rho_rho,error=error)
-             deriv => xc_dset_get_derivative(deriv_set,rho_spin_name(ispin)//&
-                  rho_spin_name(ispin)//norm_drho_spin_name(ispin),&
-                  allocate_deriv=.TRUE.,error=error)
-             CALL xc_derivative_get(deriv,deriv_data=e_rho_rho_ndrho,error=error)
-             deriv => xc_dset_get_derivative(deriv_set,rho_spin_name(ispin)//&
-                  norm_drho_spin_name(ispin)//norm_drho_spin_name(ispin), &
-                  allocate_deriv=.TRUE.,error=error)
-             CALL xc_derivative_get(deriv,deriv_data=e_rho_ndrho_ndrho,error=error)
-             deriv => xc_dset_get_derivative(deriv_set,norm_drho_spin_name(ispin)//&
-                  norm_drho_spin_name(ispin)//norm_drho_spin_name(ispin),&
-                  allocate_deriv=.TRUE.,error=error)
-             CALL xc_derivative_get(deriv,deriv_data=e_ndrho_ndrho_ndrho,error=error)
-
-             CALL x_p_3 ( rho(ispin)%array,&
-                  rho_1_3(ispin)%array, s, fs, e_rho_rho_rho, &
-                  e_rho_rho_ndrho, e_rho_ndrho_ndrho, e_ndrho_ndrho_ndrho,&
-                  npoints, error )
-          END IF
-          IF ( order>3.OR.order<-3) THEN
-             CALL cp_unimplemented_error(fromWhere=routineP, &
-                  message="derivatives bigger than 3 not implemented", &
-                  error=error, error_level=cp_failure_level)
-          END IF
-       END DO
-
-       DEALLOCATE ( s, STAT=stat )
-       CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
-       DEALLOCATE ( fs, STAT=stat )
-       CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
-
+    CPASSERT(ASSOCIATED(rho_set))
+    CPASSERT(rho_set%ref_count>0)
+    CPASSERT(ASSOCIATED(deriv_set))
+    CPASSERT(deriv_set%ref_count>0)
+    IF (lsd) THEN
+       CALL xc_rho_set_get(rho_set,rhoa_1_3=rho_1_3(1)%array,&
+            rhob_1_3=rho_1_3(2)%array,rhoa=rho(1)%array,&
+            rhob=rho(2)%array,norm_drhoa=norm_drho(1)%array, &
+            norm_drhob=norm_drho(2)%array,rho_cutoff=rho_cutoff,&
+            drho_cutoff=drho_cutoff, local_bounds=bo)
+       nspin=2
+       rho_spin_name=(/"(rhoa)","(rhob)"/)
+       norm_drho_spin_name=(/"(norm_drhoa)","(norm_drhob)"/)
+    ELSE
+       CALL xc_rho_set_get(rho_set,rho=rho(1)%array,rho_1_3=rho_1_3(1)%array,&
+            norm_drho=norm_drho(1)%array,local_bounds=bo,rho_cutoff=rho_cutoff,&
+            drho_cutoff=drho_cutoff)
+       nspin=1
+       rho_spin_name=(/"(rho) ","(---) "/)
+       norm_drho_spin_name=(/"(norm_drho) ","(----_----) "/)
     END IF
+    npoints=(bo(2,1)-bo(1,1)+1)*(bo(2,2)-bo(1,2)+1)*(bo(2,3)-bo(1,3)+1)
+    m = ABS(order)
+    CALL xgga_init(rho_cutoff)
+
+    ALLOCATE ( s(npoints))
+    ALLOCATE ( fs(npoints,m+1))
+
+    DO ispin=1,nspin
+       IF (lsd) THEN
+          fact = flsd
+          tact = 1.0_dp
+          CALL calc_wave_vector ( "p", rho(ispin)%array, norm_drho(ispin)%array, s )
+       ELSE
+          fact = flda
+          tact = t13
+          CALL calc_wave_vector ( "u", rho(ispin)%array, &
+               norm_drho(ispin)%array, s )
+       END IF
+
+       SELECT CASE (functional)
+       CASE (xgga_b88)
+          CALL efactor_b88 ( s, fs, m )
+       CASE (xgga_pw86)
+          CALL efactor_pw86 ( s, fs, m )
+       CASE (xgga_pw91)
+
+          !! omp: note this is handled slightly differently to the
+          !! other cases to prevent sprawling scope declarations
+          !! in efactor_pw91()
+
+          !$omp parallel default (none) shared(s, fs, m)
+          CALL efactor_pw91 ( s, fs, m )
+          !$omp end parallel
+
+       CASE (xgga_pbe)
+          tact = t13
+          CALL efactor_pbex ( s, fs, m, 1 )
+          IF (lsd) tact = 1.0_dp
+       CASE (xgga_revpbe)
+          tact = t13
+          CALL efactor_pbex ( s, fs, m, 2 )
+          IF (lsd) tact = 1.0_dp
+       CASE (xgga_opt)
+          CALL efactor_optx ( s, fs, m )
+       CASE (xgga_ev93)
+          tact = t13
+          CALL efactor_ev93 ( s, fs, m )
+          IF (lsd) tact = 1.0_dp
+       CASE DEFAULT
+          CPABORT("")
+       END SELECT
+
+       IF ( order>=0 ) THEN
+          deriv => xc_dset_get_derivative(deriv_set,"",&
+               allocate_deriv=.TRUE.)
+          CALL xc_derivative_get(deriv, deriv_data=e_0)
+
+          CALL x_p_0 ( rho(ispin)%array, rho_1_3(ispin)%array, fs, e_0,&
+               npoints)
+       END IF
+       IF ( order>=1 .OR. order==-1 ) THEN
+          deriv => xc_dset_get_derivative(deriv_set,rho_spin_name(ispin),&
+               allocate_deriv=.TRUE.)
+          CALL xc_derivative_get(deriv,deriv_data=e_rho)
+          deriv => xc_dset_get_derivative(deriv_set,norm_drho_spin_name(ispin),&
+               allocate_deriv=.TRUE.)
+          CALL xc_derivative_get(deriv,deriv_data=e_ndrho)
+
+          CALL x_p_1 ( rho(ispin)%array, &
+               rho_1_3(ispin)%array, s, fs, e_rho, e_ndrho, npoints)
+       END IF
+       IF ( order>=2 .OR. order==-2 ) THEN
+          deriv => xc_dset_get_derivative(deriv_set,rho_spin_name(ispin)//&
+               rho_spin_name(ispin),allocate_deriv=.TRUE.)
+          CALL xc_derivative_get(deriv,deriv_data=e_rho_rho)
+          deriv => xc_dset_get_derivative(deriv_set,rho_spin_name(ispin)//&
+               norm_drho_spin_name(ispin),allocate_deriv=.TRUE.)
+          CALL xc_derivative_get(deriv,deriv_data=e_rho_ndrho)
+          deriv => xc_dset_get_derivative(deriv_set,norm_drho_spin_name(ispin)//&
+               norm_drho_spin_name(ispin), allocate_deriv=.TRUE.)
+          CALL xc_derivative_get(deriv,deriv_data=e_ndrho_ndrho)
+
+          CALL x_p_2 ( rho(ispin)%array, &
+               rho_1_3(ispin)%array, s, fs, e_rho_rho, e_rho_ndrho,&
+               e_ndrho_ndrho, npoints)
+       END IF
+       IF ( order>=3 .OR. order==-3 ) THEN
+          deriv => xc_dset_get_derivative(deriv_set,rho_spin_name(ispin)//&
+               rho_spin_name(ispin)//rho_spin_name(ispin),&
+               allocate_deriv=.TRUE.)
+          CALL xc_derivative_get(deriv,deriv_data=e_rho_rho_rho)
+          deriv => xc_dset_get_derivative(deriv_set,rho_spin_name(ispin)//&
+               rho_spin_name(ispin)//norm_drho_spin_name(ispin),&
+               allocate_deriv=.TRUE.)
+          CALL xc_derivative_get(deriv,deriv_data=e_rho_rho_ndrho)
+          deriv => xc_dset_get_derivative(deriv_set,rho_spin_name(ispin)//&
+               norm_drho_spin_name(ispin)//norm_drho_spin_name(ispin), &
+               allocate_deriv=.TRUE.)
+          CALL xc_derivative_get(deriv,deriv_data=e_rho_ndrho_ndrho)
+          deriv => xc_dset_get_derivative(deriv_set,norm_drho_spin_name(ispin)//&
+               norm_drho_spin_name(ispin)//norm_drho_spin_name(ispin),&
+               allocate_deriv=.TRUE.)
+          CALL xc_derivative_get(deriv,deriv_data=e_ndrho_ndrho_ndrho)
+
+          CALL x_p_3 ( rho(ispin)%array,&
+               rho_1_3(ispin)%array, s, fs, e_rho_rho_rho, &
+               e_rho_rho_ndrho, e_rho_ndrho_ndrho, e_ndrho_ndrho_ndrho,&
+               npoints)
+       END IF
+       IF ( order>3.OR.order<-3) THEN
+          CPABORT("derivatives bigger than 3 not implemented")
+       END IF
+    END DO
+
+    DEALLOCATE ( s)
+    DEALLOCATE ( fs)
+
     CALL timestop(handle)
   END SUBROUTINE xgga_eval
 
@@ -374,9 +352,8 @@ CONTAINS
 !> \param fs ...
 !> \param e_0 ...
 !> \param npoints ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE x_p_0 ( rho, r13, fs, e_0, npoints, error )
+  SUBROUTINE x_p_0 ( rho, r13, fs, e_0, npoints)
 
     REAL(KIND=dp), DIMENSION(*), INTENT(IN)  :: rho, r13
     REAL(KIND=dp), DIMENSION(:, :), &
@@ -384,7 +361,6 @@ CONTAINS
     REAL(KIND=dp), DIMENSION(*), &
       INTENT(INOUT)                          :: e_0
     INTEGER, INTENT(in)                      :: npoints
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     INTEGER                                  :: ip
 
@@ -413,9 +389,8 @@ CONTAINS
 !> \param e_rho ...
 !> \param e_ndrho ...
 !> \param npoints ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE x_p_1 ( rho, r13, s, fs, e_rho,e_ndrho,npoints,error )
+  SUBROUTINE x_p_1 ( rho, r13, s, fs, e_rho,e_ndrho,npoints)
 
     REAL(KIND=dp), DIMENSION(*), INTENT(IN)  :: rho, r13, s
     REAL(KIND=dp), DIMENSION(:, :), &
@@ -423,7 +398,6 @@ CONTAINS
     REAL(KIND=dp), DIMENSION(*), &
       INTENT(INOUT)                          :: e_rho, e_ndrho
     INTEGER, INTENT(in)                      :: npoints
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     INTEGER                                  :: ip
     REAL(KIND=dp)                            :: a0, a1, sx, sy
@@ -462,10 +436,9 @@ CONTAINS
 !> \param e_rho_ndrho ...
 !> \param e_ndrho_ndrho ...
 !> \param npoints ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE x_p_2 ( rho, r13, s, fs, e_rho_rho, e_rho_ndrho, &
-       e_ndrho_ndrho, npoints, error )
+       e_ndrho_ndrho, npoints)
 
     REAL(KIND=dp), DIMENSION(*), INTENT(IN)  :: rho, r13, s
     REAL(KIND=dp), DIMENSION(:, :), &
@@ -474,7 +447,6 @@ CONTAINS
       INTENT(INOUT)                          :: e_rho_rho, e_rho_ndrho, &
                                                 e_ndrho_ndrho
     INTEGER, INTENT(in)                      :: npoints
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     INTEGER                                  :: ip
     REAL(KIND=dp)                            :: a0, a1, a2, sx, sxx, sxy, sy
@@ -520,10 +492,9 @@ CONTAINS
 !> \param e_rho_ndrho_ndrho ...
 !> \param e_ndrho_ndrho_ndrho ...
 !> \param npoints ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE x_p_3 ( rho, r13, s, fs, e_rho_rho_rho, e_rho_rho_ndrho,&
-       e_rho_ndrho_ndrho, e_ndrho_ndrho_ndrho, npoints,error )
+       e_rho_ndrho_ndrho, e_ndrho_ndrho_ndrho, npoints)
 
     REAL(KIND=dp), DIMENSION(*), INTENT(IN)  :: rho, r13, s
     REAL(KIND=dp), DIMENSION(:, :), &
@@ -534,7 +505,6 @@ CONTAINS
                                                 e_rho_ndrho_ndrho, &
                                                 e_ndrho_ndrho_ndrho
     INTEGER, INTENT(in)                      :: npoints
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     INTEGER                                  :: ip
     REAL(KIND=dp)                            :: a0, a1, a2, a3, sx, sxx, &
@@ -681,7 +651,7 @@ CONTAINS
          fs(ip,4) = f0*f0*f0*fs(ip,4)
 
       CASE DEFAULT
-         CALL stop_program(routineN,moduleN,__LINE__,"Illegal order")
+         CPABORT("Illegal order")
       END SELECT
     END DO
 
@@ -757,7 +727,7 @@ CONTAINS
                     75.0_dp/t14/p0*p1*(2*t1+12*t2*s2+30*t3*s4)+&
                     1/t14*(24*t2*s(ip)+120*t3*t19)*f15
       CASE DEFAULT
-         CALL stop_program(routineN,moduleN,__LINE__,"Illegal order")
+         CPABORT("Illegal order")
       END SELECT
     END DO
 
@@ -847,7 +817,7 @@ CONTAINS
          fs(ip,3) = f2 * scale_s * scale_s
          fs(ip,4) = (n3-f0*d3-3._dp*f2*d1-3._dp*f1*d2)/d0 * scale_s * scale_s * scale_s
       CASE DEFAULT
-         CALL stop_program(routineN,moduleN,__LINE__,"Illegal order")
+         CPABORT("Illegal order")
       END SELECT
     END DO
 
@@ -903,7 +873,7 @@ CONTAINS
          fs(ip,4) = 24.0_dp*b*f0*f0*f0* gamma_bo*gamma_bo*x * &
                     (1.0_dp-5.0_dp*a+2.0_dp*a*a) * y*y*y*y*y
       CASE DEFAULT
-         CALL stop_program(routineN,moduleN,__LINE__,"Illegal order")
+         CPABORT("Illegal order")
       END SELECT
     END DO
 
@@ -1153,7 +1123,7 @@ CONTAINS
          fs(ip,3) = -2.0_dp*mu*(3.0_dp*mk*x2-1.0_dp)*y*y*y*f0*f0
          fs(ip,4) = 24.0_dp*mu*mk*x*(mk*x2-1.0_dp)*y*y*y*y*f0*f0*f0
       CASE DEFAULT
-         CALL stop_program(routineN,moduleN,__LINE__,"Illegal order")
+         CPABORT("Illegal order")
       END SELECT
     END DO
 

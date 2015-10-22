@@ -957,70 +957,6 @@
   END SUBROUTINE mp_sum_[nametype1]m4
 
 ! *****************************************************************************
-!> \brief Element-wise sum of a rank-5 array on all processes.
-!> \param[in] msg             Arary to sum and result
-!> \param gid ...
-!> \note see mp_sum_[nametype1] 
-! *****************************************************************************
-  SUBROUTINE mp_sum_[nametype1]m5(msg,gid)
-    [type1], INTENT(INOUT)                   :: msg( :, :, :, :, : )
-    INTEGER, INTENT(IN)                      :: gid
-
-    CHARACTER(len=*), PARAMETER :: routineN = 'mp_sum_[nametype1]m5', &
-      routineP = moduleN//':'//routineN
-
-    INTEGER                                  :: handle, ierr, &
-                                                msglen
-
-    ierr = 0
-    CALL mp_timeset(routineN,handle)
-
-    msglen = SIZE(msg)
-#if defined(__parallel)
-    t_start = m_walltime ( )
-    IF (msglen>0) THEN
-      CALL mpi_allreduce(MPI_IN_PLACE,msg,msglen,[mpi_type1],MPI_SUM,gid,ierr)
-      IF ( ierr /= 0 ) CALL mp_stop( ierr, "mpi_allreduce @ "//routineN )
-    END IF
-    t_end = m_walltime ( )
-    CALL add_perf(perf_id=3,count=1,time=t_end-t_start,msg_size=msglen*[bytes1])
-#endif
-    CALL mp_timestop(handle)
-  END SUBROUTINE mp_sum_[nametype1]m5
-
-! *****************************************************************************
-!> \brief Element-wise sum of a rank-6 array on all processes.
-!> \param[in] msg             Arary to sum and result
-!> \param gid ...
-!> \note see mp_sum_[nametype1] 
-! *****************************************************************************
-  SUBROUTINE mp_sum_[nametype1]m6(msg,gid)
-    [type1], INTENT(INOUT)                   :: msg( :, :, :, :, :, : )
-    INTEGER, INTENT(IN)                      :: gid
-
-    CHARACTER(len=*), PARAMETER :: routineN = 'mp_sum_[nametype1]m6', &
-      routineP = moduleN//':'//routineN
-
-    INTEGER                                  :: handle, ierr, &
-                                                msglen
-
-    ierr = 0
-    CALL mp_timeset(routineN,handle)
-
-    msglen = SIZE(msg)
-#if defined(__parallel)
-    t_start = m_walltime ( )
-    IF (msglen>0) THEN
-      CALL mpi_allreduce(MPI_IN_PLACE,msg,msglen,[mpi_type1],MPI_SUM,gid,ierr)
-      IF ( ierr /= 0 ) CALL mp_stop( ierr, "mpi_allreduce @ "//routineN )
-    END IF
-    t_end = m_walltime ( )
-    CALL add_perf(perf_id=3,count=1,time=t_end-t_start,msg_size=msglen*[bytes1])
-#endif
-    CALL mp_timestop(handle)
-  END SUBROUTINE mp_sum_[nametype1]m6
-
-! *****************************************************************************
 !> \brief Element-wise sum of data from all processes with result left only on
 !>        one.
 !> \param[in,out] msg         Vector to sum (input) and (only on process root)
@@ -1053,8 +989,7 @@
     IF ( ierr /= 0 ) CALL mp_stop( ierr, "mpi_comm_rank @ "//routineN )
     IF (msglen>0) THEN
       m1 = SIZE(msg,1)
-      ALLOCATE (res(m1),STAT=ierr)
-      IF ( ierr /= 0 ) CALL mp_abort( "allocate @ "//routineN )
+      ALLOCATE (res(m1))
       CALL mpi_reduce(msg,res,msglen,[mpi_type1],MPI_SUM,&
            root,gid,ierr)
       IF ( ierr /= 0 ) CALL mp_stop( ierr, "mpi_reduce @ "//routineN )
@@ -1102,8 +1037,7 @@
     IF (msglen>0) THEN
     m1 = SIZE(msg,1)
     m2 = SIZE(msg,2)
-    ALLOCATE (res(m1,m2),STAT=ierr)
-    IF ( ierr /= 0 ) CALL mp_abort( "allocate @ "//routineN )
+    ALLOCATE (res(m1,m2))
     CALL mpi_reduce(msg,res,msglen,[mpi_type1],MPI_SUM,root,gid,ierr)
     IF ( ierr /= 0 ) CALL mp_stop( ierr, "mpi_reduce @ "//routineN )
     IF ( taskid == root ) THEN
@@ -1235,7 +1169,6 @@
     msglen = SIZE(msg)
 #if defined(__parallel)
     t_start = m_walltime ( )
-    IF ( ierr /= 0 ) CALL mp_abort( "allocate @ "//routineN )
     CALL mpi_allreduce(MPI_IN_PLACE,msg,msglen,[mpi_type1],MPI_MIN,gid,ierr)
     IF ( ierr /= 0 ) CALL mp_stop( ierr, "mpi_allreduce @ "//routineN )
     t_end = m_walltime ( )
@@ -1965,84 +1898,6 @@
   END SUBROUTINE mp_isendrecv_[nametype1]v
 
 ! *****************************************************************************
-!> \brief Non-blocking send and receieve of a matrix
-!> \param msgin ...
-!> \param dest ...
-!> \param msgout ...
-!> \param source ...
-!> \param comm ...
-!> \param send_request ...
-!> \param recv_request ...
-!> \param tag ...
-!> \par History
-!>      08.2003 created [f&j]
-!> \note see mp_isendrecv_[nametype1]v 
-!> \note
-!>      The arguments must be pointers to be sure that we do not get
-!>      temporaries. They must point to contiguous memory.
-! *****************************************************************************
-  SUBROUTINE mp_isendrecv_[nametype1]m2(msgin,dest,msgout,source,comm,send_request,&
-       recv_request,tag)
-    [type1], DIMENSION(:, :), POINTER        :: msgin
-    INTEGER, INTENT(IN)                      :: dest
-    [type1], DIMENSION(:, :), POINTER        :: msgout
-    INTEGER, INTENT(IN)                      :: source, comm
-    INTEGER, INTENT(out)                     :: send_request, recv_request
-    INTEGER, INTENT(in), OPTIONAL            :: tag
-
-    CHARACTER(len=*), PARAMETER :: routineN = 'mp_isendrecv_[nametype1]m2', &
-      routineP = moduleN//':'//routineN
-
-    INTEGER                                  :: handle, ierr
-#if defined(__parallel)
-    INTEGER                                  :: lower1, lower2, msglen, my_tag
-    [type1]                                  :: foo
-#endif
-
-    ierr = 0
-    CALL mp_timeset(routineN,handle)
-
-#if defined(__parallel)
-    t_start = m_walltime ( )
-    my_tag = 0
-    IF (PRESENT(tag)) my_tag=tag
-
-    msglen = SIZE(msgout,1)*SIZE(msgout,2)
-    IF (msglen>0) THEN
-       lower1=LBOUND(msgout,1)
-       lower2=LBOUND(msgout,2)
-       CALL mpi_irecv(msgout(lower1,lower2),msglen,[mpi_type1],source, my_tag,&
-            comm,recv_request,ierr)
-    ELSE
-       CALL mpi_irecv(foo,msglen,[mpi_type1],source, my_tag,&
-            comm,recv_request,ierr)
-    END IF
-    IF ( ierr /= 0 ) CALL mp_stop( ierr, "mpi_irecv @ "//routineN )
-
-    msglen = SIZE(msgin,1)*SIZE(msgin,2)
-    IF (msglen>0) THEN
-       lower1=LBOUND(msgin,1)
-       lower2=LBOUND(msgin,2)
-       CALL mpi_isend(msgin(lower1,lower2),msglen,[mpi_type1],dest,my_tag,&
-            comm,send_request,ierr)
-    ELSE
-       CALL mpi_isend(foo,msglen,[mpi_type1],dest,my_tag,&
-            comm,send_request,ierr)
-    END IF
-    IF ( ierr /= 0 ) CALL mp_stop( ierr, "mpi_isend @ mp_isendrecv_rm2" )
-
-    msglen = (msglen+SIZE(msgout,1)*SIZE(msgout,2)+1)/2
-    t_end = m_walltime ( )
-    CALL add_perf(perf_id=8,count=1,time=t_end-t_start,msg_size=msglen*[bytes1])
-#else
-    send_request=0
-    recv_request=0
-    msgout = msgin
-#endif
-    CALL mp_timestop(handle)
-  END SUBROUTINE mp_isendrecv_[nametype1]m2
-
-! *****************************************************************************
 !> \brief Non-blocking send of vector data
 !> \param msgin ...
 !> \param dest ...
@@ -2467,7 +2322,7 @@
   SUBROUTINE mp_rget_[nametype1]v(base,source,win,disp,request)
     [type1], DIMENSION(:), POINTER                      :: base
     INTEGER, INTENT(IN)                                 :: source, win
-    INTEGER(kind=mp_address_kind), INTENT(IN), OPTIONAL :: disp
+    INTEGER, INTENT(IN), OPTIONAL                       :: disp
     INTEGER, INTENT(OUT)                                :: request
 
     CHARACTER(len=*), PARAMETER :: routineN = 'mp_rget_[nametype1]v', &
@@ -2490,7 +2345,7 @@
     len = SIZE(base)
     disp_aint = 0
     IF (PRESENT(disp)) THEN
-       disp_aint = disp
+       disp_aint = INT(disp,KIND=mpi_address_kind)
     ENDIF
     IF (len>0) THEN
        lower1=LBOUND(base,1)
@@ -2538,21 +2393,16 @@
     t_start = m_walltime()
     NULLIFY(DATA)
     CALL mp_alloc_mem(DATA, len, stat=ierr)
-    IF (PRESENT (stat)) THEN
-       stat = ierr
-    ELSE
-       IF (ierr /= 0) CALL mp_stop(ierr, "mpi_alloc_mem @ "//routineN)
-    ENDIF
+    IF (ierr/=0 .AND. .NOT. PRESENT(stat)) &
+       CALL mp_stop(ierr, "mpi_alloc_mem @ "//routineN)
     t_end = m_walltime()
     CALL add_perf(perf_id=15, count=1, time=t_end-t_start)
 #else
     ALLOCATE(DATA(len), stat=ierr)
-    IF (PRESENT (stat)) THEN
-       stat = ierr
-    ELSE
-       IF (ierr /= 0) CALL mp_stop(ierr, "ALLOCATE @ "//routineN)
-    ENDIF
+    IF (ierr/=0 .AND. .NOT. PRESENT(stat)) &
+       CALL mp_stop(ierr, "ALLOCATE @ "//routineN)
 #endif
+   IF(PRESENT(stat)) stat = ierr
     CALL mp_timestop(handle)
   END SUBROUTINE mp_allocate_[nametype1]
 
@@ -2586,13 +2436,7 @@
     t_end = m_walltime()
     CALL add_perf(perf_id=15, count=1, time=t_end-t_start)
 #else
-    DEALLOCATE(DATA, stat=ierr)
-    IF (PRESENT (stat)) THEN
-       stat=ierr
-    ELSE
-       IF (ierr /= 0) CALL mp_stop(ierr, "DEALLOCATE @ "//routineN)
-    ENDIF
-    NULLIFY(DATA)
+    DEALLOCATE(DATA)
 #endif
     CALL mp_timestop(handle)
   END SUBROUTINE mp_deallocate_[nametype1]
@@ -2934,10 +2778,11 @@
      CALL C_F_POINTER(mp_baseptr, DATA, (/length/))
      IF (PRESENT (stat)) stat = mp_res
 #else
-     INTEGER                                 :: length
+     INTEGER                                 :: length, mystat
      length = MAX(len,1)
      IF (PRESENT (stat)) THEN
-        ALLOCATE(DATA(length), stat=stat)
+        ALLOCATE(DATA(length), stat=mystat)
+        stat = mystat ! show to convention checker that stat is used
      ELSE
         ALLOCATE(DATA(length))
      ENDIF
@@ -2960,10 +2805,7 @@
     CALL MPI_FREE_MEM(DATA, mp_res)
     IF (PRESENT (stat)) stat = mp_res
 #else
-     IF (PRESENT (stat)) THEN
-        DEALLOCATE(DATA, stat=stat)
-     ELSE
-        DEALLOCATE(DATA)
-     ENDIF
+     DEALLOCATE(DATA)
+     IF (PRESENT (stat)) stat=0
 #endif
    END SUBROUTINE mp_free_mem_[nametype1]

@@ -35,11 +35,10 @@ MODULE scptb_core_interactions
   USE scptb_types,                     ONLY: get_scptb_parameter,&
                                              scptb_parameter_p_type,&
                                              scptb_parameter_type
-  USE timings,                         ONLY: timeset,&
-                                             timestop
   USE virial_methods,                  ONLY: virial_pair_force
   USE virial_types,                    ONLY: virial_type
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -54,24 +53,21 @@ CONTAINS
 !> \brief Evaluates the repulsive core interactions for SCPTB methods
 !> \param qs_env ...
 !> \param calculate_forces ...
-!> \param error ...
 !> \date 12.2011 [jhu]
 !> \author Juerg Hutter [jhu] - University of Zurich
 ! *****************************************************************************
-  SUBROUTINE scptb_core_interaction(qs_env, calculate_forces, error)
+  SUBROUTINE scptb_core_interaction(qs_env, calculate_forces)
     TYPE(qs_environment_type), POINTER       :: qs_env
     LOGICAL, INTENT(in)                      :: calculate_forces
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'scptb_core_interaction', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: atom_a, atom_b, handle, &
                                                 iatom, ikind, jatom, jkind, &
-                                                natom, nkind, stat
+                                                natom, nkind
     INTEGER, DIMENSION(:), POINTER           :: atom_of_kind
-    LOGICAL                                  :: atener, defined, failure, &
-                                                use_virial
+    LOGICAL                                  :: atener, defined, use_virial
     LOGICAL, ALLOCATABLE, DIMENSION(:)       :: scptb_defined
     REAL(KIND=dp)                            :: dr1, enuc, enucij, enuclear
     REAL(KIND=dp), DIMENSION(3)              :: force_ab, rij
@@ -97,14 +93,13 @@ CONTAINS
     TYPE(scptb_parameter_type), POINTER      :: scptb_kind_a, scptb_kind_b
     TYPE(virial_type), POINTER               :: virial
 
-    failure  = .FALSE.
     enuclear = 0.0_dp
     NULLIFY(atprop)
     CALL timeset(routineN,handle)
 
-    CPPrecondition(ASSOCIATED(qs_env),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(qs_env))
     CALL get_qs_env(qs_env=qs_env,para_env=para_env,dft_control=dft_control,&
-                    cell=cell,virial=virial,energy=energy,atprop=atprop,error=error)
+                    cell=cell,virial=virial,energy=energy,atprop=atprop)
 
     ! Parameters
     use_virial = virial%pv_availability.AND.(.NOT.virial%pv_numer)
@@ -112,88 +107,82 @@ CONTAINS
     ! atomic energy decomposition
     atener = atprop%energy
     IF (atener) THEN
-      CALL get_qs_env(qs_env=qs_env,particle_set=particle_set,error=error)
+      CALL get_qs_env(qs_env=qs_env,particle_set=particle_set)
       natom = SIZE (particle_set)
-      CALL atprop_array_init(atprop%atecc,natom,error)
+      CALL atprop_array_init(atprop%atecc,natom)
     END IF
 
-    IF (.NOT. failure) THEN
-       CALL get_qs_env(qs_env=qs_env,sab_core=sab_core, atomic_kind_set=atomic_kind_set,&
-                      qs_kind_set=qs_kind_set,error=error)
+    CALL get_qs_env(qs_env=qs_env,sab_core=sab_core, atomic_kind_set=atomic_kind_set,&
+                   qs_kind_set=qs_kind_set)
 
-       nkind = SIZE(atomic_kind_set)
-       ! Possibly compute forces
-       IF(calculate_forces) THEN
-          CALL get_qs_env(qs_env=qs_env,particle_set=particle_set,force=force,error=error)
-          natom = SIZE (particle_set)
-          ALLOCATE (atom_of_kind(natom),STAT=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-          CALL get_atomic_kind_set(atomic_kind_set,atom_of_kind=atom_of_kind)
-       END IF
+    nkind = SIZE(atomic_kind_set)
+    ! Possibly compute forces
+    IF(calculate_forces) THEN
+       CALL get_qs_env(qs_env=qs_env,particle_set=particle_set,force=force)
+       natom = SIZE (particle_set)
+       ALLOCATE (atom_of_kind(natom))
+       CALL get_atomic_kind_set(atomic_kind_set,atom_of_kind=atom_of_kind)
+    END IF
 
-       ALLOCATE (scptb_kind_param(nkind),scptb_defined(nkind),STAT=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       DO ikind=1,nkind
-          CALL get_qs_kind(qs_kind_set(ikind),scptb_parameter=scptb_kind_a)
-          scptb_kind_param(ikind)%scptb_param => scptb_kind_a
-          CALL get_scptb_parameter(scptb_kind_a,defined=defined)
-          scptb_defined(ikind)=defined
-       END DO
-       CALL neighbor_list_iterator_create(nl_iterator,sab_core)
-       DO WHILE (neighbor_list_iterate(nl_iterator)==0)
-          CALL get_iterator_info(nl_iterator,ikind=ikind,jkind=jkind,iatom=iatom,jatom=jatom,r=rij)
-          IF (.NOT.scptb_defined(ikind)) CYCLE
-          IF (.NOT.scptb_defined(jkind)) CYCLE
-          scptb_kind_a => scptb_kind_param(ikind)%scptb_param
-          scptb_kind_b => scptb_kind_param(jkind)%scptb_param
-          dr1 = DOT_PRODUCT(rij,rij)
-          enucij = 0._dp
-          IF ( dr1 > 0.00001_dp ) THEN
-             ! Core-Core energy and derivatives
-             IF(calculate_forces) THEN
-                CALL corecore (scptb_kind_a,scptb_kind_b,rij,enuc=enuc,denuc=force_ab,error=error)
+    ALLOCATE (scptb_kind_param(nkind),scptb_defined(nkind))
+    DO ikind=1,nkind
+       CALL get_qs_kind(qs_kind_set(ikind),scptb_parameter=scptb_kind_a)
+       scptb_kind_param(ikind)%scptb_param => scptb_kind_a
+       CALL get_scptb_parameter(scptb_kind_a,defined=defined)
+       scptb_defined(ikind)=defined
+    END DO
+    CALL neighbor_list_iterator_create(nl_iterator,sab_core)
+    DO WHILE (neighbor_list_iterate(nl_iterator)==0)
+       CALL get_iterator_info(nl_iterator,ikind=ikind,jkind=jkind,iatom=iatom,jatom=jatom,r=rij)
+       IF (.NOT.scptb_defined(ikind)) CYCLE
+       IF (.NOT.scptb_defined(jkind)) CYCLE
+       scptb_kind_a => scptb_kind_param(ikind)%scptb_param
+       scptb_kind_b => scptb_kind_param(jkind)%scptb_param
+       dr1 = DOT_PRODUCT(rij,rij)
+       enucij = 0._dp
+       IF ( dr1 > 0.00001_dp ) THEN
+          ! Core-Core energy and derivatives
+          IF(calculate_forces) THEN
+             CALL corecore (scptb_kind_a,scptb_kind_b,rij,enuc=enuc,denuc=force_ab)
 
-                atom_a = atom_of_kind(iatom)
-                atom_b = atom_of_kind(jatom)
+             atom_a = atom_of_kind(iatom)
+             atom_b = atom_of_kind(jatom)
 
-                ! Sum up force components
-                force(ikind)%all_potential(1,atom_a) = force(ikind)%all_potential(1,atom_a) - force_ab(1)
-                force(jkind)%all_potential(1,atom_b) = force(jkind)%all_potential(1,atom_b) + force_ab(1)
+             ! Sum up force components
+             force(ikind)%all_potential(1,atom_a) = force(ikind)%all_potential(1,atom_a) - force_ab(1)
+             force(jkind)%all_potential(1,atom_b) = force(jkind)%all_potential(1,atom_b) + force_ab(1)
 
-                force(ikind)%all_potential(2,atom_a) = force(ikind)%all_potential(2,atom_a) - force_ab(2)
-                force(jkind)%all_potential(2,atom_b) = force(jkind)%all_potential(2,atom_b) + force_ab(2)
+             force(ikind)%all_potential(2,atom_a) = force(ikind)%all_potential(2,atom_a) - force_ab(2)
+             force(jkind)%all_potential(2,atom_b) = force(jkind)%all_potential(2,atom_b) + force_ab(2)
 
-                force(ikind)%all_potential(3,atom_a) = force(ikind)%all_potential(3,atom_a) - force_ab(3)
-                force(jkind)%all_potential(3,atom_b) = force(jkind)%all_potential(3,atom_b) + force_ab(3)
+             force(ikind)%all_potential(3,atom_a) = force(ikind)%all_potential(3,atom_a) - force_ab(3)
+             force(jkind)%all_potential(3,atom_b) = force(jkind)%all_potential(3,atom_b) + force_ab(3)
 
-                IF (use_virial) THEN
-                   CALL virial_pair_force ( virial%pv_virial, -1._dp, force_ab, rij, error)
-                END IF
-
-             ELSE
-                CALL corecore (scptb_kind_a,scptb_kind_b,rij,enuc=enuc,error=error)
+             IF (use_virial) THEN
+                CALL virial_pair_force ( virial%pv_virial, -1._dp, force_ab, rij)
              END IF
-             enucij = enucij + enuc
-          END IF
-          IF (atener) THEN
-            atprop%atecc(iatom) = atprop%atecc(iatom) + 0.5_dp*enucij
-            atprop%atecc(jatom) = atprop%atecc(jatom) + 0.5_dp*enucij
-          END IF
-          enuclear = enuclear + enucij
-       END DO
-       CALL neighbor_list_iterator_release(nl_iterator)
 
-       DEALLOCATE (scptb_kind_param,scptb_defined,STAT=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-
-       IF (calculate_forces) THEN
-          DEALLOCATE(atom_of_kind,stat=stat)
-          CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+          ELSE
+             CALL corecore (scptb_kind_a,scptb_kind_b,rij,enuc=enuc)
+          END IF
+          enucij = enucij + enuc
        END IF
+       IF (atener) THEN
+         atprop%atecc(iatom) = atprop%atecc(iatom) + 0.5_dp*enucij
+         atprop%atecc(jatom) = atprop%atecc(jatom) + 0.5_dp*enucij
+       END IF
+       enuclear = enuclear + enucij
+    END DO
+    CALL neighbor_list_iterator_release(nl_iterator)
 
-       CALL mp_sum(enuclear,para_env%group)
-       energy%repulsive  = enuclear
+    DEALLOCATE (scptb_kind_param,scptb_defined)
+
+    IF (calculate_forces) THEN
+       DEALLOCATE(atom_of_kind)
     END IF
+
+    CALL mp_sum(enuclear,para_env%group)
+    energy%repulsive  = enuclear
 
     CALL timestop(handle)
 
@@ -206,15 +195,13 @@ CONTAINS
 !> \param rij ...
 !> \param enuc ...
 !> \param denuc ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE corecore (sepi,sepj,rij,enuc,denuc,error)
+  SUBROUTINE corecore (sepi,sepj,rij,enuc,denuc)
     TYPE(scptb_parameter_type), POINTER      :: sepi, sepj
     REAL(dp), DIMENSION(3), INTENT(IN)       :: rij
     REAL(dp), INTENT(OUT)                    :: enuc
     REAL(dp), DIMENSION(3), INTENT(OUT), &
       OPTIONAL                               :: denuc
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'corecore', &
       routineP = moduleN//':'//routineN

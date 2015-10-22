@@ -31,6 +31,7 @@ MODULE moments_utils
   USE qs_kind_types,                   ONLY: get_qs_kind,&
                                              qs_kind_type
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -54,10 +55,9 @@ CONTAINS
 !> \param ref_point ...
 !> \param ifirst ...
 !> \param ilast ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE get_reference_point(rpoint,drpoint,qs_env,fist_env,reference,ref_point,&
-             ifirst, ilast, error)
+             ifirst, ilast)
     REAL(dp), DIMENSION(3), INTENT(OUT)      :: rpoint
     REAL(dp), DIMENSION(3), INTENT(OUT), &
       OPTIONAL                               :: drpoint
@@ -68,13 +68,12 @@ CONTAINS
     INTEGER, INTENT(IN)                      :: reference
     REAL(KIND=dp), DIMENSION(:), POINTER     :: ref_point
     INTEGER, INTENT(IN), OPTIONAL            :: ifirst, ilast
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'get_reference_point', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: akind, ia, iatom, ikind
-    LOGICAL                                  :: do_molecule, failure
+    LOGICAL                                  :: do_molecule
     REAL(dp)                                 :: charge, mass, mass_low, mtot, &
                                                 ztot
     REAL(dp), DIMENSION(3)                   :: center, ria
@@ -87,26 +86,23 @@ CONTAINS
     TYPE(qs_kind_type), DIMENSION(:), &
       POINTER                                :: qs_kind_set
 
-    failure = .FALSE.
-    CPPostcondition(PRESENT(ifirst).EQV.PRESENT(ilast),cp_failure_level,routineP,error,failure)
+    CPASSERT(PRESENT(ifirst).EQV.PRESENT(ilast))
     NULLIFY ( cell, particle_set, qs_kind_set, local_particles, para_env )
     IF (PRESENT(qs_env)) THEN
        CALL get_qs_env ( qs_env, cell=cell, particle_set=particle_set, &
             qs_kind_set=qs_kind_set,&
-            local_particles=local_particles, para_env=para_env, error=error)
+            local_particles=local_particles, para_env=para_env)
     END IF
     IF (PRESENT(fist_env)) THEN
        CALL fist_env_get( fist_env, cell=cell, particle_set=particle_set, &
-            local_particles=local_particles, para_env=para_env, error=error)
+            local_particles=local_particles, para_env=para_env)
     END IF
     do_molecule = .FALSE.
     IF (PRESENT(ifirst).AND.PRESENT(ilast)) do_molecule = .TRUE.
     IF (PRESENT(drpoint)) drpoint = 0.0_dp
     SELECT CASE (reference)
     CASE DEFAULT
-       CALL cp_unimplemented_error(fromWhere=routineP, &
-            message="Type of reference point not implemented", &
-            error=error, error_level=cp_failure_level)
+       CPABORT("Type of reference point not implemented")
     CASE (use_mom_ref_com)
        rpoint = 0._dp
        mtot = 0._dp

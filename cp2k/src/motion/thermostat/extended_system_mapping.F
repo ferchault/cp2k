@@ -29,14 +29,12 @@ MODULE extended_system_mapping
   USE molecule_types_new,              ONLY: global_constraint_type,&
                                              molecule_type
   USE simpar_types,                    ONLY: simpar_type
-  USE termination,                     ONLY: stop_program
   USE thermostat_mapping,              ONLY: adiabatic_mapping_region,&
                                              init_baro_map_info,&
                                              thermostat_mapping_region
   USE thermostat_types,                ONLY: thermostat_info_type
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "../../common/cp_common_uses.f90"
+#include "../../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -54,32 +52,28 @@ CONTAINS
 !> \brief Creates the thermostatting for the barostat
 !> \param simpar ...
 !> \param nhc ...
-!> \param error ...
 !> \par History
 !>      CJM, 20-Feb-01  : nhc structure allocated to zero when not in use
 !>      JGH (10-Mar-2001) : set nhc variables to zero when not in use
 !> \author CJM
 ! *****************************************************************************
-  SUBROUTINE nhc_to_barostat_mapping ( simpar, nhc, error )
+  SUBROUTINE nhc_to_barostat_mapping ( simpar, nhc)
 
     TYPE(simpar_type), POINTER               :: simpar
     TYPE(lnhc_parameters_type), POINTER      :: nhc
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'nhc_to_barostat_mapping', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: handle, i, number, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: handle, i, number
     TYPE(map_info_type), POINTER             :: map_info
 
     CALL timeset(routineN,handle)
 
-    failure = .FALSE.
 
     SELECT CASE (simpar%ensemble)
     CASE  DEFAULT
-       CALL stop_program(routineN,moduleN,__LINE__,'Never reach this point!')
+       CPABORT('Never reach this point!')
     CASE ( npt_i_ensemble, npt_f_ensemble )
        map_info => nhc%map_info
        map_info%dis_type = do_thermo_only_master
@@ -93,10 +87,9 @@ CONTAINS
           number = 1
        ENDIF
 
-       CALL init_baro_map_info(map_info, number, nhc%loc_num_nhc, error)
+       CALL init_baro_map_info(map_info, number, nhc%loc_num_nhc)
 
-       ALLOCATE ( nhc%nvt(nhc%nhc_len, nhc%loc_num_nhc), STAT = stat )
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       ALLOCATE ( nhc%nvt(nhc%nhc_len, nhc%loc_num_nhc))
        ! Now that we know how many there are stick this into nhc % nkt
        ! (number of degrees of freedom times k_B T )
        DO i = 1, nhc%loc_num_nhc
@@ -131,7 +124,6 @@ CONTAINS
 !> \param nhc ...
 !> \param para_env ...
 !> \param gci ...
-!> \param error ...
 !> \par History
 !>      29-Nov-00 (JGH) correct counting of DOF if constraints are off
 !>      CJM, 20-Feb-01  : nhc structure allocated to zero when not in use
@@ -141,7 +133,7 @@ CONTAINS
 !> \author CJM
 ! *****************************************************************************
   SUBROUTINE nhc_to_particle_mapping ( thermostat_info, simpar, local_molecules,&
-       molecule_set, molecule_kind_set, nhc, para_env, gci, error)
+       molecule_set, molecule_kind_set, nhc, para_env, gci)
 
     TYPE(thermostat_info_type), POINTER      :: thermostat_info
     TYPE(simpar_type), POINTER               :: simpar
@@ -151,36 +143,33 @@ CONTAINS
     TYPE(lnhc_parameters_type), POINTER      :: nhc
     TYPE(cp_para_env_type), POINTER          :: para_env
     TYPE(global_constraint_type), POINTER    :: gci
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'nhc_to_particle_mapping', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, i, imap, j, &
-                                                natoms_local, stat, &
+                                                natoms_local, &
                                                 sum_of_thermostats
     INTEGER, DIMENSION(:), POINTER           :: deg_of_freedom, &
                                                 massive_atom_list
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: fac
     TYPE(map_info_type), POINTER             :: map_info
 
     CALL timeset(routineN,handle)
 
-    failure = .FALSE.
     NULLIFY (massive_atom_list, deg_of_freedom)
 
     SELECT CASE ( simpar % ensemble )
     CASE DEFAULT
-       CALL stop_program(routineN,moduleN,__LINE__,'Unknown ensemble!')
+       CPABORT('Unknown ensemble!')
     CASE ( nve_ensemble, isokin_ensemble,npe_f_ensemble, npe_i_ensemble, nph_uniaxial_ensemble,&
            nph_uniaxial_damped_ensemble, reftraj_ensemble, langevin_ensemble )
-       CALL stop_program(routineN,moduleN,__LINE__,'Never reach this point!')
+       CPABORT('Never reach this point!')
     CASE ( nvt_ensemble, npt_i_ensemble, npt_f_ensemble )
 
        CALL setup_nhc_thermostat(nhc, thermostat_info, deg_of_freedom, massive_atom_list,&
             molecule_kind_set, local_molecules, molecule_set, para_env, natoms_local, &
-            simpar, sum_of_thermostats, gci, error=error)
+            simpar, sum_of_thermostats, gci)
 
        ! Sum up the number of degrees of freedom on each thermostat.
        ! first: initialize the target
@@ -200,7 +189,7 @@ CONTAINS
        IF ( ( sum_of_thermostats == 1 ) .AND. ( map_info%dis_type /= do_thermo_no_communication ) ) THEN
           fac = map_info%s_kin(1)-deg_of_freedom(1)-simpar%nfree_rot_transl
           IF ( fac == 0.0_dp ) THEN
-             CALL stop_program(routineN,moduleN,__LINE__,'Zero degrees of freedom. Nothing to thermalize!')
+             CPABORT('Zero degrees of freedom. Nothing to thermalize!')
           END IF
           nhc%nvt(1,1)%nkt = simpar%temp_ext*fac
           nhc%nvt(1,1)%degrees_of_freedom = FLOOR(fac)
@@ -219,10 +208,8 @@ CONTAINS
           nhc % nvt ( i, : ) % nkt = simpar % temp_ext
           nhc % nvt ( i, : ) % degrees_of_freedom = 1
        END DO
-       DEALLOCATE (deg_of_freedom,STAT=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       DEALLOCATE ( massive_atom_list, STAT = stat )
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE (deg_of_freedom)
+       DEALLOCATE ( massive_atom_list)
 
        ! Let's clean the arrays
        map_info%s_kin   = 0.0_dp
@@ -248,12 +235,11 @@ CONTAINS
 !> \param sum_of_thermostats ...
 !> \param gci ...
 !> \param shell ...
-!> \param error ...
 !> \author CJM -PNNL -2011
 ! *****************************************************************************
   SUBROUTINE setup_adiabatic_thermostat ( nhc, thermostat_info, deg_of_freedom,&
        massive_atom_list, molecule_kind_set, local_molecules, molecule_set,&
-       para_env, natoms_local, simpar, sum_of_thermostats, gci, shell, error)
+       para_env, natoms_local, simpar, sum_of_thermostats, gci, shell)
 
     TYPE(lnhc_parameters_type), POINTER      :: nhc
     TYPE(thermostat_info_type), POINTER      :: thermostat_info
@@ -268,19 +254,16 @@ CONTAINS
     INTEGER, INTENT(OUT)                     :: sum_of_thermostats
     TYPE(global_constraint_type), POINTER    :: gci
     LOGICAL, INTENT(IN), OPTIONAL            :: shell
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'setup_adiabatic_thermostat', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: handle, nkind, number, &
-                                                region, stat
-    LOGICAL                                  :: do_shell, failure
+    INTEGER                                  :: handle, nkind, number, region
+    LOGICAL                                  :: do_shell
     TYPE(map_info_type), POINTER             :: map_info
 
     CALL timeset(routineN,handle)
 
-    failure  = .FALSE.
     do_shell = .FALSE.
     IF (PRESENT(shell)) do_shell = shell
     map_info    => nhc%map_info
@@ -294,9 +277,8 @@ CONTAINS
     CALL adiabatic_mapping_region(map_info, deg_of_freedom, massive_atom_list,&
        molecule_kind_set, local_molecules, molecule_set, para_env, natoms_local,&
        simpar, number, region, gci, do_shell, thermostat_info%map_loc_thermo_gen,&
-       sum_of_thermostats, error)
-    ALLOCATE (nhc%nvt(nhc%nhc_len,number),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       sum_of_thermostats)
+    ALLOCATE (nhc%nvt(nhc%nhc_len,number))
 
     ! Now that we know how many there are stick this into nhc%nkt
     ! (number of degrees of freedom times k_B T for the first thermostat
@@ -318,12 +300,11 @@ CONTAINS
 !> \param nhc ...
 !> \param para_env ...
 !> \param gci ...
-!> \param error ...
 !> \par History
 !> \author CJM
 ! *****************************************************************************
   SUBROUTINE nhc_to_particle_mapping_slow ( thermostat_info, simpar, local_molecules,&
-       molecule_set, molecule_kind_set, nhc, para_env, gci, error)
+       molecule_set, molecule_kind_set, nhc, para_env, gci)
 
     TYPE(thermostat_info_type), POINTER      :: thermostat_info
     TYPE(simpar_type), POINTER               :: simpar
@@ -333,32 +314,29 @@ CONTAINS
     TYPE(lnhc_parameters_type), POINTER      :: nhc
     TYPE(cp_para_env_type), POINTER          :: para_env
     TYPE(global_constraint_type), POINTER    :: gci
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'nhc_to_particle_mapping_slow', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, i, imap, j, &
-                                                natoms_local, stat, &
+                                                natoms_local, &
                                                 sum_of_thermostats
     INTEGER, DIMENSION(:), POINTER           :: deg_of_freedom, &
                                                 massive_atom_list
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: fac
     TYPE(map_info_type), POINTER             :: map_info
 
     CALL timeset(routineN,handle)
 
-    failure = .FALSE.
     NULLIFY (massive_atom_list, deg_of_freedom)
 
     SELECT CASE ( simpar % ensemble )
     CASE DEFAULT
-       CALL stop_program(routineN,moduleN,__LINE__,'Unknown ensemble!')
+       CPABORT('Unknown ensemble!')
     CASE ( nvt_adiabatic_ensemble )
        CALL setup_adiabatic_thermostat(nhc, thermostat_info, deg_of_freedom, massive_atom_list,&
             molecule_kind_set, local_molecules, molecule_set, para_env, natoms_local, &
-            simpar, sum_of_thermostats, gci, error=error)
+            simpar, sum_of_thermostats, gci)
 
        ! Sum up the number of degrees of freedom on each thermostat.
        ! first: initialize the target
@@ -379,7 +357,7 @@ CONTAINS
        IF ( ( sum_of_thermostats == 1 ) .AND. ( map_info%dis_type /= do_thermo_no_communication ) ) THEN
           fac = map_info%s_kin(1)-deg_of_freedom(1)-simpar%nfree_rot_transl
           IF ( fac == 0.0_dp ) THEN
-             CALL stop_program(routineN,moduleN,__LINE__,'Zero degrees of freedom. Nothing to thermalize!')
+             CPABORT('Zero degrees of freedom. Nothing to thermalize!')
           END IF
           nhc%nvt(1,1)%nkt = simpar%temp_slow*fac
           nhc%nvt(1,1)%degrees_of_freedom = FLOOR(fac)
@@ -398,10 +376,8 @@ CONTAINS
           nhc % nvt ( i, : ) % nkt = simpar % temp_slow
           nhc % nvt ( i, : ) % degrees_of_freedom = 1
        END DO
-       DEALLOCATE (deg_of_freedom,STAT=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       DEALLOCATE ( massive_atom_list, STAT = stat )
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE (deg_of_freedom)
+       DEALLOCATE ( massive_atom_list)
 
        ! Let's clean the arrays
        map_info%s_kin   = 0.0_dp
@@ -422,12 +398,11 @@ CONTAINS
 !> \param nhc ...
 !> \param para_env ...
 !> \param gci ...
-!> \param error ...
 !> \par History
 !> \author CJM
 ! *****************************************************************************
   SUBROUTINE nhc_to_particle_mapping_fast ( thermostat_info, simpar, local_molecules,&
-       molecule_set, molecule_kind_set, nhc, para_env, gci, error)
+       molecule_set, molecule_kind_set, nhc, para_env, gci)
 
     TYPE(thermostat_info_type), POINTER      :: thermostat_info
     TYPE(simpar_type), POINTER               :: simpar
@@ -437,32 +412,29 @@ CONTAINS
     TYPE(lnhc_parameters_type), POINTER      :: nhc
     TYPE(cp_para_env_type), POINTER          :: para_env
     TYPE(global_constraint_type), POINTER    :: gci
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'nhc_to_particle_mapping_fast', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, i, imap, j, &
-                                                natoms_local, stat, &
+                                                natoms_local, &
                                                 sum_of_thermostats
     INTEGER, DIMENSION(:), POINTER           :: deg_of_freedom, &
                                                 massive_atom_list
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: fac
     TYPE(map_info_type), POINTER             :: map_info
 
     CALL timeset(routineN,handle)
 
-    failure = .FALSE.
     NULLIFY (massive_atom_list, deg_of_freedom)
 
     SELECT CASE ( simpar % ensemble )
     CASE DEFAULT
-       CALL stop_program(routineN,moduleN,__LINE__,'Unknown ensemble!')
+       CPABORT('Unknown ensemble!')
     CASE ( nvt_adiabatic_ensemble )
        CALL setup_adiabatic_thermostat(nhc, thermostat_info, deg_of_freedom, massive_atom_list,&
             molecule_kind_set, local_molecules, molecule_set, para_env, natoms_local, &
-            simpar, sum_of_thermostats, gci, error=error)
+            simpar, sum_of_thermostats, gci)
 
        ! Sum up the number of degrees of freedom on each thermostat.
        ! first: initialize the target
@@ -483,7 +455,7 @@ CONTAINS
        IF ( ( sum_of_thermostats == 1 ) .AND. ( map_info%dis_type /= do_thermo_no_communication ) ) THEN
           fac = map_info%s_kin(1)-deg_of_freedom(1)-simpar%nfree_rot_transl
           IF ( fac == 0.0_dp ) THEN
-             CALL stop_program(routineN,moduleN,__LINE__,'Zero degrees of freedom. Nothing to thermalize!')
+             CPABORT('Zero degrees of freedom. Nothing to thermalize!')
           END IF
           nhc%nvt(1,1)%nkt = simpar%temp_fast*fac
           nhc%nvt(1,1)%degrees_of_freedom = FLOOR(fac)
@@ -502,10 +474,8 @@ CONTAINS
           nhc % nvt ( i, : ) % nkt = simpar % temp_fast
           nhc % nvt ( i, : ) % degrees_of_freedom = 1
        END DO
-       DEALLOCATE (deg_of_freedom,STAT=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       DEALLOCATE ( massive_atom_list, STAT = stat )
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE (deg_of_freedom)
+       DEALLOCATE ( massive_atom_list)
 
        ! Let's clean the arrays
        map_info%s_kin   = 0.0_dp
@@ -531,12 +501,11 @@ CONTAINS
 !> \param sum_of_thermostats ...
 !> \param gci ...
 !> \param shell ...
-!> \param error ...
 !> \author Teodoro Laino [tlaino] - University of Zurich - 10.2007
 ! *****************************************************************************
   SUBROUTINE setup_nhc_thermostat ( nhc, thermostat_info, deg_of_freedom,&
        massive_atom_list, molecule_kind_set, local_molecules, molecule_set,&
-       para_env, natoms_local, simpar, sum_of_thermostats, gci, shell, error)
+       para_env, natoms_local, simpar, sum_of_thermostats, gci, shell)
 
     TYPE(lnhc_parameters_type), POINTER      :: nhc
     TYPE(thermostat_info_type), POINTER      :: thermostat_info
@@ -551,19 +520,16 @@ CONTAINS
     INTEGER, INTENT(OUT)                     :: sum_of_thermostats
     TYPE(global_constraint_type), POINTER    :: gci
     LOGICAL, INTENT(IN), OPTIONAL            :: shell
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'setup_nhc_thermostat', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: handle, nkind, number, &
-                                                region, stat
-    LOGICAL                                  :: do_shell, failure
+    INTEGER                                  :: handle, nkind, number, region
+    LOGICAL                                  :: do_shell
     TYPE(map_info_type), POINTER             :: map_info
 
     CALL timeset(routineN,handle)
 
-    failure  = .FALSE.
     do_shell = .FALSE.
     IF (PRESENT(shell)) do_shell = shell
     map_info    => nhc%map_info
@@ -577,10 +543,9 @@ CONTAINS
     CALL thermostat_mapping_region(map_info, deg_of_freedom, massive_atom_list,&
        molecule_kind_set, local_molecules, molecule_set, para_env, natoms_local,&
        simpar, number, region, gci, do_shell, thermostat_info%map_loc_thermo_gen,&
-       sum_of_thermostats, error)
+       sum_of_thermostats)
 
-    ALLOCATE (nhc%nvt(nhc%nhc_len,number),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (nhc%nvt(nhc%nhc_len,number))
 
     ! Now that we know how many there are stick this into nhc%nkt
     ! (number of degrees of freedom times k_B T for the first thermostat
@@ -602,10 +567,9 @@ CONTAINS
 !> \param nhc ...
 !> \param para_env ...
 !> \param gci ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE nhc_to_shell_mapping( thermostat_info, simpar, local_molecules,&
-       molecule_set, molecule_kind_set, nhc, para_env, gci, error)
+       molecule_set, molecule_kind_set, nhc, para_env, gci)
 
     TYPE(thermostat_info_type), POINTER      :: thermostat_info
     TYPE(simpar_type), POINTER               :: simpar
@@ -615,35 +579,32 @@ CONTAINS
     TYPE(lnhc_parameters_type), POINTER      :: nhc
     TYPE(cp_para_env_type), POINTER          :: para_env
     TYPE(global_constraint_type), POINTER    :: gci
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'nhc_to_shell_mapping', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, i, imap, j, &
-                                                nshell_local, stat, &
+                                                nshell_local, &
                                                 sum_of_thermostats
     INTEGER, DIMENSION(:), POINTER           :: deg_of_freedom, &
                                                 massive_shell_list
-    LOGICAL                                  :: failure
     TYPE(map_info_type), POINTER             :: map_info
 
     CALL timeset(routineN,handle)
 
-    failure = .FALSE.
     NULLIFY (massive_shell_list, deg_of_freedom)
 
     SELECT CASE ( simpar % ensemble )
     CASE DEFAULT
-       CALL stop_program(routineN,moduleN,__LINE__,'Unknown ensemble!')
+       CPABORT('Unknown ensemble!')
     CASE ( isokin_ensemble, nph_uniaxial_ensemble,&
            nph_uniaxial_damped_ensemble, reftraj_ensemble, langevin_ensemble )
-       CALL stop_program(routineN,moduleN,__LINE__,'Never reach this point!')
+       CPABORT('Never reach this point!')
     CASE ( nve_ensemble, nvt_ensemble, npe_f_ensemble, npe_i_ensemble,npt_i_ensemble, npt_f_ensemble )
 
        CALL setup_nhc_thermostat(nhc, thermostat_info, deg_of_freedom, massive_shell_list,&
             molecule_kind_set, local_molecules, molecule_set, para_env, nshell_local, &
-            simpar, sum_of_thermostats, gci, shell=.TRUE., error=error)
+            simpar, sum_of_thermostats, gci, shell=.TRUE.)
 
        map_info => nhc%map_info
        ! Sum up the number of degrees of freedom on each thermostat.
@@ -672,10 +633,8 @@ CONTAINS
           nhc % nvt ( i, : ) % nkt = simpar%temp_sh_ext
           nhc % nvt ( i, : ) % degrees_of_freedom = 1
        END DO
-       DEALLOCATE (deg_of_freedom,STAT=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       DEALLOCATE ( massive_shell_list, STAT = stat )
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE (deg_of_freedom)
+       DEALLOCATE ( massive_shell_list)
 
        ! Let's clean the arrays
        map_info%s_kin   = 0.0_dp

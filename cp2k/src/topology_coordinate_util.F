@@ -39,18 +39,17 @@ MODULE topology_coordinate_util
   USE particle_types,                  ONLY: allocate_particle_set,&
                                              particle_type
   USE physcon,                         ONLY: massunit
-  USE qmmm_types,                      ONLY: qmmm_env_mm_type
+  USE qmmm_types_low,                  ONLY: qmmm_env_mm_type
   USE string_table,                    ONLY: id2str,&
                                              s2s,&
                                              str2id
-  USE timings,                         ONLY: timeset,&
-                                             timestop
   USE topology_types,                  ONLY: atom_info_type,&
                                              connectivity_info_type,&
                                              topology_parameters_type
   USE topology_util,                   ONLY: array1_list_type,&
                                              reorder_structure
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -75,14 +74,13 @@ CONTAINS
 !> \param force_env_section ...
 !> \param exclusions ...
 !> \param ignore_outside_box ...
-!> \param error ...
 !> \par History
 !>      Teodoro Laino - modified in order to optimize the list of molecules
 !>                      to build the exclusion lists
 ! *****************************************************************************
   SUBROUTINE topology_coordinate_pack (particle_set,atomic_kind_set,&
        molecule_kind_set,molecule_set,topology,qmmm,qmmm_env,&
-       subsys_section,force_env_section,exclusions,ignore_outside_box,error)
+       subsys_section,force_env_section,exclusions,ignore_outside_box)
     TYPE(particle_type), DIMENSION(:), &
       POINTER                                :: particle_set
     TYPE(atomic_kind_type), DIMENSION(:), &
@@ -101,7 +99,6 @@ CONTAINS
     TYPE(exclusion_type), DIMENSION(:), &
       OPTIONAL, POINTER                      :: exclusions
     LOGICAL, INTENT(IN), OPTIONAL            :: ignore_outside_box
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'topology_coordinate_pack', &
       routineP = moduleN//':'//routineN
@@ -109,15 +106,15 @@ CONTAINS
     CHARACTER(LEN=default_string_length)     :: atmname
     INTEGER :: atom_i, atom_j, counter, dim0, dim1, dim2, dim3, first, &
       handle, handle2, i, iatom, ikind, iw, j, k, last, method_name_id, n, &
-      natom, stat
+      natom
     INTEGER, DIMENSION(:), POINTER           :: iatomlist, id_element, &
                                                 id_work, kind_of, list, &
                                                 list2, molecule_list, &
                                                 natom_of_kind, wlist
     INTEGER, DIMENSION(:, :), POINTER        :: pairs
     LOGICAL :: autogen, check, disable_exclusion_lists, do_center, explicit, &
-      failure, found, my_ignore_outside_box, my_qmmm, &
-      present_12_excl_ei_list, present_12_excl_vdw_list
+      found, my_ignore_outside_box, my_qmmm, present_12_excl_ei_list, &
+      present_12_excl_vdw_list
     REAL(KIND=dp)                            :: bounds(2,3), cdims(3), &
                                                 dims(3), qeff, vec(3)
     REAL(KIND=dp), DIMENSION(:), POINTER     :: charge, cpoint, mass
@@ -136,12 +133,11 @@ CONTAINS
     TYPE(section_vals_type), POINTER         :: exclude_section, &
                                                 topology_section
 
-    failure = .FALSE.
     NULLIFY(logger)
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
     iw = cp_print_key_unit_nr(logger,subsys_section,"PRINT%TOPOLOGY_INFO/UTIL_INFO",&
-         extension=".subsysLog",error=error)
-    topology_section => section_vals_get_subs_vals(subsys_section,"TOPOLOGY",error=error)
+         extension=".subsysLog")
+    topology_section => section_vals_get_subs_vals(subsys_section,"TOPOLOGY")
     CALL timeset(routineN,handle)
 
     my_qmmm = .FALSE.
@@ -156,14 +152,10 @@ CONTAINS
     CALL timeset(routineN//'_1',handle2)
     counter=0
     NULLIFY(id_work,mass,id_element,charge)
-    ALLOCATE(id_work(topology%natoms),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(mass(topology%natoms),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(id_element(topology%natoms),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(charge(topology%natoms),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(id_work(topology%natoms))
+    ALLOCATE(mass(topology%natoms))
+    ALLOCATE(id_element(topology%natoms))
+    ALLOCATE(charge(topology%natoms))
     id_work=str2id(s2s(""))
     IF (iw>0) WRITE(iw,*)"molecule_kind_set ::",SIZE(molecule_kind_set)
     DO i = 1, SIZE(molecule_kind_set)
@@ -206,13 +198,11 @@ CONTAINS
        END DO
     END DO
     topology%natom_type = counter
-    ALLOCATE(atom_info%id_atom_names(topology%natom_type),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(atom_info%id_atom_names(topology%natom_type))
     DO k=1,counter
        atom_info%id_atom_names(k)=id_work(k)
     ENDDO
-    DEALLOCATE(id_work,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(id_work)
     CALL reallocate(mass,1,counter)
     CALL reallocate(id_element,1,counter)
     CALL reallocate(charge,1,counter)
@@ -235,7 +225,7 @@ CONTAINS
     !-----------------------------------------------------------------------------
     CALL timeset(routineN//'_3',handle2)
     NULLIFY(particle_set)
-    CALL allocate_particle_set(particle_set,topology%natoms,error)
+    CALL allocate_particle_set(particle_set,topology%natoms)
     CALL timestop(handle2)
 
     !-----------------------------------------------------------------------------
@@ -255,10 +245,8 @@ CONTAINS
                TRIM(id2str(id_element(i)))
        END IF
     END DO
-    DEALLOCATE(mass,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    DEALLOCATE(id_element,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(mass)
+    DEALLOCATE(id_element)
     CALL timestop(handle2)
 
     !-----------------------------------------------------------------------------
@@ -266,10 +254,8 @@ CONTAINS
     ! 5. Determine number of atom of each kind (ie natom_of_kind and kind_of)
     !-----------------------------------------------------------------------------
     CALL timeset(routineN//'_5',handle2)
-    ALLOCATE(kind_of(topology%natoms),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(natom_of_kind(topology%natom_type),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(kind_of(topology%natoms))
+    ALLOCATE(natom_of_kind(topology%natom_type))
     kind_of(:) = 0
     natom_of_kind(:) = 0
     DO i=1,topology%natom_type
@@ -287,7 +273,7 @@ CONTAINS
              WRITE(*,*)"Two molecules have been defined as identical molecules but atoms mismatch charges!!"
           END IF
        END DO
-       CPPostcondition(.FALSE.,cp_failure_level,routineP,error,failure)
+       CPABORT("")
     END IF
     CALL timestop(handle2)
 
@@ -299,8 +285,7 @@ CONTAINS
     DO i=1,topology%natom_type
        atomic_kind => atomic_kind_set(i)
        NULLIFY (iatomlist)
-       ALLOCATE(iatomlist(natom_of_kind(i)),STAT=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       ALLOCATE(iatomlist(natom_of_kind(i)))
        counter=0
        DO j=1,topology%natoms
           IF(kind_of(j)==i) THEN
@@ -321,11 +306,9 @@ CONTAINS
        ENDIF
        CALL set_atomic_kind(atomic_kind=atomic_kind,&
             natom=natom_of_kind(i),atom_list=iatomlist)
-       DEALLOCATE(iatomlist,STAT=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE(iatomlist)
     END DO
-    DEALLOCATE(natom_of_kind,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(natom_of_kind)
     CALL timestop(handle2)
 
     !-----------------------------------------------------------------------------
@@ -333,8 +316,7 @@ CONTAINS
     ! 7. Possibly center the coordinates and fill in coordinates in particle_set
     !-----------------------------------------------------------------------------
     CALL section_vals_val_get(subsys_section,&
-         "TOPOLOGY%CENTER_COORDINATES%_SECTION_PARAMETERS_",l_val=do_center,&
-         error=error)
+         "TOPOLOGY%CENTER_COORDINATES%_SECTION_PARAMETERS_",l_val=do_center)
     CALL timeset(routineN//'_7a',handle2)
     bounds(1,1) = MINVAL(atom_info%r(1,:))
     bounds(2,1) = MAXVAL(atom_info%r(1,:))
@@ -360,19 +342,15 @@ CONTAINS
     END DO
     my_ignore_outside_box = .FALSE.
     IF (PRESENT(ignore_outside_box)) my_ignore_outside_box = ignore_outside_box
-    CALL cp_assert(my_ignore_outside_box .OR. check,cp_failure_level,cp_assertion_failed,routineP,&
-         "A non-periodic calculation has been requested but the system size "//&
-         "exceeds the cell size in at least one of the non-periodic directions! "//&
-CPSourceFileRef,&
-         only_ionode=.TRUE.)
+    IF(.NOT.my_ignore_outside_box .AND. .NOT. check)&
+      CALL cp_abort(__LOCATION__, "A non-periodic calculation has been requested but the system size "//&
+           "exceeds the cell size in at least one of the non-periodic directions!")
     IF (do_center) THEN
        CALL section_vals_val_get(subsys_section,&
-            "TOPOLOGY%CENTER_COORDINATES%CENTER_POINT",explicit=explicit,&
-            error=error)
+            "TOPOLOGY%CENTER_COORDINATES%CENTER_POINT",explicit=explicit)
        IF (explicit) THEN
           CALL section_vals_val_get(subsys_section,&
-               "TOPOLOGY%CENTER_COORDINATES%CENTER_POINT",r_vals=cpoint,&
-               error=error)
+               "TOPOLOGY%CENTER_COORDINATES%CENTER_POINT",r_vals=cpoint)
           vec = cpoint
        ELSE
           vec = cdims/2.0_dp
@@ -393,8 +371,7 @@ CPSourceFileRef,&
        particle_set(i)%atom_index = i
     END DO
     CALL timestop(handle2)
-    DEALLOCATE(kind_of,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(kind_of)
 
     !-----------------------------------------------------------------------------
     !-----------------------------------------------------------------------------
@@ -403,85 +380,75 @@ CPSourceFileRef,&
     ! 10. Fill in the exclusions%list_onfo
     !-----------------------------------------------------------------------------
     CALL timeset(routineN//'_89',handle2)
-    CALL section_vals_val_get(force_env_section,"METHOD",i_val=method_name_id,error=error)
+    CALL section_vals_val_get(force_env_section,"METHOD",i_val=method_name_id)
     CALL section_vals_val_get(subsys_section,"TOPOLOGY%DISABLE_EXCLUSION_LISTS",&
-                              l_val=disable_exclusion_lists,error=error)
+                              l_val=disable_exclusion_lists)
     IF ((method_name_id == do_fist).AND.(.NOT.disable_exclusion_lists)) THEN
-       CPPostcondition(PRESENT(exclusions),cp_failure_level,routineP,error,failure)
+       CPASSERT(PRESENT(exclusions))
        natom=topology%natoms
        ! allocate exclusions. Most likely they would only be needed for the local_particles
-       ALLOCATE(exclusions(natom),stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       ALLOCATE(exclusions(natom))
        DO I=1,natom
           NULLIFY(exclusions(i)%list_exclude_vdw)
           NULLIFY(exclusions(i)%list_exclude_ei)
           NULLIFY(exclusions(i)%list_onfo)
        ENDDO
        ! Reorder bonds
-       ALLOCATE(ex_bond_list(natom),stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       ALLOCATE(ex_bond_list(natom))
        DO I=1,natom
-          ALLOCATE(ex_bond_list(I)%array1(0),stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          ALLOCATE(ex_bond_list(I)%array1(0))
        ENDDO
        N = 0
        IF(ASSOCIATED(conn_info%bond_a)) THEN
          N = SIZE(conn_info%bond_a)
-         CALL reorder_structure(ex_bond_list, conn_info%bond_a, conn_info%bond_b, N, error)
+         CALL reorder_structure(ex_bond_list, conn_info%bond_a, conn_info%bond_b, N)
        END IF
 
        ! Check if a list of 1-2 exclusion bonds is defined.. if not use all bonds
        NULLIFY(ex_bond_list_vdw, ex_bond_list_ei)
        ! VdW
-       exclude_section => section_vals_get_subs_vals(topology_section,"EXCLUDE_VDW_LIST",error=error)
-       CALL section_vals_get(exclude_section, explicit=explicit, error=error)
+       exclude_section => section_vals_get_subs_vals(topology_section,"EXCLUDE_VDW_LIST")
+       CALL section_vals_get(exclude_section, explicit=explicit)
        present_12_excl_vdw_list = .FALSE.
        IF (explicit) present_12_excl_vdw_list = .TRUE.
        IF (present_12_excl_vdw_list) THEN
-          ALLOCATE(ex_bond_list_vdw(natom),stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          ALLOCATE(ex_bond_list_vdw(natom))
           DO I=1,natom
-             ALLOCATE(ex_bond_list_vdw(I)%array1(0),stat=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+             ALLOCATE(ex_bond_list_vdw(I)%array1(0))
           ENDDO
           CALL setup_exclusion_list(exclude_section,"BOND", ex_bond_list, ex_bond_list_vdw,&
-                                    particle_set, error)
+                                    particle_set)
        ELSE
           ex_bond_list_vdw => ex_bond_list
        END IF
        ! EI
-       exclude_section => section_vals_get_subs_vals(topology_section,"EXCLUDE_EI_LIST",error=error)
-       CALL section_vals_get(exclude_section, explicit=explicit, error=error)
+       exclude_section => section_vals_get_subs_vals(topology_section,"EXCLUDE_EI_LIST")
+       CALL section_vals_get(exclude_section, explicit=explicit)
        present_12_excl_ei_list = .FALSE.
        IF (explicit) present_12_excl_ei_list = .TRUE.
        IF (present_12_excl_ei_list) THEN
-          ALLOCATE(ex_bond_list_ei(natom),stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          ALLOCATE(ex_bond_list_ei(natom))
           DO I=1,natom
-             ALLOCATE(ex_bond_list_ei(I)%array1(0),stat=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+             ALLOCATE(ex_bond_list_ei(I)%array1(0))
           ENDDO
           CALL setup_exclusion_list(exclude_section,"BOND", ex_bond_list, ex_bond_list_ei,&
-                                    particle_set, error)
+                                    particle_set)
        ELSE
           ex_bond_list_ei => ex_bond_list
        END IF
 
 
        CALL section_vals_val_get(topology_section, "AUTOGEN_EXCLUDE_LISTS", &
-            l_val=autogen, error=error)
+            l_val=autogen)
        ! Reorder bends
-       ALLOCATE(ex_bend_list(natom),stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       ALLOCATE(ex_bend_list(natom))
        DO I=1,natom
-          ALLOCATE(ex_bend_list(I)%array1(0),stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          ALLOCATE(ex_bend_list(I)%array1(0))
        ENDDO
        IF (autogen) THEN
           ! Construct autogenerated 1-3 pairs, i.e. all possible 1-3 pairs instead
           ! of only the bends that are present in the topology.
-          ALLOCATE(pairs(0,2),stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          ALLOCATE(pairs(0,2))
           N = 0
           DO iatom = 1, natom
              DO i = 1, SIZE(ex_bond_list(iatom)%array1)
@@ -511,28 +478,24 @@ CPSourceFileRef,&
                 END DO
              END DO
           END DO
-          CALL reorder_structure(ex_bend_list, pairs(:,1), pairs(:,2), N, error)
-          DEALLOCATE(pairs,stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          CALL reorder_structure(ex_bend_list, pairs(:,1), pairs(:,2), N)
+          DEALLOCATE(pairs)
        ELSE
           IF (ASSOCIATED(conn_info%theta_a)) THEN
              N = SIZE(conn_info%theta_a)
-             CALL reorder_structure(ex_bend_list, conn_info%theta_a, conn_info%theta_c, N, error)
+             CALL reorder_structure(ex_bend_list, conn_info%theta_a, conn_info%theta_c, N)
           END IF
        END IF
 
        ! Reorder onfo
-       ALLOCATE(ex_onfo_list(natom),stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       ALLOCATE(ex_onfo_list(natom))
        DO I=1,natom
-          ALLOCATE(ex_onfo_list(I)%array1(0),stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          ALLOCATE(ex_onfo_list(I)%array1(0))
        ENDDO
        IF (autogen) THEN
           ! Construct autogenerated 1-4 pairs, i.e. all possible 1-4 pairs instead
           ! of only the onfo's that are present in the topology.
-          ALLOCATE(pairs(0,2),stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          ALLOCATE(pairs(0,2))
           N = 0
           DO iatom = 1, natom
              DO i = 1, SIZE(ex_bond_list(iatom)%array1)
@@ -572,13 +535,12 @@ CPSourceFileRef,&
                 END DO
              END DO
           END DO
-          CALL reorder_structure(ex_onfo_list, pairs(:,1), pairs(:,2), N, error)
-          DEALLOCATE(pairs,stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          CALL reorder_structure(ex_onfo_list, pairs(:,1), pairs(:,2), N)
+          DEALLOCATE(pairs)
        ELSE
           IF(ASSOCIATED(conn_info%onfo_a)) THEN
              N = SIZE(conn_info%onfo_a)
-             CALL reorder_structure(ex_onfo_list, conn_info%onfo_a, conn_info%onfo_b, N, error)
+             CALL reorder_structure(ex_onfo_list, conn_info%onfo_a, conn_info%onfo_b, N)
           END IF
        END IF
 
@@ -601,8 +563,7 @@ CPSourceFileRef,&
           dim3 = dim2 + dim3
           IF (dim3 /= 0) THEN
              NULLIFY(list, wlist)
-             ALLOCATE(wlist(dim3),stat=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+             ALLOCATE(wlist(dim3))
              wlist(  dim0:dim0) = iatom
              IF (dim1>dim0) wlist(dim0+1:dim1) = ex_bond_list_vdw(iatom)%array1
              IF (dim2>dim1) wlist(dim1+1:dim2) = ex_bend_list(iatom)%array1
@@ -615,16 +576,14 @@ CPSourceFileRef,&
                 END DO
              END DO
              dim3 = SIZE(wlist)-COUNT(wlist==0)
-             ALLOCATE(list(dim3),stat=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+             ALLOCATE(list(dim3))
              j = 0
              DO i = 1, SIZE(wlist)
                 IF (wlist(i)==0)CYCLE
                 j = j + 1
                 list(j)=wlist(i)
              END DO
-             DEALLOCATE(wlist,stat=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+             DEALLOCATE(wlist)
              ! Unique list completed
              NULLIFY(list2)
              IF((topology%exclude_vdw==topology%exclude_ei).AND.&
@@ -648,8 +607,7 @@ CPSourceFileRef,&
                 dim3 = dim2 + dim3
 
                 IF (dim3 /= 0) THEN
-                   ALLOCATE(wlist(dim3),stat=stat)
-                   CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+                   ALLOCATE(wlist(dim3))
                    wlist(  dim0:dim0) = iatom
                    IF (dim1>dim0) wlist(dim0+1:dim1) = ex_bond_list_ei(iatom)%array1
                    IF (dim2>dim1) wlist(dim1+1:dim2) = ex_bend_list(iatom)%array1
@@ -662,16 +620,14 @@ CPSourceFileRef,&
                       END DO
                    END DO
                    dim3 = SIZE(wlist)-COUNT(wlist==0)
-                   ALLOCATE(list2(dim3),stat=stat)
-                   CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+                   ALLOCATE(list2(dim3))
                    j = 0
                    DO i = 1, SIZE(wlist)
                       IF (wlist(i)==0)CYCLE
                       j = j + 1
                       list2(j)=wlist(i)
                    END DO
-                   DEALLOCATE(wlist,stat=stat)
-                   CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+                   DEALLOCATE(wlist)
                    ! Unique list completed
                 END IF
              END IF
@@ -681,7 +637,6 @@ CPSourceFileRef,&
           ! Keep a list of onfo atoms for proper selection of specialized 1-4
           ! potentials instead of conventional nonbonding potentials.
           ALLOCATE(exclusions(iatom)%list_onfo(SIZE(ex_onfo_list(iatom)%array1)))
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
           ! copy of data, not copy of pointer
           exclusions(iatom)%list_onfo = ex_onfo_list(iatom)%array1
           IF (iw>0) THEN
@@ -703,45 +658,35 @@ CPSourceFileRef,&
        END DO
        ! deallocate onfo
        DO I=1,natom
-          DEALLOCATE(ex_onfo_list(I)%array1,stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          DEALLOCATE(ex_onfo_list(I)%array1)
        ENDDO
-       DEALLOCATE(ex_onfo_list,stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE(ex_onfo_list)
        ! deallocate bends
        DO I=1,natom
-          DEALLOCATE(ex_bend_list(I)%array1,stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          DEALLOCATE(ex_bend_list(I)%array1)
        ENDDO
-       DEALLOCATE(ex_bend_list,stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE(ex_bend_list)
        ! deallocate bonds
        IF (present_12_excl_ei_list) THEN
           DO I=1,natom
-             DEALLOCATE(ex_bond_list_ei(I)%array1,stat=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+             DEALLOCATE(ex_bond_list_ei(I)%array1)
           ENDDO
-          DEALLOCATE(ex_bond_list_ei,stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          DEALLOCATE(ex_bond_list_ei)
        ELSE
           NULLIFY(ex_bond_list_ei)
        END IF
        IF (present_12_excl_vdw_list) THEN
           DO I=1,natom
-             DEALLOCATE(ex_bond_list_vdw(I)%array1,stat=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+             DEALLOCATE(ex_bond_list_vdw(I)%array1)
           ENDDO
-          DEALLOCATE(ex_bond_list_vdw,stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          DEALLOCATE(ex_bond_list_vdw)
        ELSE
           NULLIFY(ex_bond_list_vdw)
        END IF
        DO I=1,natom
-          DEALLOCATE(ex_bond_list(I)%array1,stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          DEALLOCATE(ex_bond_list(I)%array1)
        ENDDO
-       DEALLOCATE(ex_bond_list,stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE(ex_bond_list)
     ENDIF
     CALL timestop(handle2)
     !-----------------------------------------------------------------------------
@@ -749,20 +694,19 @@ CPSourceFileRef,&
     ! 11. Set the atomic_kind_set()%fist_potentail%[qeff] (PART 1)
     !-----------------------------------------------------------------------------
     CALL timeset(routineN//'_10',handle2)
-    CALL section_vals_val_get(force_env_section,"METHOD",i_val=method_name_id,error=error)
+    CALL section_vals_val_get(force_env_section,"METHOD",i_val=method_name_id)
     IF(method_name_id == do_fist) THEN
        DO i=1,SIZE(atomic_kind_set)
           atomic_kind => atomic_kind_set(i)
           CALL get_atomic_kind(atomic_kind=atomic_kind,name=atmname)
           qeff = charge(i)
           NULLIFY(fist_potential)
-          CALL allocate_potential(fist_potential,error)
+          CALL allocate_potential(fist_potential)
           CALL set_potential(potential=fist_potential,qeff=qeff)
           CALL set_atomic_kind(atomic_kind=atomic_kind,fist_potential=fist_potential)
        END DO
     END IF
-    DEALLOCATE(charge,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(charge)
     CALL timestop(handle2)
 
     !-----------------------------------------------------------------------------
@@ -803,7 +747,7 @@ CPSourceFileRef,&
 
     CALL timestop(handle)
     CALL cp_print_key_finished_output(iw,logger,subsys_section,&
-         "PRINT%TOPOLOGY_INFO/UTIL_INFO",error=error)
+         "PRINT%TOPOLOGY_INFO/UTIL_INFO")
   END SUBROUTINE topology_coordinate_pack
 
 ! *****************************************************************************
@@ -814,19 +758,17 @@ CPSourceFileRef,&
 !> \param ex_bond_list ...
 !> \param ex_bond_list_w ...
 !> \param particle_set ...
-!> \param error ...
 !> \par History
 !>      Teodoro Laino [tlaino] - 12.2009
 ! *****************************************************************************
   SUBROUTINE setup_exclusion_list(exclude_section, keyword, ex_bond_list,&
-       ex_bond_list_w, particle_set, error)
+       ex_bond_list_w, particle_set)
     TYPE(section_vals_type), POINTER         :: exclude_section
     CHARACTER(LEN=*), INTENT(IN)             :: keyword
     TYPE(array1_list_type), DIMENSION(:), &
       POINTER                                :: ex_bond_list, ex_bond_list_w
     TYPE(particle_type), DIMENSION(:), &
       POINTER                                :: particle_set
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'setup_exclusion_list', &
       routineP = moduleN//':'//routineN
@@ -835,17 +777,15 @@ CPSourceFileRef,&
     CHARACTER(LEN=default_string_length), &
       DIMENSION(:), POINTER                  :: names
     INTEGER                                  :: i, ind, j, k, l, m, n_rep
-    LOGICAL                                  :: failure
 
-    failure = .FALSE.
-    CPPostcondition(ASSOCIATED(ex_bond_list),cp_failure_level,routineP,error,failure)
-    CPPostcondition(ASSOCIATED(ex_bond_list_w),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(ex_bond_list))
+    CPASSERT(ASSOCIATED(ex_bond_list_w))
     SELECT CASE(keyword)
     CASE ("BOND")
-       CALL section_vals_val_get(exclude_section,keyword,n_rep_val=n_rep,error=error)
+       CALL section_vals_val_get(exclude_section,keyword,n_rep_val=n_rep)
        DO j=1, SIZE(ex_bond_list)
-          CPPostcondition(ASSOCIATED(ex_bond_list(j)%array1),cp_failure_level,routineP,error,failure)
-          CPPostcondition(ASSOCIATED(ex_bond_list_w(j)%array1),cp_failure_level,routineP,error,failure)
+          CPASSERT(ASSOCIATED(ex_bond_list(j)%array1))
+          CPASSERT(ASSOCIATED(ex_bond_list_w(j)%array1))
 
           flag1=particle_set(j)%atomic_kind%name
           m = SIZE(ex_bond_list(j)%array1)
@@ -857,7 +797,7 @@ CPSourceFileRef,&
              flag2=particle_set(ind)%atomic_kind%name
              DO i=1, n_rep
                 CALL section_vals_val_get(exclude_section,keyword,i_rep_val=i,&
-                     c_vals=names,error=error)
+                     c_vals=names)
                 IF  (((TRIM(names(1))==TRIM(flag1)).AND.(TRIM(names(2))==TRIM(flag2))).OR.&
                      ((TRIM(names(1))==TRIM(flag2)).AND.(TRIM(names(2))==TRIM(flag1)))) THEN
                    l = l + 1
@@ -868,7 +808,7 @@ CPSourceFileRef,&
           CALL reallocate(ex_bond_list_w(j)%array1,1,l)
        END DO
     CASE DEFAULT
-       CPPostcondition(.FALSE.,cp_failure_level,routineP,error,failure)
+       CPABORT("")
     END SELECT
 
   END SUBROUTINE setup_exclusion_list

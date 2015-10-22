@@ -23,10 +23,9 @@ MODULE fist_main
   USE force_env_types,                 ONLY: force_env_type
   USE global_types,                    ONLY: global_environment_type
   USE input_section_types,             ONLY: section_vals_type
-  USE qmmm_types,                      ONLY: qmmm_env_mm_type
-  USE timings,                         ONLY: timeset,&
-                                             timestop
+  USE qmmm_types_low,                  ONLY: qmmm_env_mm_type
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -58,13 +57,12 @@ CONTAINS
 !> \param subsys_section ...
 !> \param use_motion_section ...
 !> \param prev_subsys ...
-!> \param error ...
 !> \par Used By
 !>      cp2k
 !> \author CJM
 ! *****************************************************************************
   SUBROUTINE fist_create_force_env ( force_env, root_section, para_env, globenv,&
-       qmmm, qmmm_env, force_env_section, subsys_section, use_motion_section, prev_subsys, error)
+       qmmm, qmmm_env, force_env_section, subsys_section, use_motion_section, prev_subsys)
     TYPE(force_env_type), POINTER            :: force_env
     TYPE(section_vals_type), POINTER         :: root_section
     TYPE(cp_para_env_type), POINTER          :: para_env
@@ -76,7 +74,6 @@ CONTAINS
                                                 subsys_section
     LOGICAL, INTENT(IN)                      :: use_motion_section
     TYPE(cp_subsys_type), OPTIONAL, POINTER  :: prev_subsys
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'fist_create_force_env', &
       routineP = moduleN//':'//routineN
@@ -91,22 +88,22 @@ CONTAINS
        myqmmm=qmmm
     END IF
 
-    CALL fist_env_create( fist_env, para_env = para_env ,error=error)
+    CALL fist_env_create( fist_env, para_env = para_env)
     IF (PRESENT(qmmm_env)) THEN
-       CALL fist_env_set (fist_env, qmmm=myqmmm, qmmm_env=qmmm_env, error=error)
+       CALL fist_env_set (fist_env, qmmm=myqmmm, qmmm_env=qmmm_env)
     ELSE
-       CALL fist_env_set (fist_env, qmmm=myqmmm, error=error)
+       CALL fist_env_set (fist_env, qmmm=myqmmm)
     END IF
     ! *** Read the input and the database files and perform further  ***
     ! *** initializations for the setup of the FIST environment ***
     CALL fist_init ( fist_env, root_section, para_env, force_env_section,&
-         subsys_section, use_motion_section, prev_subsys=prev_subsys, error=error )
+         subsys_section, use_motion_section, prev_subsys=prev_subsys)
 
     CALL force_env_create ( force_env, root_section, fist_env = fist_env, &
          para_env = para_env, globenv = globenv, &
-         force_env_section=force_env_section, error = error )
+         force_env_section=force_env_section)
 
-    CALL fist_env_release ( fist_env, error = error )
+    CALL fist_env_release ( fist_env)
     CALL timestop(handle)
   END SUBROUTINE fist_create_force_env
 

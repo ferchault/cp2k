@@ -50,6 +50,7 @@ MODULE glbopt_master
                                              swarm_message_type
   USE topology,                        ONLY: topology_control
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
  IMPLICIT NONE
  PRIVATE
@@ -78,7 +79,6 @@ MODULE glbopt_master
    TYPE(atomic_kind_type), DIMENSION(:), POINTER       :: atomic_kind_set => Null()
    TYPE(particle_type), DIMENSION(:), POINTER          :: particle_set => Null()
    TYPE(section_vals_type), POINTER                    :: glbopt_section => Null()
-   TYPE(cp_error_type)                                 :: error
  END TYPE glbopt_master_type
 
  CONTAINS
@@ -91,46 +91,46 @@ MODULE glbopt_master
 !> \param root_section ...
 !> \param n_walkers ...
 !> \param iw ...
-!> \param error ...
 !> \author Ole Schuett
 ! *****************************************************************************
- SUBROUTINE glbopt_master_init(this, para_env, root_section,  n_walkers, iw, error)
+ SUBROUTINE glbopt_master_init(this, para_env, root_section,  n_walkers, iw)
     TYPE(glbopt_master_type), INTENT(INOUT)  :: this
     TYPE(cp_para_env_type), POINTER          :: para_env
     TYPE(section_vals_type), POINTER         :: root_section
     INTEGER, INTENT(IN)                      :: n_walkers, iw
-    TYPE(cp_error_type), INTENT(inout)       :: error
+
+    CHARACTER(len=*), PARAMETER :: routineN = 'glbopt_master_init', &
+      routineP = moduleN//':'//routineN
 
     TYPE(cp_logger_type), POINTER            :: logger
 
     NULLIFY(logger)
 
     this%iw = iw
-    this%error = error
 
-    this%glbopt_section => section_vals_get_subs_vals(root_section, "SWARM%GLOBAL_OPT", error=error)
-    CALL section_vals_retain(this%glbopt_section,error=error)
+    this%glbopt_section => section_vals_get_subs_vals(root_section, "SWARM%GLOBAL_OPT")
+    CALL section_vals_retain(this%glbopt_section)
 
-    CALL section_vals_val_get(this%glbopt_section,"E_TARGET", r_val=this%E_target, error=error)
-    CALL section_vals_val_get(this%glbopt_section,"METHOD", i_val=this%method, error=error)
+    CALL section_vals_val_get(this%glbopt_section,"E_TARGET", r_val=this%E_target)
+    CALL section_vals_val_get(this%glbopt_section,"METHOD", i_val=this%method)
 
-    CALL glbopt_read_particle_set(this, para_env, root_section, error)
+    CALL glbopt_read_particle_set(this, para_env, root_section)
 
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
     this%progress_traj_unit = cp_print_key_unit_nr(logger, &
       this%glbopt_section,"PROGRESS_TRAJECTORY", &
       middle_name="progress", extension=".xyz", &
-      file_action="WRITE", file_position="REWIND", error=error)
+      file_action="WRITE", file_position="REWIND")
 
     SELECT CASE (this%method)
        CASE(glbopt_do_minhop)
          ALLOCATE(this%minhop)
-         CALL minhop_init(this%minhop, this%glbopt_section, n_walkers, iw, error)
+         CALL minhop_init(this%minhop, this%glbopt_section, n_walkers, iw)
        CASE(glbopt_do_mincrawl)
          ALLOCATE(this%mincrawl)
-         CALL mincrawl_init(this%mincrawl, this%glbopt_section, n_walkers, iw, this%particle_set, error)
+         CALL mincrawl_init(this%mincrawl, this%glbopt_section, n_walkers, iw, this%particle_set)
        CASE DEFAULT
-        STOP "Unknown glbopt_method"
+        CPABORT("Unknown glbopt_method")
     END SELECT
  END SUBROUTINE glbopt_master_init
 
@@ -140,14 +140,12 @@ MODULE glbopt_master
 !> \param this ...
 !> \param para_env ...
 !> \param root_section ...
-!> \param error ...
 !> \author Ole Schuett
 ! *****************************************************************************
- SUBROUTINE glbopt_read_particle_set(this, para_env, root_section, error)
+ SUBROUTINE glbopt_read_particle_set(this, para_env, root_section)
     TYPE(glbopt_master_type), INTENT(INOUT)  :: this
     TYPE(cp_para_env_type), POINTER          :: para_env
     TYPE(section_vals_type), POINTER         :: root_section
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     TYPE(atomic_kind_type), DIMENSION(:), &
       POINTER                                :: atomic_kind_set
@@ -168,8 +166,8 @@ MODULE glbopt_master
     NULLIFY(atomic_kind_set, particle_set, molecule_kind_set, molecule_set)
     NULLIFY(colvar_p, gci, exclusions, force_env_section, subsys_section)
 
-    force_env_section => section_vals_get_subs_vals(root_section, "FORCE_EVAL", error=error)
-    subsys_section => section_vals_get_subs_vals(root_section, "FORCE_EVAL%SUBSYS", error=error)
+    force_env_section => section_vals_get_subs_vals(root_section, "FORCE_EVAL")
+    subsys_section => section_vals_get_subs_vals(root_section, "FORCE_EVAL%SUBSYS")
 
 
     CALL topology_control(atomic_kind_set, &
@@ -183,17 +181,16 @@ MODULE glbopt_master
                           force_env_section=force_env_section, &
                           subsys_section=subsys_section, &
                           use_motion_section=.FALSE., &
-                          exclusions=exclusions, &
-                          error=error)
+                          exclusions=exclusions)
 
     !This is the only thing we need to write trajectories.
     this%atomic_kind_set => atomic_kind_set
     this%particle_set => particle_set
-    CALL exclusion_release(exclusions, error)
-    CALL deallocate_molecule_set(molecule_set, error)
-    CALL deallocate_molecule_kind_set(molecule_kind_set, error)
-    CALL deallocate_global_constraint(gci, error)
-    CALL colvar_p_release(colvar_p, error)
+    CALL exclusion_release(exclusions)
+    CALL deallocate_molecule_set(molecule_set)
+    CALL deallocate_molecule_kind_set(molecule_kind_set)
+    CALL deallocate_global_constraint(gci)
+    CALL colvar_p_release(colvar_p)
 
   END SUBROUTINE glbopt_read_particle_set
 
@@ -211,6 +208,9 @@ MODULE glbopt_master
     TYPE(swarm_message_type)                 :: report, cmd
     LOGICAL, INTENT(INOUT)                   :: should_stop
 
+    CHARACTER(len=*), PARAMETER :: routineN = 'glbopt_master_steer', &
+      routineP = moduleN//':'//routineN
+
     CALL progress_report(this, report)
 
     SELECT CASE (this%method)
@@ -219,7 +219,7 @@ MODULE glbopt_master
       CASE(glbopt_do_mincrawl)
           CALL mincrawl_steer(this%mincrawl, report, cmd)
       CASE DEFAULT
-       STOP "Unknown glbopt_method"
+       CPABORT("Unknown glbopt_method")
     END SELECT
 
     IF(this%E_lowest<this%E_target) THEN
@@ -307,16 +307,15 @@ MODULE glbopt_master
 
     !get the conversion factor for the length unit
     CALL section_vals_val_get(this%glbopt_section,"PROGRESS_TRAJECTORY%UNIT",&
-            c_val=unit_str,error=this%error)
-    unit_conv = cp_unit_from_cp2k(1.0_dp,TRIM(unit_str),error=this%error)
+            c_val=unit_str)
+    unit_conv = cp_unit_from_cp2k(1.0_dp,TRIM(unit_str))
     CALL write_particle_coordinates(this%particle_set,&
                                     iunit=this%progress_traj_unit, &
                                     output_format=dump_xmol, &
                                     content="POS", &
                                     title=TRIM(title), &
                                     array=report_positions,&
-                                    unit_conv=unit_conv,&
-                                    error=this%error)
+                                    unit_conv=unit_conv)
      DEALLOCATE(report_positions)
  END SUBROUTINE write_progress_traj
 
@@ -328,6 +327,9 @@ MODULE glbopt_master
 ! *****************************************************************************
  SUBROUTINE glbopt_master_finalize(this)
     TYPE(glbopt_master_type), INTENT(INOUT)  :: this
+
+    CHARACTER(len=*), PARAMETER :: routineN = 'glbopt_master_finalize', &
+      routineP = moduleN//':'//routineN
 
     TYPE(cp_logger_type), POINTER            :: logger
 
@@ -341,16 +343,16 @@ MODULE glbopt_master
          CALL mincrawl_finalize(this%mincrawl)
          DEALLOCATE(this%mincrawl)
        CASE DEFAULT
-        STOP "Unknown glbopt_method"
+        CPABORT("Unknown glbopt_method")
     END SELECT
 
-    logger => cp_error_get_logger(this%error)
+    logger => cp_get_default_logger()
     CALL cp_print_key_finished_output(this%progress_traj_unit, logger, &
-      this%glbopt_section, "PROGRESS_TRAJECTORY", error=this%error)
+      this%glbopt_section, "PROGRESS_TRAJECTORY")
 
-    CALL section_vals_release(this%glbopt_section, error=this%error)
-    CALL deallocate_particle_set(this%particle_set, this%error)
-    CALL deallocate_atomic_kind_set(this%atomic_kind_set, this%error)
+    CALL section_vals_release(this%glbopt_section)
+    CALL deallocate_particle_set(this%particle_set)
+    CALL deallocate_atomic_kind_set(this%atomic_kind_set)
 
  END SUBROUTINE glbopt_master_finalize
 

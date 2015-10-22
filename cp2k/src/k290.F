@@ -12,9 +12,8 @@ MODULE k290
   USE kinds,                           ONLY: dp
   USE mathlib,                         ONLY: invmat
   USE string_utilities,                ONLY: xstring
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -115,32 +114,23 @@ CONTAINS
 ! *****************************************************************************
 !> \brief Release the CSYM type
 !> \param csym  The CSYM type
-!> \param error CP2K error handling
 ! *****************************************************************************
-  SUBROUTINE release_csym_type(csym,error)
+  SUBROUTINE release_csym_type(csym)
     TYPE(csym_type), POINTER                 :: csym
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'release_csym_type', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: ierr
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    CPPrecondition(ASSOCIATED(csym),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(csym))
 
     IF ( ASSOCIATED(csym%xkappa) ) THEN
-       DEALLOCATE(csym%xkappa,STAT=ierr)
-       CPPostcondition(ierr==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE(csym%xkappa)
     END IF
     IF ( ASSOCIATED(csym%ty) ) THEN
-       DEALLOCATE(csym%ty,STAT=ierr)
-       CPPostcondition(ierr==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE(csym%ty)
     END IF
 
-    DEALLOCATE(csym,STAT=ierr)
-    CPPostcondition(ierr==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(csym)
 
   END SUBROUTINE release_csym_type
 
@@ -158,10 +148,9 @@ CONTAINS
 !> \param wkpoint ...
 !> \param xkpoint ...
 !> \param iounit ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE kp_sym_gen(csym,coor,types,hmat,nk,shift,stress,symm,delta,&
-                        wkpoint,xkpoint,iounit,error)
+                        wkpoint,xkpoint,iounit)
     TYPE(csym_type), POINTER                 :: csym
     REAL(KIND=dp), DIMENSION(:, :), &
       INTENT(IN)                             :: coor
@@ -176,34 +165,28 @@ CONTAINS
     REAL(KIND=dp), DIMENSION(:, :), &
       OPTIONAL, POINTER                      :: xkpoint
     INTEGER, INTENT(IN), OPTIONAL            :: iounit
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'kp_sym_gen', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: handle, ik, isos, isum, n, &
-                                                nat, nhash, nkk, nkpts, nsp
+    INTEGER                                  :: handle, ik, isum, n, nat, &
+                                                nhash, nkk, nkpts, nsp
     INTEGER, ALLOCATABLE                     :: f0(:,:), includ(:), isc(:), &
                                                 list(:), lrot(:,:), lwght(:)
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: wsum
     REAL(KIND=dp), ALLOCATABLE               :: rlist(:,:), rx(:,:), &
                                                 tvec(:,:), wvkl(:,:)
 
-    failure = .FALSE.
     CALL timeset(routineN,handle)
 
-    CPPrecondition(.NOT.ASSOCIATED(csym),cp_failure_level,routineP,error,failure)
-    ALLOCATE(csym,stat=isos)
-    CPPostcondition(isos==0,cp_failure_level,routineP,error,failure)
+    CPASSERT(.NOT.ASSOCIATED(csym))
+    ALLOCATE(csym)
 
     !..total number of atoms
     nat = SIZE(coor,2)
     !..allocate arrays for coordinates and atom types
-    ALLOCATE (csym%xkappa(3,nat),STAT=isos)
-    CPPostcondition(isos==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE (csym%ty(nat),STAT=isos)
-    CPPostcondition(isos==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (csym%xkappa(3,nat))
+    ALLOCATE (csym%ty(nat))
     !..count number of atom types
     csym%ty = types
     nsp = 0
@@ -250,27 +233,17 @@ CONTAINS
     csym%nkpoint = csym%iq1*csym%iq2*csym%iq3
     nkk = csym%nkpoint
     !..allocate intermediate arrays
-    ALLOCATE (rx(3,nat),STAT=isos)
-    CPPostcondition(isos==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE (tvec(3,nat),STAT=isos)
-    CPPostcondition(isos==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE (isc(nat),STAT=isos)
-    CPPostcondition(isos==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE (f0(49,nat),STAT=isos)
-    CPPostcondition(isos==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE (wvkl(3,nkk),STAT=isos)
-    CPPostcondition(isos==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE (lwght(nkk),STAT=isos)
-    CPPostcondition(isos==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE (lrot(48,nkk),STAT=isos)
-    CPPostcondition(isos==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE (includ(nkk),STAT=isos)
-    CPPostcondition(isos==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (rx(3,nat))
+    ALLOCATE (tvec(3,nat))
+    ALLOCATE (isc(nat))
+    ALLOCATE (f0(49,nat))
+    ALLOCATE (wvkl(3,nkk))
+    ALLOCATE (lwght(nkk))
+    ALLOCATE (lrot(48,nkk))
+    ALLOCATE (includ(nkk))
     nhash = MAX(2000,nkk/10)
-    ALLOCATE (list(nkk+nhash),STAT=isos)
-    CPPostcondition(isos==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE (rlist(3,nkk),STAT=isos)
-    CPPostcondition(isos==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (list(nkk+nhash))
+    ALLOCATE (rlist(3,nkk))
 
     IF ( PRESENT(iounit) ) THEN
        csym%punit = iounit
@@ -283,14 +256,14 @@ CONTAINS
        csym%delta = 1.e-6_dp
     END IF
     !..calculate symmetry operations and generate kpoints
-    CALL k290prg(csym%punit,csym%nat,csym%nkpoint,csym%nsp,csym%iq1,csym%iq2,csym%iq3,&
+    CALL k290prg(csym%punit,csym%nat,csym%nkpoint,csym%iq1,csym%iq2,csym%iq3,&
          csym%istriz,csym%a1,csym%a2,csym%a3,csym%alat,csym%strain,csym%xkappa,&
          rx,tvec,csym%ty,isc,f0,csym%ntvec,csym%wvk0,csym%ihg,csym%ihc,csym%isy,&
          csym%li,csym%nc,csym%indpg,csym%ib,csym%v,csym%r,csym%origin,csym%xb,&
-         wvkl,lwght,lrot,nhash,includ,list,rlist,csym%delta,error)
+         wvkl,lwght,lrot,nhash,includ,list,rlist,csym%delta)
     IF ( PRESENT(xkpoint) ) THEN
        !..return kpoints and weights
-       CPPrecondition(PRESENT(wkpoint),cp_failure_level,routineP,error,failure)
+       CPASSERT(PRESENT(wkpoint))
        isum=0
        nkpts=0
        DO ik=1,nkk
@@ -299,16 +272,14 @@ CONTAINS
           isum = isum + lwght(nkpts)
        END DO
        wsum=REAL(isum,KIND=dp)
-       ALLOCATE (xkpoint(3,nkpts),wkpoint(nkpts),STAT=isos)
-       CPPostcondition(isos==0,cp_failure_level,routineP,error,failure)
+       ALLOCATE (xkpoint(3,nkpts),wkpoint(nkpts))
        DO ik=1,nkpts
           wkpoint(ik) = REAL(lwght(ik),KIND=dp)/wsum
           xkpoint(1:3,ik) = wvkl(1:3,ik)
        END DO
     END IF
     !..deallocate intermediate arrays
-    DEALLOCATE (rx,tvec,isc,f0,wvkl,lwght,lrot,includ,list,rlist,STAT=isos)
-    CPPostcondition(isos==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE (rx,tvec,isc,f0,wvkl,lwght,lrot,includ,list,rlist)
 
     CALL timestop(handle)
 
@@ -317,11 +288,9 @@ CONTAINS
 ! *****************************************************************************
 !> \brief ...
 !> \param csym ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE print_crys_symmetry(csym,error)
+  SUBROUTINE print_crys_symmetry(csym)
     TYPE(csym_type), POINTER                 :: csym
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'print_crys_symmetry', &
       routineP = moduleN//':'//routineN
@@ -427,7 +396,6 @@ CONTAINS
 !> \param iout ...
 !> \param nat ...
 !> \param nkpoint ...
-!> \param nsp ...
 !> \param iq1 ...
 !> \param iq2 ...
 !> \param iq3 ...
@@ -464,7 +432,6 @@ CONTAINS
 !> \param list ...
 !> \param rlist ...
 !> \param delta ...
-!> \param error ...
 !> \par Original Header:
 !> ---------------------------------------------------------------------------!
 !>      WRITTEN ON SEPTEMBER 12TH, 1979.
@@ -525,11 +492,11 @@ CONTAINS
 !>       "COMPUTER PHYSICS COMMUNICATIONS" PACKAGE "ACMI" - (1971,1974)
 !>       WORLTON-WARREN).
 ! *****************************************************************************
-  SUBROUTINE k290prg(iout,nat,nkpoint,nsp,iq1,iq2,iq3,istriz,a1,a2,a3, &
+  SUBROUTINE k290prg(iout,nat,nkpoint,iq1,iq2,iq3,istriz,a1,a2,a3, &
        alat,strain,xkapa,rx,tvec,ty,isc,f0,ntvec,wvk0,ihg,ihc,isy,li,nc,indpg,ib,v,r,&
-       xb,origin,wvkl,lwght,lrot,nhash,includ,list,rlist,delta,error)
-    INTEGER                                  :: iout, nat, nkpoint, nsp, iq1, &
-                                                iq2, iq3, istriz
+       xb,origin,wvkl,lwght,lrot,nhash,includ,list,rlist,delta)
+    INTEGER                                  :: iout, nat, nkpoint, iq1, iq2, &
+                                                iq3, istriz
     REAL(KIND=dp)                            :: a1(3), a2(3), a3(3), alat, &
                                                 strain(6), xkapa(3,nat), &
                                                 rx(3,nat), tvec(3,nat)
@@ -545,19 +512,16 @@ CONTAINS
                                                 includ(nkpoint), &
                                                 list(nkpoint+nhash)
     REAL(KIND=dp)                            :: rlist(3,nkpoint), delta
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'k290prg', &
       routineP = moduleN//':'//routineN
 
     INTEGER :: f00(49,1), i, ib0(48), ihc0, ihg0, indpg0, invadd, istrin, &
       iswght, isy0, j, l, li0, lmax, n, nc0, ntot, ntvec0
-    LOGICAL                                  :: failure
     REAL(KIND=dp) :: a01(3), a02(3), a03(3), b01(3), b02(3), b03(3), b1(3), &
       b2(3), b3(3), dtotstr, origin0(3), proj1, proj2, proj3, r0(3,3,48), &
       totstr, tvec0(3,1), v0(3,48), volum, x0(3,1), xb0(3)
 
-    failure = .FALSE.
     v(:,:) = 0.0_dp
     f00 = 0
     x0 = 0.0_dp
@@ -597,8 +561,8 @@ CONTAINS
     !----------------------------------------------------------------------------!
     !      GROUP-THEORY ANALYSIS OF LATTICE
     !----------------------------------------------------------------------------!
-    CALL group1(iout,a1,a2,a3,nat,ty,xkapa,b1,b2,b3,ihg,ihc,isy,li,nc, &
-         indpg,ib,ntvec,v,f0,xb,r,tvec,origin,rx,isc,delta,error)
+    CALL group1(a1,a2,a3,nat,ty,xkapa,b1,b2,b3,ihg,ihc,isy,li,nc, &
+         indpg,ib,ntvec,v,f0,xb,r,tvec,origin,rx,isc,delta)
     !----------------------------------------------------------------------------!
     DO n = nc + 1, 48
        ib(n) = 0
@@ -623,8 +587,8 @@ CONTAINS
                       ' The (unstrained) bravais lattice ', &
                       ' (used for generating the largest possible mesh in the B.Z.)'
        !----------------------------------------------------------------------------!
-       CALL group1(iout,a01,a02,a03,1,ty,x0,b01,b02,b03,ihg0,ihc0,isy0,li0, &
-            nc0,indpg0,ib0,ntvec0,v0,f00,xb0,r0,tvec0,origin0,rx,isc,delta,error)
+       CALL group1(a01,a02,a03,1,ty,x0,b01,b02,b03,ihg0,ihc0,isy0,li0, &
+            nc0,indpg0,ib0,ntvec0,v0,f00,xb0,r0,tvec0,origin0,rx,isc,delta)
        !----------------------------------------------------------------------------!
        !   It is assumed that the same 'type' of symmetry operations
        !   (cubic/hexagonal) will apply to the crystal as well as the Bravais
@@ -642,7 +606,7 @@ CONTAINS
             ' constant vector shift (MacDonald) of this mesh:', wvk0
           IF (ABS(istriz)/=1) THEN
              WRITE (iout,'(" invalid switch for symmetrization",I10)') istriz
-             CPPostcondition(.FALSE.,cp_failure_level,routineP,error,failure)
+             CPABORT("")
           END IF
           WRITE (iout,'(" symmetrization switch: ",I3)',ADVANCE="NO") istriz
           IF (istriz==1) THEN
@@ -669,7 +633,7 @@ CONTAINS
              WRITE (iout,*) ' K290| Number of rotations for crystal lattice', &
                   nc
              WRITE (iout,*) ' K290| No duplication found'
-             CPPostcondition(.FALSE.,cp_failure_level,routineP,error,failure)
+             CPABORT("")
           END IF
           nc = nc0
           DO i = 1, nc0
@@ -686,7 +650,7 @@ CONTAINS
        END IF
        CALL sppt2(iout,iq1,iq2,iq3,wvk0,nkpoint,a01,a02,a03,b01,b02,b03, &
             invadd,nc,ib,r,ntot,wvkl,lwght,lrot,nc0,ib0,istriz,nhash,includ, &
-            list,rlist,delta,error)
+            list,rlist,delta)
        !----------------------------------------------------------------------------!
        !      Check on error signals
        !----------------------------------------------------------------------------!
@@ -742,7 +706,6 @@ CONTAINS
 
 ! *****************************************************************************
 !> \brief ...
-!> \param iout ...
 !> \param a1 ...
 !> \param a2 ...
 !> \param a3 ...
@@ -769,7 +732,6 @@ CONTAINS
 !> \param rx ...
 !> \param isc ...
 !> \param delta ...
-!> \param error ...
 !> \par Original Header:
 !> ---------------------------------------------------------------------------!
 !>       WRITTEN ON SEPTEMBER 10TH - FROM THE ACMI COMPLEX
@@ -873,9 +835,8 @@ CONTAINS
 !>       NONSYMMORPHIC AND WHETHER THE POINT GROUP OF THE CRYSTAL
 !>       CONTAINS INVERSION.
 ! *****************************************************************************
-  SUBROUTINE group1(iout,a1,a2,a3,nat,ty,x,b1,b2,b3,ihg,ihc,isy,li,nc, &
-       indpg,ib,ntvec,v,f0,xb,r,tvec,origin,rx,isc,delta,error)
-    INTEGER                                  :: iout
+  SUBROUTINE group1(a1,a2,a3,nat,ty,x,b1,b2,b3,ihg,ihc,isy,li,nc, &
+       indpg,ib,ntvec,v,f0,xb,r,tvec,origin,rx,isc,delta)
     REAL(KIND=dp)                            :: a1(3), a2(3), a3(3)
     INTEGER                                  :: nat, ty(nat)
     REAL(KIND=dp)                            :: x(3,nat), b1(3), b2(3), b3(3)
@@ -888,7 +849,6 @@ CONTAINS
                                                 rx(3,nat)
     INTEGER                                  :: isc(nat)
     REAL(KIND=dp)                            :: delta
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'group1', &
       routineP = moduleN//':'//routineN
@@ -913,7 +873,7 @@ CONTAINS
     !     DETERMINE PRIMITIVE LATTICE VECTORS FOR THE RECIPROCAL LATTICE
     !------------------------------------------------------------------------------!
 
-    CALL calbrec(a,ai,error)
+    CALL calbrec(a,ai)
     DO i = 1, 3
        b1(i) = ai(1,i)
        b2(i) = ai(2,i)
@@ -923,25 +883,25 @@ CONTAINS
     !     Determination of the translation vectors associated with
     !     the Identity matrix i.e. if the cell is duplicated
     !     Give also the ``primitive lattice''
-    CALL primlatt(a,ai,ap,api,nat,ty,x,ntvec,tvec,f0,isc,delta,error)
+    CALL primlatt(a,ai,ap,api,nat,ty,x,ntvec,tvec,f0,isc,delta)
     !------------------------------------------------------------------------------!
     !     Determination of the holohedral group (and crystal system)
-    CALL pgl1(ap,api,ihc,nc,ib,ihg,r,delta,error)
+    CALL pgl1(ap,api,ihc,nc,ib,ihg,r,delta)
     IF (ntvec>1) THEN
        !       All rotations found by PGL1 have axes in x, y or z cart. axis
        !       So we have too check if we do not loose symmetry
        ncprim = nc
        !       The hexagonal system is found if the z axis is the sixfold axis
-       CALL pgl1(a,ai,ihc,nc,ib,ihg,r,delta,error)
+       CALL pgl1(a,ai,ihc,nc,ib,ihg,r,delta)
        IF (ncprim>nc) THEN
           !         More symmetry with
-          CALL pgl1(ap,api,ihc,nc,ib,ihg,r,delta,error)
+          CALL pgl1(ap,api,ihc,nc,ib,ihg,r,delta)
        END IF
     END IF
     !------------------------------------------------------------------------------!
     !     Determination of the space group
-    CALL atftm1(iout,r,v,x,f0,xb,origin,ib,ty,nat,ihg,rx,nc,indpg,ntvec,a,ai, &
-         li,isy,isc,delta,error)
+    CALL atftm1(r,v,x,f0,xb,origin,ib,ty,nat,ihg,rx,nc,indpg,ntvec,a,ai, &
+         li,isy,isc,delta)
     !------------------------------------------------------------------------------!
   END SUBROUTINE group1
 
@@ -949,7 +909,6 @@ CONTAINS
 !> \brief CALCULATE RECIPROCAL VECTOR BASIS (AI(1:3,1:3))
 !> \param a ...
 !> \param ai ...
-!> \param error ...
 !> \par   Note
 !>             INPUT:
 !>              A(3,3) A(I,J) IS THE I-TH CARTESIAN COMPONENT
@@ -958,9 +917,8 @@ CONTAINS
 !>             OUTPUT:
 !>              AI(3,3) RECIPROCAL VECTOR BASIS
 ! *****************************************************************************
-  SUBROUTINE calbrec(a,ai,error)
+  SUBROUTINE calbrec(a,ai)
     REAL(KIND=dp)                            :: a(3,3), ai(3,3)
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'calbrec', &
       routineP = moduleN//':'//routineN
@@ -1004,7 +962,6 @@ CONTAINS
 !> \param f0 ...
 !> \param isc ...
 !> \param delta ...
-!> \param error ...
 !> \par Note
 !>        INPUT:
 !>          A(3,3)   A(I,J) IS THE I-TH CARTESIAN COMPONENT
@@ -1026,7 +983,7 @@ CONTAINS
 !>                        THE 49-TH LINE
 !>          ISC(NAT)      SCRATCH ARRAY
 ! *****************************************************************************
-  SUBROUTINE primlatt(a,ai,ap,api,nat,ty,x,ntvec,tvec,f0,isc,delta,error)
+  SUBROUTINE primlatt(a,ai,ap,api,nat,ty,x,ntvec,tvec,f0,isc,delta)
     REAL(KIND=dp)                            :: a(3,3), ai(3,3), ap(3,3), &
                                                 api(3,3)
     INTEGER                                  :: nat, ty(nat)
@@ -1035,7 +992,6 @@ CONTAINS
     REAL(KIND=dp)                            :: tvec(3,nat)
     INTEGER                                  :: f0(49,nat), isc(nat)
     REAL(KIND=dp)                            :: delta
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'primlatt', &
       routineP = moduleN//':'//routineN
@@ -1060,8 +1016,8 @@ CONTAINS
           xb(i) = x(i,k2) - x(i,1)
        END DO
        !       A fractional translation vector VR is defined.
-       CALL rlv3(ai,xb,vr,il,delta,error)
-       CALL checkrlv3(1,nat,ty,x,x,vr,f0,ai,isc,.TRUE.,oksym,delta,error)
+       CALL rlv3(ai,xb,vr,il,delta)
+       CALL checkrlv3(1,nat,ty,x,x,vr,f0,ai,isc,.TRUE.,oksym,delta)
        IF (oksym) THEN
           !         A fractional translational vector is found
           ntvec = ntvec + 1
@@ -1099,7 +1055,7 @@ CONTAINS
                   tvec(3,iv)*a(i,3)
           END DO
           !         We calculare TVEC in AP basis
-          CALL rlv3(api,xb,vr,il,delta,error)
+          CALL rlv3(api,xb,vr,il,delta)
           DO i = 1, 3
              IF (ABS(vr(i))>delta) THEN
                 il = NINT(1.0_dp/ABS(vr(i)))
@@ -1109,7 +1065,7 @@ CONTAINS
                       ap(j,i) = xb(j)
                    END DO
                    !               Calculate new API
-                   CALL calbrec(ap,api,error)
+                   CALL calbrec(ap,api)
                    EXIT
                 END IF
              END IF
@@ -1128,7 +1084,6 @@ CONTAINS
 !> \param ihg ...
 !> \param r ...
 !> \param delta ...
-!> \param error ...
 !> \par Original Header
 !> ---------------------------------------------------------------------------!
 !>         WRITTEN ON SEPTEMBER 11TH, 1979 - FROM ACMI COMPLEX
@@ -1166,11 +1121,10 @@ CONTAINS
 !>                  ALL 48 OR 24 MATRICES ARE LISTED.
 !>                  FOLLOW NOTATION OF WORLTON-WARREN(1972)
 ! *****************************************************************************
-  SUBROUTINE pgl1(a,ai,ihc,nc,ib,ihg,r,delta,error)
+  SUBROUTINE pgl1(a,ai,ihc,nc,ib,ihg,r,delta)
     REAL(KIND=dp)                            :: a(3,3), ai(3,3)
     INTEGER                                  :: ihc, nc, ib(48), ihg
     REAL(KIND=dp)                            :: r(3,3,48), delta
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'pgl1', &
       routineP = moduleN//':'//routineN
@@ -1187,7 +1141,7 @@ CONTAINS
        END IF
        nc = 0
        !       Constructs rotation operations.
-       CALL rot1(ihc,r,error)
+       CALL rot1(ihc,r)
        DO n = 1, nr
           ib(n) = 0
           !         Rotate the A1,2,3 vectors by rotation No. N
@@ -1198,7 +1152,7 @@ CONTAINS
                    xa(i) = xa(i) + r(i,j,n)*a(j,k)
                 END DO
              END DO
-             CALL rlv3(ai,xa,vr,lx,delta,error)
+             CALL rlv3(ai,xa,vr,lx,delta)
              tr = 0.0_dp
              DO i = 1, 3
                 tr = tr + ABS(vr(i))
@@ -1237,7 +1191,6 @@ CONTAINS
 !> \param vr ...
 !> \param il ...
 !> \param delta ...
-!> \param error ...
 !> \par Original Header
 !> ---------------------------------------------------------------------------!
 !>         WRITTEN ON SEPTEMBER 11TH, 1979 - FROM ACMI COMPLEX
@@ -1259,12 +1212,11 @@ CONTAINS
 !>            IL ABS OF VR
 !>         K.K., 23.10.1979
 ! *****************************************************************************
-  SUBROUTINE rlv3(ai,xb,vr,il,delta,error)
+  SUBROUTINE rlv3(ai,xb,vr,il,delta)
 
     REAL(KIND=dp)                            :: ai(3,3), xb(3), vr(3)
     INTEGER                                  :: il
     REAL(KIND=dp)                            :: delta
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'rlv3', &
       routineP = moduleN//':'//routineN
@@ -1292,7 +1244,6 @@ CONTAINS
 
 ! *****************************************************************************
 !> \brief ...
-!> \param iout ...
 !> \param r ...
 !> \param v ...
 !> \param x ...
@@ -1313,7 +1264,6 @@ CONTAINS
 !> \param isy ...
 !> \param isc ...
 !> \param delta ...
-!> \param error ...
 !> \par Original Header
 !> ---------------------------------------------------------------------------!
 !>         WRITTEN ON SEPTEMBER 11TH, 1979 - FROM ACMI COMPLEX
@@ -1365,9 +1315,8 @@ CONTAINS
 !>                  LI.GT.0 : there is inversion in the point
 !>                            group of the crystal
 ! *****************************************************************************
-  SUBROUTINE atftm1(iout,r,v,x,f0,xb,origin,ib,ty,nat,ihg,rx,nc,indpg,ntvec, &
-       a,ai,li,isy,isc,delta,error)
-    INTEGER                                  :: iout
+  SUBROUTINE atftm1(r,v,x,f0,xb,origin,ib,ty,nat,ihg,rx,nc,indpg,ntvec, &
+       a,ai,li,isy,isc,delta)
     REAL(KIND=dp)                            :: r(3,3,48), v(3,48), xb(3), &
                                                 origin(3)
     INTEGER                                  :: ib(48), nat, ty(nat), &
@@ -1379,17 +1328,15 @@ CONTAINS
     REAL(KIND=dp)                            :: a(3,3), ai(3,3)
     INTEGER                                  :: li, isy, isc(nat)
     REAL(KIND=dp)                            :: delta
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'atftm1', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: i, iis(48), il, info, j, k, &
                                                 k2, l, n, nca, ni
-    LOGICAL                                  :: failure, nodupli, oksym
+    LOGICAL                                  :: nodupli, oksym
     REAL(KIND=dp)                            :: vc(3,48), vr(3), vs
 
-    failure = .FALSE.
     nodupli = ntvec == 1
     nca = 0
     DO n = 1, 48
@@ -1413,7 +1360,7 @@ CONTAINS
        END DO
        !       First we determine for VR=(/0,0,0/)
        !       IMPORTANT IF NOT UNIQUE ATOMS FOR DETERMINATION OF SYMMORPHIC
-       CALL checkrlv3(n,nat,ty,rx,x,vr,f0,ai,isc,nodupli,oksym,delta,error)
+       CALL checkrlv3(n,nat,ty,rx,x,vr,f0,ai,isc,nodupli,oksym,delta)
        IF (oksym) THEN
          nca = nca + 1
          DO i = 1, 3
@@ -1429,7 +1376,7 @@ CONTAINS
              xb(i) = rx(i,1) - x(i,k2)
           END DO
           !         A translation vector VR is defined.
-          CALL rlv3(ai,xb,vr,il,delta,error)
+          CALL rlv3(ai,xb,vr,il,delta)
           !------------------------------------------------------------------------------!
           !            SUBROUTINE RLV3 REMOVES A DIRECT LATTICE VECTOR FROM XB
           !            LEAVING THE REMAINDER IN VR. IF A NONZERO LATTICE
@@ -1438,7 +1385,7 @@ CONTAINS
           !            VR IS NOT GIVEN IN CARTESIAN COORDINATES BUT
           !            IN THE SYSTEM A1,A2,A3.     K.K., 23.10.1979
           !------------------------------------------------------------------------------!
-          CALL checkrlv3(n,nat,ty,rx,x,vr,f0,ai,isc,nodupli,oksym,delta,error)
+          CALL checkrlv3(n,nat,ty,rx,x,vr,f0,ai,isc,nodupli,oksym,delta)
           IF (oksym) THEN
             nca = nca + 1
             DO i = 1, 3
@@ -1494,7 +1441,7 @@ CONTAINS
     IF (ihg<6) THEN
        IF (nc==0) THEN
           WRITE (*,'(" ATFTM1! IHG=",A," NC=",I2)') icst(ihg), nc
-          CPPostcondition(.FALSE.,cp_failure_level,routineP,error,failure)
+          CPABORT("")
           !       Triclinic system
        ELSE IF (nc==1) THEN
           !         IB=1
@@ -1632,7 +1579,7 @@ CONTAINS
     ELSE IF (ihg>=6) THEN
        IF (nc==0) THEN
           WRITE (*,'(" ATFTM1! IHG=",A," NC=",I2)') icst(ihg), nc
-          CPPostcondition(.FALSE.,cp_failure_level,routineP,error,failure)
+          CPABORT("")
           !       Triclinic system
        ELSE IF (nc==1) THEN
           !         IB=1
@@ -1725,9 +1672,9 @@ CONTAINS
              vc(i,n) = a(i,1)*v(1,n) + a(i,2)*v(2,n) + a(i,3)*v(3,n)
           END DO
        END DO
-       CALL symmorphic(nc,ib,r,vc,ai,info,origin,delta,error)
+       CALL symmorphic(nc,ib,r,vc,ai,info,origin,delta)
        IF (info==1) THEN
-          CALL rlv3(ai,origin,xb,il,delta,error)
+          CALL rlv3(ai,origin,xb,il,delta)
           !         !!!RLV3 determines -XB in crystal coordinates
           !         !!We want between 0.0 and 1.0
           DO i = 1, 3
@@ -1766,7 +1713,6 @@ CONTAINS
 !> \param nodupli ...
 !> \param oksym ...
 !> \param delta ...
-!> \param error ...
 !> \par Original Header
 !> ------------------------------------------------------------------------------!
 !>         WRITTEN IN MAY 14TH, 1998 (T.D.)
@@ -1795,7 +1741,7 @@ CONTAINS
 !>                          EACH ATOM IS ONLY ONCE AN IMAGE
 !>                          IF NO DUPLICATION OF THE CELL
 ! *****************************************************************************
-  SUBROUTINE checkrlv3(n,nat,ty,rx,x,vr,f0,ai,isc,nodupli,oksym,delta,error)
+  SUBROUTINE checkrlv3(n,nat,ty,rx,x,vr,f0,ai,isc,nodupli,oksym,delta)
 
     INTEGER                                  :: n, nat, ty(nat)
     REAL(KIND=dp)                            :: rx(3,nat), x(3,nat), vr(3)
@@ -1804,7 +1750,6 @@ CONTAINS
     INTEGER                                  :: isc(nat)
     LOGICAL                                  :: nodupli, oksym
     REAL(KIND=dp)                            :: delta
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'checkrlv3', &
       routineP = moduleN//':'//routineN
@@ -1822,7 +1767,7 @@ CONTAINS
              xb(1) = rx(1,ia) - x(1,ib)
              xb(2) = rx(2,ia) - x(2,ib)
              xb(3) = rx(3,ia) - x(3,ib)
-             CALL rlv3(ai,xb,vt,il,delta,error)
+             CALL rlv3(ai,xb,vt,il,delta)
              !           VT STANDS FOR V-TEST
              oksym = (ABS((vr(1)-vt(1))-NINT(vr(1)-vt(1)))<delta) .AND. &
                   (ABS((vr(2)-vt(2))-NINT(vr(2)-vt(2)))<delta) .AND. &
@@ -1851,7 +1796,6 @@ CONTAINS
 !> \param info ...
 !> \param origin ...
 !> \param delta ...
-!> \param error ...
 !> \par Original Header
 !> ------------------------------------------------------------------------------!
 !>         Check if the group is symmorphic with a non-standard origin
@@ -1877,12 +1821,11 @@ CONTAINS
 !>           INFO = 0 The group is not symmorphic
 !>           INFO =-1 The routine cannot determine
 ! *****************************************************************************
-  SUBROUTINE symmorphic(nc,ib,r,v,ai,info,origin,delta,error)
+  SUBROUTINE symmorphic(nc,ib,r,v,ai,info,origin,delta)
     INTEGER                                  :: nc, ib(nc)
     REAL(KIND=dp)                            :: r(3,3,48), v(3,nc), ai(3,3)
     INTEGER                                  :: info
     REAL(KIND=dp)                            :: origin(3), delta
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'symmorphic', &
       routineP = moduleN//':'//routineN
@@ -1913,7 +1856,7 @@ CONTAINS
              END DO
              r3(i,i) = 1 + r3(i,i)
           END DO
-          CALL invmat(r3(1:3,1:3),ierror,error)
+          CALL invmat(r3(1:3,1:3),ierror)
           IF (ierror==0) THEN
              !           The matrix 3x3 has an inverse.
              DO i = 1, 3
@@ -1938,7 +1881,7 @@ CONTAINS
                    r2(i1,i1) = 1 + r2(i1,i1)
                 END IF
              END DO
-             CALL invmat(r2(1:2,1:2),ierror,error)
+             CALL invmat(r2(1:2,1:2),ierror)
              IF (ierror==0) THEN
                 !             The matrix 2X2 has an inverse.
                 !             Solve Vxy = (1-R).OAxy + OAz R3z (z is IMISSING3)
@@ -2024,7 +1967,7 @@ CONTAINS
                r(i,3,ib(ir))*origin(3)
           vr(i) = (origin(i)-vr(i)) - v(i,ir)
        END DO
-       CALL rlv3(ai,vr,xb,il,delta,error)
+       CALL rlv3(ai,vr,xb,il,delta)
        dif = ABS(xb(1)) + ABS(xb(2)) + ABS(xb(3))
        IF (dif>delta) THEN
           !         Non-symmorphic
@@ -2038,7 +1981,6 @@ CONTAINS
 !> \brief ...
 !> \param ihc ...
 !> \param r ...
-!> \param error ...
 !> \par Original Header
 !> ------------------------------------------------------------------------------!
 !>         WRITTEN ON FEBRUARY 17TH, 1976
@@ -2063,10 +2005,9 @@ CONTAINS
 !>         FOR IHC=1 THE FIRST 48 MATRICES OF THE ARRAY R REPRESENT
 !>                   THE FULL CUBIC GROUP O(H)
 ! *****************************************************************************
-  SUBROUTINE rot1(ihc,r,error)
+  SUBROUTINE rot1(ihc,r)
     INTEGER                                  :: ihc
     REAL(KIND=dp)                            :: r(3,3,48)
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'rot1', &
       routineP = moduleN//':'//routineN
@@ -2227,7 +2168,6 @@ CONTAINS
 !> \param list ...
 !> \param rlist ...
 !> \param delta ...
-!> \param error ...
 !> \par Original Header
 !> ------------------------------------------------------------------------------!
 !>         WRITTEN ON SEPTEMBER 12-20TH, 1979 BY K.K.
@@ -2359,7 +2299,7 @@ CONTAINS
 ! *****************************************************************************
   SUBROUTINE sppt2(iout,iq1,iq2,iq3,wvk0,nkpoint,a1,a2,a3,b1,b2,b3,inv,nc, &
        ib,r,ntot,wvkl,lwght,lrot,ncbrav,ibrav,istriz,nhash,includ,list, &
-       rlist,delta,error)
+       rlist,delta)
     INTEGER                                  :: iout, iq1, iq2, iq3
     REAL(KIND=dp)                            :: wvk0(3)
     INTEGER                                  :: nkpoint
@@ -2372,7 +2312,6 @@ CONTAINS
     INTEGER :: lwght(nkpoint), lrot(48,nkpoint), ncbrav, ibrav(48), istriz, &
       nhash, includ(nkpoint), list(nkpoint+nhash)
     REAL(KIND=dp)                            :: rlist(3,nkpoint), delta
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'sppt2', &
       routineP = moduleN//':'//routineN
@@ -2382,15 +2321,12 @@ CONTAINS
                                                 igarb0, igarbage, igarbg, &
                                                 imesh, iop, iplace, iremov, &
                                                 iwvk, j, jplace, k, n, nplane
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: diff, proja(3), projb(3), &
                                                 rsdir(4,nrsdir), ur1, ur2, &
                                                 ur3, wva(3), wvk(3)
 
 !------------------------------------------------------------------------------!
-
-    failure = .FALSE.
-    !------------------------------------------------------------------------------!
+!------------------------------------------------------------------------------!
 
     ntot = 0
     DO i = 1, nkpoint
@@ -2408,7 +2344,7 @@ CONTAINS
     !------------------------------------------------------------------------------!
     !        DEFINE THE 1ST BRILLOUIN ZONE
     !------------------------------------------------------------------------------!
-    CALL bzdefi(iout,b1,b2,b3,rsdir,nrsdir,nplane,delta,error)
+    CALL bzdefi(iout,b1,b2,b3,rsdir,nrsdir,nplane,delta)
     !------------------------------------------------------------------------------!
     !        Generation of the mesh (they are not multiplied by 2*pi) by
     !        the Monkhorst/Pack algorithm, supplemented by all rotations
@@ -2416,7 +2352,7 @@ CONTAINS
     !     Initialize the list of vectors
     iplace = -2
     CALL mesh(iout,wva,iplace,igarb0,igarbg,nkpoint,nhash,list,rlist, &
-         delta,error)
+         delta)
     imesh = 0
     DO i1 = 1, iq1
        DO i2 = 1, iq2
@@ -2428,7 +2364,7 @@ CONTAINS
                 wvk(i) = ur1*b1(i) + ur2*b2(i) + ur3*b3(i) + wvk0(i)
              END DO
              !           Reduce WVK to the 1st Brillouin zone
-             CALL bzrduc(wvk,a1,a2,a3,b1,b2,b3,rsdir,nrsdir,nplane,delta,error)
+             CALL bzrduc(wvk,a1,a2,a3,b1,b2,b3,rsdir,nrsdir,nplane,delta)
              IF (istriz==1) THEN
                 !             Symmetrization of the k-points mesh.
                 !             Apply all the Bravais lattice operations to WVK
@@ -2444,7 +2380,7 @@ CONTAINS
                    !               Place WVA in list
                    iplace = 0
                    CALL mesh(iout,wva,iplace,igarb0,igarbg,nkpoint,nhash,list, &
-                        rlist,delta,error)
+                        rlist,delta)
                    !               If WVA was new (and therefore inserted),
                    !               IPLACE is the number.
                    IF (iplace>0) imesh = iplace
@@ -2454,7 +2390,7 @@ CONTAINS
                 !             Place WVK in list
                 iplace = 0
                 CALL mesh(iout,wvk,iplace,igarb0,igarbg,nkpoint,nhash,list, &
-                     rlist,delta,error)
+                     rlist,delta)
                 imesh = iplace
                 IF (iplace>nkpoint) GO TO 470
              END IF
@@ -2467,7 +2403,7 @@ CONTAINS
             imesh
        WRITE (iout,'(" K290| The points are:")')
        DO i = 1, imesh
-          CALL mesh(iout,wva,i,igarb0,igarbg,nkpoint,nhash,list,rlist,delta,error)
+          CALL mesh(iout,wva,i,igarb0,igarbg,nkpoint,nhash,list,rlist,delta)
           IF (MOD(i,2)==1) THEN
              WRITE (iout,'(1X,I5,3F10.4)',ADVANCE="NO") i, wva
           ELSE
@@ -2484,7 +2420,7 @@ CONTAINS
        DO i = 1, (imesh-1)
           iplace = i
           CALL mesh(iout,wva,iplace,igarb0,igarbg,nkpoint,nhash,list,rlist, &
-               delta,error)
+               delta)
           !         Project WVA onto B1,2,3:
           proja(1) = 0.0_dp
           proja(2) = 0.0_dp
@@ -2498,7 +2434,7 @@ CONTAINS
           DO j = (i+1), imesh
              jplace = j
              CALL mesh(iout,wvk,jplace,igarb0,igarbg,nkpoint,nhash,list, &
-                  rlist,delta,error)
+                  rlist,delta)
              !           Project WVK onto B1,2,3:
              projb(1) = 0.0_dp
              projb(2) = 0.0_dp
@@ -2516,7 +2452,7 @@ CONTAINS
              IF (ABS(REAL(NINT(diff),KIND=dp)-diff)>delta) CYCLE
              !           DIFF is integral: remove WVK from mesh:
              CALL remove(wvk,jplace,igarb0,igarbg,nkpoint,nhash,list,rlist, &
-                  delta,error)
+                  delta)
              !           If WVK actually removed, increment IREMOV
              IF (jplace>0) iremov = iremov + 1
           END DO
@@ -2539,9 +2475,9 @@ CONTAINS
        includ(iwvk) = IBSET(includ(iwvk),0)
        iplace = iwvk
        CALL mesh(iout,wvk,iplace,igarb0,igarbg,nkpoint,nhash,list,rlist, &
-            delta,error)
+            delta)
        !       Find out whether Wvk is in the garbage list
-       CALL garbag(wvk,igarbage,igarb0,nkpoint,nhash,list,rlist,delta,error)
+       CALL garbag(wvk,igarbage,igarb0,nkpoint,nhash,list,rlist,delta)
        IF (igarbage>0) CYCLE
        ntot = ntot + 1
        !       Give the index in the special k points table.
@@ -2565,7 +2501,7 @@ CONTAINS
           !         Find WVA in the list
           iplace = -1
           CALL mesh(iout,wva,iplace,igarb0,igarbg,nkpoint,nhash,list,rlist, &
-               delta,error)
+               delta)
           IF (iplace==0) THEN
              IF (istriz==-1) THEN
                 !             No symmetrisation -> WVA not in the list
@@ -2577,7 +2513,7 @@ CONTAINS
              END IF
           END IF
           !         Find out whether WVA is in the garbage list
-          CALL garbag(wva,igarbage,igarb0,nkpoint,nhash,list,rlist,delta,error)
+          CALL garbag(wva,igarbage,igarb0,nkpoint,nhash,list,rlist,delta)
           IF (igarbage>0) CYCLE
           !         Was WVA encountered before ?
           !          IF(INCLUD(IPLACE) .EQ. YES) GOTO 364
@@ -2634,19 +2570,19 @@ CONTAINS
     WRITE (*,'(A,3F10.4,/,A,3F10.4,A,/,A,I3,A)') ' THE VECTOR     ', &
          wva, ' GENERATED FROM ', wvk, ' IN THE BASIC MESH', &
          ' BY ROTATION NO. ', ibrav(iop), ' IS OUTSIDE THE 1BZ'
-    CPPostcondition(.FALSE.,cp_failure_level,routineP,error,failure)
+    CPABORT("")
     !------------------------------------------------------------------------------!
 470 CONTINUE
     WRITE (*,'(A,/)') ' SUBROUTINE SPPT2 *** FATAL ERROR ***'
     WRITE (*,*) 'MESH SIZE EXCEEDS NKPOINT=', nkpoint
-    CPPostcondition(.FALSE.,cp_failure_level,routineP,error,failure)
+    CPABORT("")
     !------------------------------------------------------------------------------!
 490 CONTINUE
     WRITE (*,'(A,/)') ' SUBROUTINE SPPT2 *** FATAL ERROR ***'
     WRITE (*,'(A,3F10.4,/,A,3F10.4,A,/,A,I3,A)') ' THE VECTOR     ', &
          wva, ' GENERATED FROM ', wvk, ' IN THE BASIC MESH', &
          ' BY ROTATION NO. ', ib(n), ' IS NOT IN THE LIST'
-    CPPostcondition(.FALSE.,cp_failure_level,routineP,error,failure)
+    CPABORT("")
   END SUBROUTINE sppt2
 ! *****************************************************************************
 !> \brief ...
@@ -2660,7 +2596,6 @@ CONTAINS
 !> \param list ...
 !> \param rlist ...
 !> \param delta ...
-!> \param error ...
 !> \par Original Header
 !>         MESH MAINTAINS A LIST OF VECTORS FOR PLACEMENT AND/OR LOOKUP
 !>
@@ -2678,7 +2613,7 @@ CONTAINS
 !>         DELTA      REQUIRED ACCURACY (1.0E-6_dp IS A GOOD VALUE)
 ! *****************************************************************************
   SUBROUTINE mesh(iout,wvk,iplace,igarb0,igarbg,nmesh,nhash,list,rlist, &
-       delta,error)
+       delta)
 
     INTEGER                                  :: iout
     REAL(KIND=dp)                            :: wvk(3)
@@ -2686,7 +2621,6 @@ CONTAINS
                                                 nmesh, nhash, &
                                                 list(nhash+nmesh)
     REAL(KIND=dp)                            :: rlist(3,nmesh), delta
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'mesh', &
       routineP = moduleN//':'//routineN
@@ -2694,10 +2628,8 @@ CONTAINS
 
     INTEGER                                  :: i, ihash, ipoint, j
     INTEGER, SAVE                            :: istore = 0
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: delta1, rhash
 
-    failure = .FALSE.
     delta1 = 10.0_dp*delta
     IF (iplace<=-2) THEN
        DO i = 1, nhash + nmesh
@@ -2734,7 +2666,7 @@ CONTAINS
        WRITE (*,'(2A,/,A)') &
             ' SUBROUTINE MESH *** FATAL ERROR *** LINKED LIST', &
             ' TOO LONG ***', ' CHOOSE A BETTER HASH-FUNCTION'
-       CPPostcondition(.FALSE.,cp_failure_level,routineP,error,failure)
+       CPABORT("")
        !       WVK was not found
 130    CONTINUE
        IF (iplace==-1) THEN
@@ -2748,7 +2680,7 @@ CONTAINS
              WRITE (*,'(A)') 'SUBROUTINE MESH *** FATAL ERROR ***'
              WRITE (*,'(A,I10,A,/,A,3F10.5)') ' ISTORE=', istore, &
                   ' EXCEEDS DIMENSIONS', ' WVK = ', wvk
-             CPPostcondition(.FALSE.,cp_failure_level,routineP,error,failure)
+             CPABORT("")
           END IF
           list(istore) = nil
           DO i = 1, 3
@@ -2798,7 +2730,6 @@ CONTAINS
 !> \param list ...
 !> \param rlist ...
 !> \param delta ...
-!> \param error ...
 !> \par Original Header
 !>         ENTRY POINT FOR REMOVING A WAVEVECTOR
 !>
@@ -2810,24 +2741,21 @@ CONTAINS
 !>                        0 IF WVK WAS NOT REMOVED
 !>                          (WVK NOT IN THE LINKED LISTS)
 ! *****************************************************************************
-  SUBROUTINE remove(wvk,iplace,igarb0,igarbg,nmesh,nhash,list,rlist,delta,error)
+  SUBROUTINE remove(wvk,iplace,igarb0,igarbg,nmesh,nhash,list,rlist,delta)
 
     REAL(KIND=dp)                            :: wvk(3)
     INTEGER                                  :: iplace, igarb0, igarbg, &
                                                 nmesh, nhash, &
                                                 list(nhash+nmesh)
     REAL(KIND=dp)                            :: rlist(3,nmesh), delta
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'remove', &
       routineP = moduleN//':'//routineN
     INTEGER, PARAMETER                       :: nil = 0
 
     INTEGER                                  :: i, ihash, ipoint, j
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: delta1, rhash
 
-    failure = .FALSE.
     delta1 = 10.0_dp*delta
     !     The particular hash function used in this case:
     rhash = 0.7890E0_dp*wvk(1) + 0.6810E0_dp*wvk(2) + 0.5811E0_dp*wvk(3) + delta
@@ -2869,7 +2797,7 @@ CONTAINS
        RETURN
     END DO
     !     List too long
-    CPPostcondition(.FALSE.,cp_failure_level,routineP,error,failure)
+    CPABORT("")
   END SUBROUTINE remove
 
 ! *****************************************************************************
@@ -2882,7 +2810,6 @@ CONTAINS
 !> \param list ...
 !> \param rlist ...
 !> \param delta ...
-!> \param error ...
 !> \par Original Header
 !>         ENTRY POINT FOR CHECKING IF A WAVEVECTOR
 !>                     IS IN THE GARBAGE LIST
@@ -2894,22 +2821,19 @@ CONTAINS
 !>           IPLACE  ..... I > 0 IS THE PLACE IN THE GARBAGE LIST
 !>                             0 IF WVK NOT AMONG THE GARBAGE
 ! *****************************************************************************
-  SUBROUTINE garbag(wvk,iplace,igarb0,nmesh,nhash,list,rlist,delta,error)
+  SUBROUTINE garbag(wvk,iplace,igarb0,nmesh,nhash,list,rlist,delta)
     REAL(KIND=dp)                            :: wvk(3)
     INTEGER                                  :: iplace, igarb0, nmesh, nhash, &
                                                 list(nhash+nmesh)
     REAL(KIND=dp)                            :: rlist(3,nmesh), delta
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'garbag', &
       routineP = moduleN//':'//routineN
     INTEGER, PARAMETER                       :: nil = 0
 
     INTEGER                                  :: i, ihash, ipoint, j
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: delta1
 
-    failure = .FALSE.
     delta1 = 10.0_dp*delta
     !     Search for WVK in linked list
     !     Point to the garbage list
@@ -2936,7 +2860,7 @@ CONTAINS
 
     END DO
     !     List too long
-    CPPostcondition(.FALSE.,cp_failure_level,routineP,error,failure)
+    CPABORT("")
   END SUBROUTINE garbag
 
 ! *****************************************************************************
@@ -2952,20 +2876,18 @@ CONTAINS
 !> \param nrsdir ...
 !> \param nplane ...
 !> \param delta ...
-!> \param error ...
 !> \par Original Header
 !>         REDUCE WVK TO LIE ENTIRELY WITHIN THE 1ST BRILLOUIN ZONE
 !>         BY ADDING B-VECTORS
 !>         DELTA      REQUIRED ACCURACY (1.0E-6_dp IS A GOOD VALUE)
 ! *****************************************************************************
-  SUBROUTINE bzrduc(wvk,a1,a2,a3,b1,b2,b3,rsdir,nrsdir,nplane,delta,error)
+  SUBROUTINE bzrduc(wvk,a1,a2,a3,b1,b2,b3,rsdir,nrsdir,nplane,delta)
     REAL(KIND=dp)                            :: wvk(3), a1(3), a2(3), a3(3), &
                                                 b1(3), b2(3), b3(3)
     INTEGER                                  :: nrsdir
     REAL(KIND=dp)                            :: rsdir(4,nrsdir)
     INTEGER                                  :: nplane
     REAL(KIND=dp)                            :: delta
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'bzrduc', &
       routineP = moduleN//':'//routineN
@@ -2975,10 +2897,8 @@ CONTAINS
 
     INTEGER                                  :: i, i1, i2, i3, n1, n2, n3, &
                                                 nn1, nn2, nn3
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: wb(3), wva(3)
 
-    failure = .FALSE.
     IF (inbz(wvk,rsdir,nrsdir,nplane,delta)==yes) RETURN
     !------------------------------------------------------------------------------!
     !     Look around +/- "NZONES" to locate vector
@@ -3020,7 +2940,7 @@ CONTAINS
     !     Fatal error
     WRITE (*,'(A,/,A,3F10.4,A)') ' SUBROUTINE BZRDUC *** FATAL ERROR ***', &
          ' WAVEVECTOR ', wvk, ' COULD NOT BE REDUCED TO THE 1BZ'
-    CPPostcondition(.FALSE.,cp_failure_level,routineP,error,failure)
+    CPABORT("")
 
   END SUBROUTINE bzrduc
 ! *****************************************************************************
@@ -3072,7 +2992,6 @@ CONTAINS
 !> \param nrsdir ...
 !> \param nplane ...
 !> \param delta ...
-!> \param error ...
 !> \par Original Header
 !>         FIND THE VECTORS WHOSE HALVES DEFINE THE 1ST BRILLOUIN ZONE
 !>         OUTPUT:
@@ -3086,14 +3005,13 @@ CONTAINS
 !>         PLANES.
 !>         DELTA      REQUIRED ACCURACY (1.0E-6_dp IS A GOOD VALUE)
 ! *****************************************************************************
-  SUBROUTINE bzdefi(iout,b1,b2,b3,rsdir,nrsdir,nplane,delta,error)
+  SUBROUTINE bzdefi(iout,b1,b2,b3,rsdir,nrsdir,nplane,delta)
     INTEGER                                  :: iout
     REAL(KIND=dp)                            :: b1(3), b2(3), b3(3)
     INTEGER                                  :: nrsdir
     REAL(KIND=dp)                            :: rsdir(4,nrsdir)
     INTEGER                                  :: nplane
     REAL(KIND=dp)                            :: delta
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'bzdefi', &
       routineP = moduleN//':'//routineN
@@ -3101,12 +3019,11 @@ CONTAINS
     INTEGER                                  :: i, i1, i2, i3, j, n, n1, n2, &
                                                 n3, nb1, nb2, nb3, nnb1, &
                                                 nnb2, nnb3
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: b1len, b2len, b3len, bmax, &
                                                 bvec(3), projct
 
-    failure = .FALSE.
-    !------------------------------------------------------------------------------!
+!------------------------------------------------------------------------------!
+
     b1len = b1(1)**2 + b1(2)**2 + b1(3)**2
     b2len = b2(1)**2 + b2(2)**2 + b2(3)**2
     b3len = b3(1)**2 + b3(2)**2 + b3(3)**2
@@ -3166,7 +3083,7 @@ CONTAINS
                    WRITE (iout,'(A)') ' SUBROUTINE BZDEFI *** FATAL ERROR ***'
                    WRITE (iout,'(" TOO MANY PLANES, NRSDIR = ",I5)') nrsdir
                 END IF
-                CPPostcondition(.FALSE.,cp_failure_level,routineP,error,failure)
+                CPABORT("")
                 RETURN
              ENDIF
              DO i = 1, 3

@@ -14,9 +14,8 @@ MODULE ps_wavelet_base
   USE ps_wavelet_fft3d,                ONLY: ctrig,&
                                              ctrig_length,&
                                              fftstp
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -44,7 +43,7 @@ CONTAINS
 !> \param zf& ...
 ! *****************************************************************************
   SUBROUTINE P_PoissonSolver(n1,n2,n3,nd1,nd2,nd3,md1,md2,md3,nproc,iproc,zf&
-       ,scal,hx,hy,hz,mpi_group,error)
+       ,scal,hx,hy,hz,mpi_group)
     INTEGER, INTENT(in)                      :: n1, n2, n3, nd1, nd2, nd3, &
                                                 md1, md2, md3, nproc, iproc
     REAL(KIND=dp), &
@@ -52,12 +51,13 @@ CONTAINS
       INTENT(inout)                          :: zf
     REAL(KIND=dp), INTENT(in)                :: scal, hx, hy, hz
     INTEGER, INTENT(in)                      :: mpi_group
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     INTEGER, PARAMETER                       :: ncache_optimal = 8*1024
 
-    INTEGER :: i, i1, i3, i_all, i_stat, ic1, ic2, ic3, inzee, j, j2, J2stb, &
-      J2stf, j3, Jp2stb, Jp2stf, lot, lzt, ma, mb, ncache, nfft
+    INTEGER                                  :: i, i1, i3, ic1, ic2, ic3, &
+                                                inzee, j, j2, J2stb, J2stf, &
+                                                j3, Jp2stb, Jp2stf, lot, lzt, &
+                                                ma, mb, ncache, nfft
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: after1, after2, after3, &
                                                 before1, before2, before3, &
                                                 now1, now2, now3
@@ -71,14 +71,14 @@ CONTAINS
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :, :, :, :)               :: zmpi1
 
-    IF (nd1.LT.n1/2+1) STOP 'Parallel convolution:ERROR:nd1'
-    IF (nd2.LT.n2/2+1) STOP 'Parallel convolution:ERROR:nd2'
-    IF (nd3.LT.n3/2+1) STOP 'Parallel convolution:ERROR:nd3'
-    IF (md1.LT.n1) STOP 'Parallel convolution:ERROR:md1'
-    IF (md2.LT.n2) STOP 'Parallel convolution:ERROR:md2'
-    IF (md3.LT.n3) STOP 'Parallel convolution:ERROR:md3'
-    IF (MOD(nd3,nproc).NE.0) STOP 'Parallel convolution:ERROR:nd3'
-    IF (MOD(md2,nproc).NE.0) STOP 'Parallel convolution:ERROR:md2'
+    IF (nd1.LT.n1/2+1) CPABORT("Parallel convolution:ERROR:nd1")
+    IF (nd2.LT.n2/2+1) CPABORT("Parallel convolution:ERROR:nd2")
+    IF (nd3.LT.n3/2+1) CPABORT("Parallel convolution:ERROR:nd3")
+    IF (md1.LT.n1) CPABORT("Parallel convolution:ERROR:md1")
+    IF (md2.LT.n2) CPABORT("Parallel convolution:ERROR:md2")
+    IF (md3.LT.n3) CPABORT("Parallel convolution:ERROR:md3")
+    IF (MOD(nd3,nproc).NE.0) CPABORT("Parallel convolution:ERROR:nd3")
+    IF (MOD(md2,nproc).NE.0) CPABORT("Parallel convolution:ERROR:md2")
 
     !defining work arrays dimensions
     ncache=ncache_optimal
@@ -89,46 +89,25 @@ CONTAINS
     IF (MOD(n2,4).EQ.0) lzt=lzt+1 !maybe this is useless
 
     !Allocations
-    ALLOCATE(btrig1(2,ctrig_length),stat=i_all)
-    ALLOCATE(ftrig1(2,ctrig_length),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(after1(7),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(now1(7),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(before1(7),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(btrig2(2,ctrig_length),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(ftrig2(2,ctrig_length),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(after2(7),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(now2(7),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(before2(7),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(btrig3(2,ctrig_length),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(ftrig3(2,ctrig_length),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(after3(7),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(now3(7),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(before3(7),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(zw(2,ncache/4,2),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(zt(2,lzt,n1),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(zmpi2(2,n1,md2/nproc,nd3),stat=i_stat)
-    i_all=i_all+i_stat
-    IF (nproc.GT.1) ALLOCATE(zmpi1(2,n1,md2/nproc,nd3/nproc,nproc),stat=i_stat)
-    IF (i_all+i_stat /= 0) THEN
-       WRITE(*,*)' p_poissonsolver: problem of memory allocation'
-       STOP
-    END IF
+    ALLOCATE(btrig1(2,ctrig_length))
+    ALLOCATE(ftrig1(2,ctrig_length))
+    ALLOCATE(after1(7))
+    ALLOCATE(now1(7))
+    ALLOCATE(before1(7))
+    ALLOCATE(btrig2(2,ctrig_length))
+    ALLOCATE(ftrig2(2,ctrig_length))
+    ALLOCATE(after2(7))
+    ALLOCATE(now2(7))
+    ALLOCATE(before2(7))
+    ALLOCATE(btrig3(2,ctrig_length))
+    ALLOCATE(ftrig3(2,ctrig_length))
+    ALLOCATE(after3(7))
+    ALLOCATE(now3(7))
+    ALLOCATE(before3(7))
+    ALLOCATE(zw(2,ncache/4,2))
+    ALLOCATE(zt(2,lzt,n1))
+    ALLOCATE(zmpi2(2,n1,md2/nproc,nd3))
+    IF (nproc.GT.1) ALLOCATE(zmpi1(2,n1,md2/nproc,nd3/nproc,nproc))
 
     !calculating the FFT work arrays (beware on the HalFFT in n3 dimension)
     CALL ctrig(n3,btrig3,after3,before3,now3,1,ic3)
@@ -154,7 +133,7 @@ CONTAINS
             'convolxc_off:ncache has to be enlarged to be able to hold at' // &
             'least one 1-d FFT of this size even though this will' // &
             'reduce the performance for shorter transform lengths'
-       STOP
+       CPABORT("")
     ENDIF
     DO j2=1,md2/nproc
        !this condition ensures that we manage only the interesting part for the FFT
@@ -208,7 +187,7 @@ CONTAINS
                   'convolxc_off:ncache has to be enlarged to be able to hold at' // &
                   'least one 1-d FFT of this size even though this will' // &
                   'reduce the performance for shorter transform lengths'
-             STOP
+             CPABORT("")
           ENDIF
 
           DO j=1,n2,lot
@@ -248,7 +227,7 @@ CONTAINS
                   'convolxc_off:ncache has to be enlarged to be able to hold at' // &
                   'least one 1-d FFT of this size even though this will' // &
                   'reduce the performance for shorter transform lengths'
-             STOP
+             CPABORT("")
           ENDIF
 
           DO j=1,n1,lot
@@ -365,46 +344,25 @@ CONTAINS
     END DO
 
     !De-allocations
-    DEALLOCATE(btrig1,stat=i_all)
-    DEALLOCATE(ftrig1,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(after1,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(now1,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(before1,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(btrig2,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(ftrig2,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(after2,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(now2,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(before2,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(btrig3,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(ftrig3,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(after3,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(now3,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(before3,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(zmpi2,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(zw,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(zt,stat=i_stat)
-    i_all=i_all+i_stat
-    IF (nproc.GT.1) DEALLOCATE(zmpi1,stat=i_stat)
-    IF (i_all+i_stat /= 0) THEN
-       WRITE(*,*)' p_poissonsolver: problem of memory deallocation'
-       STOP
-    END IF
+    DEALLOCATE(btrig1)
+    DEALLOCATE(ftrig1)
+    DEALLOCATE(after1)
+    DEALLOCATE(now1)
+    DEALLOCATE(before1)
+    DEALLOCATE(btrig2)
+    DEALLOCATE(ftrig2)
+    DEALLOCATE(after2)
+    DEALLOCATE(now2)
+    DEALLOCATE(before2)
+    DEALLOCATE(btrig3)
+    DEALLOCATE(ftrig3)
+    DEALLOCATE(after3)
+    DEALLOCATE(now3)
+    DEALLOCATE(before3)
+    DEALLOCATE(zmpi2)
+    DEALLOCATE(zw)
+    DEALLOCATE(zt)
+    IF (nproc.GT.1) DEALLOCATE(zmpi1)
     !  call timing(iproc,'PSolv_comput  ','OF')
   END SUBROUTINE P_PoissonSolver
 
@@ -877,7 +835,6 @@ CONTAINS
 !> \param scal factor of renormalization of the FFT in order to acheve unitarity
 !>                   and the correct dimension
 !> \param mpi_group ...
-!> \param error ...
 !> \date October 2006
 !> \author S. Goedecker, L. Genovese
 !> \note   As transform lengths most products of the prime factors 2,3,5 are allowed.
@@ -892,7 +849,7 @@ CONTAINS
 !>       GNU General Public License, see http://www.gnu.org/copyleft/gpl.txt . 
 ! *****************************************************************************
   SUBROUTINE S_PoissonSolver(n1,n2,n3,nd1,nd2,nd3,md1,md2,md3,nproc,iproc,pot,zf,&
-       scal,mpi_group,error)
+       scal,mpi_group)
     INTEGER, INTENT(in)                      :: n1, n2, n3, nd1, nd2, nd3, &
                                                 md1, md2, md3, nproc, iproc
     REAL(KIND=dp), &
@@ -903,14 +860,15 @@ CONTAINS
       INTENT(inout)                          :: zf
     REAL(KIND=dp), INTENT(in)                :: scal
     INTEGER, INTENT(in)                      :: mpi_group
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'S_PoissonSolver', &
       routineP = moduleN//':'//routineN
     INTEGER, PARAMETER                       :: ncache_optimal = 8*1024
 
-    INTEGER :: handle, i, i1, i3, i_all, i_stat, ic1, ic2, ic3, inzee, j, j2, &
-      J2stb, J2stf, j3, Jp2stb, Jp2stf, lot, lzt, ma, mb, ncache, nfft
+    INTEGER                                  :: handle, i, i1, i3, ic1, ic2, &
+                                                ic3, inzee, j, j2, J2stb, &
+                                                J2stf, j3, Jp2stb, Jp2stf, &
+                                                lot, lzt, ma, mb, ncache, nfft
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: after1, after2, after3, &
                                                 before1, before2, before3, &
                                                 now1, now2, now3
@@ -928,15 +886,15 @@ CONTAINS
 
     CALL timeset(routineN,handle)
     ! check input
-    IF (MOD(n3,2).NE.0) STOP 'Parallel convolution:ERROR:n3'
-    IF (nd1.LT.n1/2+1) STOP 'Parallel convolution:ERROR:nd1'
-    IF (nd2.LT.n2/2+1) STOP 'Parallel convolution:ERROR:nd2'
-    IF (nd3.LT.n3/2+1) STOP 'Parallel convolution:ERROR:nd3'
-    IF (md1.LT.n1) STOP 'Parallel convolution:ERROR:md1'
-    IF (md2.LT.n2) STOP 'Parallel convolution:ERROR:md2'
-    IF (md3.LT.n3/2) STOP 'Parallel convolution:ERROR:md3'
-    IF (MOD(nd3,nproc).NE.0) STOP 'Parallel convolution:ERROR:nd3'
-    IF (MOD(md2,nproc).NE.0) STOP 'Parallel convolution:ERROR:md2'
+    IF (MOD(n3,2).NE.0) CPABORT("Parallel convolution:ERROR:n3")
+    IF (nd1.LT.n1/2+1) CPABORT("Parallel convolution:ERROR:nd1")
+    IF (nd2.LT.n2/2+1) CPABORT("Parallel convolution:ERROR:nd2")
+    IF (nd3.LT.n3/2+1) CPABORT("Parallel convolution:ERROR:nd3")
+    IF (md1.LT.n1) CPABORT("Parallel convolution:ERROR:md1")
+    IF (md2.LT.n2) CPABORT("Parallel convolution:ERROR:md2")
+    IF (md3.LT.n3/2) CPABORT("Parallel convolution:ERROR:md3")
+    IF (MOD(nd3,nproc).NE.0) CPABORT("Parallel convolution:ERROR:nd3")
+    IF (MOD(md2,nproc).NE.0) CPABORT("Parallel convolution:ERROR:md2")
 
     !defining work arrays dimensions
     ncache=ncache_optimal
@@ -949,50 +907,28 @@ CONTAINS
     IF (MOD(n2,4).EQ.0) lzt=lzt+1 !maybe this is useless
 
     !Allocations
-    ALLOCATE(btrig1(2,ctrig_length),stat=i_all)
-    ALLOCATE(ftrig1(2,ctrig_length),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(after1(7),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(now1(7),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(before1(7),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(btrig2(2,ctrig_length),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(ftrig2(2,ctrig_length),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(after2(7),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(now2(7),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(before2(7),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(btrig3(2,ctrig_length),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(ftrig3(2,ctrig_length),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(after3(7),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(now3(7),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(before3(7),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(zw(2,ncache/4,2),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(zt(2,lzt,n1),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(zmpi2(2,n1,md2/nproc,nd3),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(cosinarr(2,n3/2),stat=i_stat)
-    i_all=i_all+i_stat
+    ALLOCATE(btrig1(2,ctrig_length))
+    ALLOCATE(ftrig1(2,ctrig_length))
+    ALLOCATE(after1(7))
+    ALLOCATE(now1(7))
+    ALLOCATE(before1(7))
+    ALLOCATE(btrig2(2,ctrig_length))
+    ALLOCATE(ftrig2(2,ctrig_length))
+    ALLOCATE(after2(7))
+    ALLOCATE(now2(7))
+    ALLOCATE(before2(7))
+    ALLOCATE(btrig3(2,ctrig_length))
+    ALLOCATE(ftrig3(2,ctrig_length))
+    ALLOCATE(after3(7))
+    ALLOCATE(now3(7))
+    ALLOCATE(before3(7))
+    ALLOCATE(zw(2,ncache/4,2))
+    ALLOCATE(zt(2,lzt,n1))
+    ALLOCATE(zmpi2(2,n1,md2/nproc,nd3))
+    ALLOCATE(cosinarr(2,n3/2))
     IF (nproc.GT.1)  THEN
-       ALLOCATE(zmpi1(2,n1,md2/nproc,nd3/nproc,nproc),stat=i_stat)
+       ALLOCATE(zmpi1(2,n1,md2/nproc,nd3/nproc,nproc))
        zmpi1= 0.0_dp
-    END IF
-    IF (i_all+i_stat /= 0) THEN
-       WRITE(*,*)' s_poissonsolver: problem of memory allocation'
-       STOP
     END IF
     zmpi2 = 0.0_dp
     zw = 0.0_dp
@@ -1032,7 +968,7 @@ CONTAINS
             'convolxc_off:ncache has to be enlarged to be able to hold at' // &
             'least one 1-d FFT of this size even though this will' // &
             'reduce the performance for shorter transform lengths',n1,n2,n3,nd1,nd2,nd3,md1,md2,md3,nproc,iproc
-       STOP
+       CPABORT("")
     ENDIF
 
     DO j2=1,md2/nproc
@@ -1086,7 +1022,7 @@ CONTAINS
                   'convolxc_off:ncache has to be enlarged to be able to hold at' // &
                   'least one 1-d FFT of this size even though this will' // &
                   'reduce the performance for shorter transform lengths'
-             STOP
+             CPABORT("")
           ENDIF
 
           DO j=1,n2,lot
@@ -1126,7 +1062,7 @@ CONTAINS
                   'convolxc_off:ncache has to be enlarged to be able to hold at' // &
                   'least one 1-d FFT of this size even though this will' // &
                   'reduce the performance for shorter transform lengths'
-             STOP
+             CPABORT("")
           ENDIF
 
           DO j=1,n1,lot
@@ -1247,48 +1183,26 @@ CONTAINS
     END DO
 
     !De-allocations
-    DEALLOCATE(btrig1,stat=i_all)
-    DEALLOCATE(ftrig1,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(after1,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(now1,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(before1,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(btrig2,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(ftrig2,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(after2,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(now2,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(before2,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(btrig3,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(ftrig3,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(after3,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(now3,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(before3,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(zmpi2,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(zw,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(zt,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(cosinarr,stat=i_stat)
-    i_all=i_all+i_stat
-    IF (nproc.GT.1) DEALLOCATE(zmpi1,stat=i_stat)
-    IF (i_all+i_stat /= 0) THEN
-       WRITE(*,*)' s_poissonsolver: problem of memory deallocation'
-       STOP
-    END IF
+    DEALLOCATE(btrig1)
+    DEALLOCATE(ftrig1)
+    DEALLOCATE(after1)
+    DEALLOCATE(now1)
+    DEALLOCATE(before1)
+    DEALLOCATE(btrig2)
+    DEALLOCATE(ftrig2)
+    DEALLOCATE(after2)
+    DEALLOCATE(now2)
+    DEALLOCATE(before2)
+    DEALLOCATE(btrig3)
+    DEALLOCATE(ftrig3)
+    DEALLOCATE(after3)
+    DEALLOCATE(now3)
+    DEALLOCATE(before3)
+    DEALLOCATE(zmpi2)
+    DEALLOCATE(zw)
+    DEALLOCATE(zt)
+    DEALLOCATE(cosinarr)
+    IF (nproc.GT.1) DEALLOCATE(zmpi1)
 
     !  call timing(iproc,'PSolv_comput  ','OF')
     CALL timestop(handle)
@@ -1684,7 +1598,6 @@ CONTAINS
 !> \param scal factor of renormalization of the FFT in order to acheve unitarity
 !>                   and the correct dimension 
 !> \param mpi_group ...
-!> \param error ...
 !> \date February 2006
 !> \author S. Goedecker, L. Genovese
 !> \note As transform lengths
@@ -1700,7 +1613,7 @@ CONTAINS
 !>       GNU General Public License, see http://www.gnu.org/copyleft/gpl.txt . 
 ! *****************************************************************************
   SUBROUTINE F_PoissonSolver(n1,n2,n3,nd1,nd2,nd3,md1,md2,md3,nproc,iproc,pot,zf,&
-       scal,mpi_group,error)
+       scal,mpi_group)
     INTEGER, INTENT(in)                      :: n1, n2, n3, nd1, nd2, nd3, &
                                                 md1, md2, md3, nproc, iproc
     REAL(KIND=dp), &
@@ -1711,12 +1624,13 @@ CONTAINS
       INTENT(inout)                          :: zf
     REAL(KIND=dp), INTENT(in)                :: scal
     INTEGER, INTENT(in)                      :: mpi_group
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     INTEGER, PARAMETER                       :: ncache_optimal = 8*1024
 
-    INTEGER :: i, i1, i3, i_all, i_stat, ic1, ic2, ic3, inzee, j, j2, J2stb, &
-      J2stf, j3, Jp2stb, Jp2stf, lot, lzt, ma, mb, ncache, nfft
+    INTEGER                                  :: i, i1, i3, ic1, ic2, ic3, &
+                                                inzee, j, j2, J2stb, J2stf, &
+                                                j3, Jp2stb, Jp2stf, lot, lzt, &
+                                                ma, mb, ncache, nfft
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: after1, after2, after3, &
                                                 before1, before2, before3, &
                                                 now1, now2, now3
@@ -1732,17 +1646,17 @@ CONTAINS
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :, :, :, :)               :: zmpi1
 
-    IF (MOD(n1,2).NE.0) STOP 'Parallel convolution:ERROR:n1'
-    IF (MOD(n2,2).NE.0) STOP 'Parallel convolution:ERROR:n2'
-    IF (MOD(n3,2).NE.0) STOP 'Parallel convolution:ERROR:n3'
-    IF (nd1.LT.n1/2+1) STOP 'Parallel convolution:ERROR:nd1'
-    IF (nd2.LT.n2/2+1) STOP 'Parallel convolution:ERROR:nd2'
-    IF (nd3.LT.n3/2+1) STOP 'Parallel convolution:ERROR:nd3'
-    IF (md1.LT.n1/2) STOP 'Parallel convolution:ERROR:md1'
-    IF (md2.LT.n2/2) STOP 'Parallel convolution:ERROR:md2'
-    IF (md3.LT.n3/2) STOP 'Parallel convolution:ERROR:md3'
-    IF (MOD(nd3,nproc).NE.0) STOP 'Parallel convolution:ERROR:nd3'
-    IF (MOD(md2,nproc).NE.0) STOP 'Parallel convolution:ERROR:md2'
+    IF (MOD(n1,2).NE.0) CPABORT("Parallel convolution:ERROR:n1")
+    IF (MOD(n2,2).NE.0) CPABORT("Parallel convolution:ERROR:n2")
+    IF (MOD(n3,2).NE.0) CPABORT("Parallel convolution:ERROR:n3")
+    IF (nd1.LT.n1/2+1) CPABORT("Parallel convolution:ERROR:nd1")
+    IF (nd2.LT.n2/2+1) CPABORT("Parallel convolution:ERROR:nd2")
+    IF (nd3.LT.n3/2+1) CPABORT("Parallel convolution:ERROR:nd3")
+    IF (md1.LT.n1/2) CPABORT("Parallel convolution:ERROR:md1")
+    IF (md2.LT.n2/2) CPABORT("Parallel convolution:ERROR:md2")
+    IF (md3.LT.n3/2) CPABORT("Parallel convolution:ERROR:md3")
+    IF (MOD(nd3,nproc).NE.0) CPABORT("Parallel convolution:ERROR:nd3")
+    IF (MOD(md2,nproc).NE.0) CPABORT("Parallel convolution:ERROR:md2")
 
     !defining work arrays dimensions
 
@@ -1753,49 +1667,27 @@ CONTAINS
     IF (MOD(n2/2,4).EQ.0) lzt=lzt+1
 
     !Allocations
-    ALLOCATE(btrig1(2,ctrig_length),stat=i_all)
-    ALLOCATE(ftrig1(2,ctrig_length),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(after1(7),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(now1(7),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(before1(7),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(btrig2(2,ctrig_length),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(ftrig2(2,ctrig_length),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(after2(7),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(now2(7),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(before2(7),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(btrig3(2,ctrig_length),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(ftrig3(2,ctrig_length),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(after3(7),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(now3(7),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(before3(7),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(zw(2,ncache/4,2),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(zt(2,lzt,n1),stat=i_stat)
-    i_all=i_all+i_stat
-    ALLOCATE(zmpi2(2,n1,md2/nproc,nd3),stat=i_stat)
+    ALLOCATE(btrig1(2,ctrig_length))
+    ALLOCATE(ftrig1(2,ctrig_length))
+    ALLOCATE(after1(7))
+    ALLOCATE(now1(7))
+    ALLOCATE(before1(7))
+    ALLOCATE(btrig2(2,ctrig_length))
+    ALLOCATE(ftrig2(2,ctrig_length))
+    ALLOCATE(after2(7))
+    ALLOCATE(now2(7))
+    ALLOCATE(before2(7))
+    ALLOCATE(btrig3(2,ctrig_length))
+    ALLOCATE(ftrig3(2,ctrig_length))
+    ALLOCATE(after3(7))
+    ALLOCATE(now3(7))
+    ALLOCATE(before3(7))
+    ALLOCATE(zw(2,ncache/4,2))
+    ALLOCATE(zt(2,lzt,n1))
+    ALLOCATE(zmpi2(2,n1,md2/nproc,nd3))
     zmpi2=1.0E99_dp ! init mpi'ed buffers to silence warnings under valgrind
-    i_all=i_all+i_stat
-    ALLOCATE(cosinarr(2,n3/2),stat=i_stat)
-    i_all=i_all+i_stat
-    IF (nproc.GT.1) ALLOCATE(zmpi1(2,n1,md2/nproc,nd3/nproc,nproc),stat=i_stat)
-    IF (i_all+i_stat /= 0) THEN
-       WRITE(*,*)' f_poissonsolver: problem of memory allocation'
-       STOP
-    END IF
+    ALLOCATE(cosinarr(2,n3/2))
+    IF (nproc.GT.1) ALLOCATE(zmpi1(2,n1,md2/nproc,nd3/nproc,nproc))
 
     !calculating the FFT work arrays (beware on the HalFFT in n3 dimension)
     CALL ctrig(n3/2,btrig3,after3,before3,now3,1,ic3)
@@ -1828,7 +1720,7 @@ CONTAINS
             'convolxc_on:ncache has to be enlarged to be able to hold at' // &
             'least one 1-d FFT of this size even though this will' // &
             'reduce the performance for shorter transform lengths'
-       STOP
+       CPABORT("")
     ENDIF
 
     DO j2=1,md2/nproc
@@ -1885,7 +1777,7 @@ CONTAINS
                   'convolxc_on:ncache has to be enlarged to be able to hold at' // &
                   'least one 1-d FFT of this size even though this will' // &
                   'reduce the performance for shorter transform lengths'
-             STOP
+             CPABORT("")
           ENDIF
 
           DO j=1,n2/2,lot
@@ -1925,7 +1817,7 @@ CONTAINS
                   'convolxc_on:ncache has to be enlarged to be able to hold at' // &
                   'least one 1-d FFT of this size even though this will' // &
                   'reduce the performance for shorter transform lengths'
-             STOP
+             CPABORT("")
           ENDIF
 
           DO j=1,n1,lot
@@ -2045,48 +1937,26 @@ CONTAINS
     END DO
 
     !De-allocations
-    DEALLOCATE(btrig1,stat=i_all)
-    DEALLOCATE(ftrig1,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(after1,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(now1,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(before1,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(btrig2,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(ftrig2,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(after2,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(now2,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(before2,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(btrig3,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(ftrig3,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(after3,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(now3,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(before3,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(zmpi2,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(zw,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(zt,stat=i_stat)
-    i_all=i_all+i_stat
-    DEALLOCATE(cosinarr,stat=i_stat)
-    i_all=i_all+i_stat
-    IF (nproc.GT.1) DEALLOCATE(zmpi1,stat=i_stat)
-    IF (i_all+i_stat /= 0) THEN
-       WRITE(*,*)' f_poissonsolver: problem of memory deallocation'
-       STOP
-    END IF
+    DEALLOCATE(btrig1)
+    DEALLOCATE(ftrig1)
+    DEALLOCATE(after1)
+    DEALLOCATE(now1)
+    DEALLOCATE(before1)
+    DEALLOCATE(btrig2)
+    DEALLOCATE(ftrig2)
+    DEALLOCATE(after2)
+    DEALLOCATE(now2)
+    DEALLOCATE(before2)
+    DEALLOCATE(btrig3)
+    DEALLOCATE(ftrig3)
+    DEALLOCATE(after3)
+    DEALLOCATE(now3)
+    DEALLOCATE(before3)
+    DEALLOCATE(zmpi2)
+    DEALLOCATE(zw)
+    DEALLOCATE(zt)
+    DEALLOCATE(cosinarr)
+    IF (nproc.GT.1) DEALLOCATE(zmpi1)
 
   END SUBROUTINE F_PoissonSolver
 

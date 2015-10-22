@@ -30,9 +30,8 @@ MODULE kg_vertex_coloring_methods
                                              valt
   USE kinds,                           ONLY: int_4,&
                                              int_8
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -257,29 +256,6 @@ CONTAINS
 
   END SUBROUTINE
 
-! *****************************************************************************
-!> \brief ...
-!> \param heap ...
-!> \param nnodes ...
-!> \param error ...
-! *****************************************************************************
-  SUBROUTINE kg_heap_new(heap, nnodes, error)
-    TYPE(heap_t), INTENT(OUT)                :: heap
-    INTEGER                                  :: nnodes
-    TYPE(cp_error_type), INTENT(inout)       :: error
-
-    CHARACTER(LEN=*), PARAMETER :: routineN = 'kg_heap_new', &
-      routineP = moduleN//':'//routineN
-
-    LOGICAL                                  :: failure, heap_error
-
-    failure=.FALSE.
-
-    CALL heap_new(heap, nnodes, heap_error)
-    CALL cp_assert (.NOT. heap_error, cp_fatal_level, cp_internal_error,&
-         routineP, "Error creating heap.", error=error)
-
-  END SUBROUTINE
 
 ! *****************************************************************************
 !> \brief ...
@@ -291,8 +267,9 @@ CONTAINS
     INTEGER, INTENT(IN)                      :: dsat, degree
     INTEGER(KIND=valt)                       :: value
 
-    INTEGER, PARAMETER                       :: huge_4 = HUGE(int_4) 
+    INTEGER, PARAMETER                       :: huge_4 = 2_int_4**30
 
+!   INTEGER, PARAMETER                       :: huge_4 = HUGE(0_int_4) ! PR67219 workaround
 ! we actually need a max_heap
 
     value = (huge_4 - INT(dsat,KIND=int_8)) * huge_4 + huge_4-degree
@@ -303,13 +280,11 @@ CONTAINS
 !> \brief ...
 !> \param heap ...
 !> \param graph ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE kg_heap_fill(heap, graph, error)
+  SUBROUTINE kg_heap_fill(heap, graph)
     TYPE(heap_t), INTENT(INOUT)              :: heap
     TYPE(vertex_p_type), DIMENSION(:), &
       INTENT(IN), POINTER                    :: graph
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'kg_heap_fill', &
       routineP = moduleN//':'//routineN
@@ -317,9 +292,7 @@ CONTAINS
     INTEGER                                  :: i, nnodes
     INTEGER(kind=valt), ALLOCATABLE, &
       DIMENSION(:)                           :: values
-    LOGICAL                                  :: failure, heap_error
-
-    failure = .FALSE.
+    LOGICAL                                  :: heap_error
 
     nnodes = SIZE(graph)
 
@@ -331,8 +304,8 @@ CONTAINS
 
     ! fill the heap
     CALL heap_fill (heap, values, heap_error)
-    CALL cp_assert (.NOT. heap_error, cp_warning_level, cp_internal_error,&
-         routineP, "Error initially filling heap.", error=error)
+    IF(heap_error)&
+       CPWARN("Error initially filling heap.")
 
     DEALLOCATE (values)
 
@@ -341,47 +314,21 @@ CONTAINS
 ! *****************************************************************************
 !> \brief ...
 !> \param heap ...
-!> \param error ...
-! *****************************************************************************
-  SUBROUTINE kg_heap_release(heap, error)
-    TYPE(heap_t)                             :: heap
-    TYPE(cp_error_type), INTENT(inout)       :: error
-
-    CHARACTER(LEN=*), PARAMETER :: routineN = 'kg_heap_release', &
-      routineP = moduleN//':'//routineN
-
-    LOGICAL                                  :: failure, heap_error
-
-    failure=.FALSE.
-
-    CALL heap_release(heap, heap_error)
-    CALL cp_assert (.NOT. heap_error, cp_warning_level, cp_internal_error,&
-         routineP, "Error releasing heap.", error=error)
-
-  END SUBROUTINE
-
-! *****************************************************************************
-!> \brief ...
-!> \param heap ...
 !> \param key ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE kg_heap_pop(heap, key, error)
+  SUBROUTINE kg_heap_pop(heap, key)
     TYPE(heap_t)                             :: heap
     INTEGER, INTENT(OUT)                     :: key
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'kg_heap_pop', &
       routineP = moduleN//':'//routineN
 
     INTEGER(KIND=valt)                       :: value
-    LOGICAL                                  :: failure, found, heap_error
-
-    failure=.FALSE.
+    LOGICAL                                  :: found, heap_error
 
     CALL heap_pop (heap, key, value, found, heap_error)
-    CALL cp_assert (.NOT. heap_error, cp_warning_level, cp_internal_error,&
-         routineP, "Error getting topmost heap element.", error=error)
+    IF(heap_error)&
+       CPWARN("Error getting topmost heap element.")
 
   END SUBROUTINE
 
@@ -390,13 +337,11 @@ CONTAINS
 !> \param heap ...
 !> \param key ...
 !> \param value ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE kg_heap_reset_node(heap, key, value, error)
+  SUBROUTINE kg_heap_reset_node(heap, key, value)
     TYPE(heap_t)                             :: heap
     INTEGER(KIND=keyt), INTENT(IN)           :: key
     INTEGER(KIND=valt), INTENT(IN)           :: value
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'kg_heap_reset_node', &
       routineP = moduleN//':'//routineN
@@ -404,8 +349,8 @@ CONTAINS
     LOGICAL                                  :: heap_error
 
     CALL heap_reset_node (heap, key, value, heap_error)
-    CALL cp_assert (.NOT. heap_error, cp_warning_level, cp_internal_error,&
-         routineP, "Error changing value of heap element.", error=error)
+    IF(heap_error)&
+       CPWARN("Error changing value of heap element.")
 
   END SUBROUTINE
 
@@ -413,12 +358,10 @@ CONTAINS
 !> \brief ...
 !> \param heap ...
 !> \param node ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE kg_update_node(heap, node, error)
+  SUBROUTINE kg_update_node(heap, node)
     TYPE(heap_t)                             :: heap
     TYPE(vertex), INTENT(IN), POINTER        :: node
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'kg_update_node', &
       routineP = moduleN//':'//routineN
@@ -436,7 +379,7 @@ CONTAINS
 
       value = kg_get_value(dsat, degree)
 
-      CALL kg_heap_reset_node(heap, id, value, error)
+      CALL kg_heap_reset_node(heap, id, value)
 
     END IF
 
@@ -448,14 +391,12 @@ CONTAINS
 !> \param kg_env ...
 !> \param graph ...
 !> \param ncolors ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE kg_dsatur(kg_env, graph, ncolors, error)
+  SUBROUTINE kg_dsatur(kg_env, graph, ncolors)
     TYPE(kg_environment_type), POINTER       :: kg_env
     TYPE(vertex_p_type), DIMENSION(:), &
       POINTER                                :: graph
     INTEGER(KIND=int_4), INTENT(OUT)         :: ncolors
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'kg_dsatur', &
       routineP = moduleN//':'//routineN
@@ -463,12 +404,9 @@ CONTAINS
     INTEGER                                  :: color_limit, handle, i, j, &
                                                 key, maxdegree, nneighbors, &
                                                 nnodes
-    LOGICAL                                  :: failure
     LOGICAL, ALLOCATABLE, DIMENSION(:)       :: color_present
     TYPE(heap_t)                             :: heap
     TYPE(vertex), POINTER                    :: neighbor, this
-
-    failure=.FALSE.
 
     CALL timeset(routineN,handle)
 
@@ -492,13 +430,13 @@ CONTAINS
     ELSE
 
       ! allocate and fill the heap
-      CALL kg_heap_new(heap, nnodes, error)
+      CALL heap_new(heap, nnodes)
 
-      CALL kg_heap_fill(heap, graph, error)
+      CALL kg_heap_fill(heap, graph)
 
       DO WHILE (heap%n>0)
 
-        CALL kg_heap_pop(heap, key, error)
+        CALL kg_heap_pop(heap, key)
 
         this => graph(key)%vertex
 
@@ -525,7 +463,7 @@ CONTAINS
           neighbor%color_present(this%color)=.TRUE.
           neighbor%dsat = neighbor%dsat + 1
           IF(neighbor%color/=0) CYCLE
-          CALL kg_update_node(heap, neighbor, error)
+          CALL kg_update_node(heap, neighbor)
 
         END DO
 
@@ -550,7 +488,7 @@ CONTAINS
       END DO
 
       ! release the heap
-      CALL kg_heap_release(heap, error)
+      CALL heap_release(heap)
 
     END IF
 
@@ -749,31 +687,28 @@ CONTAINS
 !> \param pairs ...
 !> \param ncolors ...
 !> \param color_of_node ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE kg_vertex_coloring(kg_env, pairs, ncolors, color_of_node, error)
+  SUBROUTINE kg_vertex_coloring(kg_env, pairs, ncolors, color_of_node)
     TYPE(kg_environment_type), POINTER       :: kg_env
     INTEGER(KIND=int_4), ALLOCATABLE, &
       DIMENSION(:, :), INTENT(IN)            :: pairs
     INTEGER(KIND=int_4), INTENT(OUT)         :: ncolors
     INTEGER(KIND=int_4), ALLOCATABLE, &
       DIMENSION(:), INTENT(out)              :: color_of_node
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'kg_vertex_coloring', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: color, handle, i, nnodes, &
                                                 unit_nr
-    LOGICAL                                  :: failure, valid
+    LOGICAL                                  :: valid
     TYPE(cp_logger_type), POINTER            :: logger
     TYPE(vertex_p_type), DIMENSION(:), &
       POINTER                                :: graph
 
-    failure = .FALSE.
+! get a useful output_unit
 
-    ! get a useful output_unit
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
     IF (logger%para_env%mepos==logger%para_env%source) THEN
        unit_nr=cp_logger_get_default_unit_nr(logger,local=.TRUE.)
     ELSE
@@ -790,18 +725,17 @@ CONTAINS
        CALL color_graph_greedy(graph, kg_env%maxdegree, ncolors) 
     CASE(kg_color_dsatur)
        ! color with max degree of saturation
-       CALL kg_dsatur(kg_env, graph, ncolors, error)
+       CALL kg_dsatur(kg_env, graph, ncolors)
     CASE DEFAULT
-       CALL cp_assert (.FALSE., cp_fatal_level, cp_internal_error,&
-            routineP, "Coloring method not known.", error=error)
+       CPABORT("Coloring method not known.")
     END SELECT
 
     CALL kg_pair_switching(graph,ncolors)
 
     valid=.FALSE.
     CALL check_coloring(graph, valid)
-    CALL cp_assert (valid, cp_fatal_level, cp_internal_error,&
-         routineP, "Coloring not valid.", error=error)
+    IF(.NOT.valid)&
+       CPABORT("Coloring not valid.")
 
     nnodes = SIZE(kg_env%molecule_set)
 

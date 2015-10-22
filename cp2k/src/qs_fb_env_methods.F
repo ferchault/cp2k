@@ -26,22 +26,33 @@ MODULE qs_fb_env_methods
        cp_dbcsr_type, dbcsr_type_no_symmetry
   USE cp_dbcsr_operations,             ONLY: copy_dbcsr_to_fm
   USE cp_fm_basic_linalg,              ONLY: cp_fm_gemm,&
-                                             cp_fm_triangular_invert
-  USE cp_fm_cholesky,                  ONLY: cp_fm_cholesky_decompose
+                                             cp_fm_symm,&
+                                             cp_fm_triangular_invert,&
+                                             cp_fm_triangular_multiply,&
+                                             cp_fm_upper_to_full
+  USE cp_fm_cholesky,                  ONLY: cp_fm_cholesky_decompose,&
+                                             cp_fm_cholesky_reduce,&
+                                             cp_fm_cholesky_restore
+  USE cp_fm_diag,                      ONLY: choose_eigv_solver,&
+                                             cp_fm_power
   USE cp_fm_struct,                    ONLY: cp_fm_struct_create,&
                                              cp_fm_struct_release,&
                                              cp_fm_struct_type
   USE cp_fm_types,                     ONLY: cp_fm_create,&
                                              cp_fm_release,&
                                              cp_fm_set_all,&
+                                             cp_fm_to_fm,&
                                              cp_fm_type
+  USE cp_gemm_interface,               ONLY: cp_gemm
   USE cp_output_handling,              ONLY: cp_print_key_finished_output,&
                                              cp_print_key_unit_nr
   USE cp_para_types,                   ONLY: cp_para_env_type
   USE cp_units,                        ONLY: cp_unit_from_cp2k
-  USE input_constants,                 ONLY: cholesky_inverse,&
-                                             use_aux_fit_basis_set,&
-                                             use_orb_basis_set
+  USE input_constants,                 ONLY: cholesky_dbcsr,&
+                                             cholesky_inverse,&
+                                             cholesky_off,&
+                                             cholesky_reduce,&
+                                             cholesky_restore
   USE input_section_types,             ONLY: section_vals_get_subs_vals,&
                                              section_vals_type,&
                                              section_vals_val_get
@@ -87,15 +98,14 @@ MODULE qs_fb_env_methods
                                              get_mo_set,&
                                              init_mo_set,&
                                              mo_set_p_type,&
+                                             mo_set_type,&
                                              set_mo_set
-  USE qs_scf_methods,                  ONLY: eigensolver
   USE qs_scf_types,                    ONLY: qs_scf_env_type
   USE scf_control_types,               ONLY: scf_control_type
   USE string_utilities,                ONLY: compress,&
                                              uppercase
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -121,7 +131,6 @@ CONTAINS
 !> \param matrix_s  : DBCSR system (unfiltered) input overlap matrix
 !> \param scf_section : SCF input section
 !> \param diis_step : whether we are doing a DIIS step
-!> \param error : cp2k error container
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
   SUBROUTINE fb_env_do_diag(fb_env, &
@@ -129,15 +138,13 @@ CONTAINS
                             matrix_ks, &
                             matrix_s, &
                             scf_section, &
-                            diis_step, &
-                            error)
+                            diis_step)
     TYPE(fb_env_obj), INTENT(INOUT)          :: fb_env
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(cp_dbcsr_p_type), DIMENSION(:), &
       POINTER                                :: matrix_ks, matrix_s
     TYPE(section_vals_type), POINTER         :: scf_section
     LOGICAL, INTENT(INOUT)                   :: diis_step
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'fb_env_do_diag', &
       routineP = moduleN//':'//routineN
@@ -145,14 +152,14 @@ CONTAINS
     CHARACTER(len=2)                         :: spin_string
     CHARACTER(len=default_string_length)     :: name
     INTEGER :: filtered_nfullrowsORcols_total, handle, homo_filtered, ispin, &
-      lfomo_filtered, my_nmo, nelectron, nmo, nmo_filtered, nspin, &
-      original_nfullrowsORcols_total, stat
+      lfomo_filtered, my_nmo, ndep, nelectron, nmo, nmo_filtered, nspin, &
+      original_nfullrowsORcols_total
     INTEGER, DIMENSION(:), POINTER           :: filtered_rowORcol_block_sizes,&
                                                 original_rowORcol_block_sizes
-    LOGICAL                                  :: collective_com, failure, &
-                                                use_jacobi
-    REAL(kind=dp) :: diis_error, eps_diis, fermi_level, filter_temp, &
-      flexible_electron_count, KTS_filtered, maxocc, mu_filtered
+    LOGICAL                                  :: collective_com
+    REAL(kind=dp) :: diis_error, eps_default, eps_diis, eps_eigval, &
+      fermi_level, filter_temp, flexible_electron_count, KTS_filtered, &
+      maxocc, mu_filtered
     REAL(KIND=dp), DIMENSION(:), POINTER     :: eigenvalues, &
                                                 eigenvalues_filtered, occ, &
                                                 occ_filtered
@@ -166,7 +173,8 @@ CONTAINS
     TYPE(cp_dbcsr_type), POINTER             :: matrix_filtered_p
     TYPE(cp_fm_struct_type), POINTER         :: filter_fm_struct, fm_struct
     TYPE(cp_fm_type), POINTER :: fm_matrix_filter, fm_matrix_filtered_ks, &
-      fm_matrix_filtered_s, fm_matrix_work, mo_coeff, mo_coeff_filtered
+      fm_matrix_filtered_s, fm_matrix_ortho, fm_matrix_work, mo_coeff, &
+      mo_coeff_filtered
     TYPE(cp_para_env_type), POINTER          :: para_env
     TYPE(fb_atomic_halo_list_obj)            :: atomic_halos
     TYPE(fb_trial_fns_obj)                   :: trial_fns
@@ -182,7 +190,6 @@ CONTAINS
 
     CALL timeset(routineN, handle)
 
-    failure = .FALSE.
 
     NULLIFY(scf_env, scf_control, para_env, blacs_env, particle_set)
     NULLIFY(eigenvalues, eigenvalues_filtered, occ, occ_filtered)
@@ -192,7 +199,7 @@ CONTAINS
     NULLIFY(fm_struct, filter_fm_struct)
     NULLIFY(fm_matrix_filter, fm_matrix_filtered_s, &
             fm_matrix_filtered_ks, fm_matrix_work, &
-            mo_coeff_filtered, mo_coeff)
+            fm_matrix_ortho, mo_coeff_filtered, mo_coeff)
     ! NULLIFY(sab_orb)
     CALL fb_atomic_halo_list_nullify(atomic_halos)
     CALL fb_trial_fns_nullify(trial_fns)
@@ -205,8 +212,7 @@ CONTAINS
                     para_env=para_env, &
                     blacs_env=blacs_env, &
                     particle_set=particle_set, &
-                    mos=mos, &
-                    error=error)
+                    mos=mos)
 
     nspin = SIZE(matrix_ks)
 
@@ -216,54 +222,33 @@ CONTAINS
 
     DO ispin = 1, nspin
        CALL copy_dbcsr_to_fm(matrix_ks(ispin)%matrix, &
-                             scf_env%scf_work1(ispin)%matrix, &
-                             error=error)
+                             scf_env%scf_work1(ispin)%matrix)
     END DO
 
     eps_diis = scf_control%eps_diis
+    eps_eigval = EPSILON(0.0_dp)
 
     IF (scf_env%iter_count > 1 .AND. .NOT. scf_env%skip_diis) THEN
        CALL qs_diis_b_step(scf_env%scf_diis_buffer, mos, scf_env%scf_work1, &
                            scf_env%scf_work2, scf_env%iter_delta, &
                            diis_error, diis_step, eps_diis, scf_control%nmixing, &
-                           s_matrix=matrix_s, scf_section=scf_section, &
-                           error=error)
+                           s_matrix=matrix_s, scf_section=scf_section)
     ELSE
        diis_step = .FALSE.
     END IF
 
-    ! IF ((scf_env%iter_count > 1).AND.&
-    !     (scf_env%iter_delta < scf_control%diagonalization%eps_jacobi)) THEN
-    !   use_jacobi = .TRUE.
-    ! ELSE
-    !   use_jacobi = .FALSE.
-    ! END IF
-    use_jacobi = .FALSE.
-
     IF (diis_step) THEN
        scf_env%iter_param = diis_error
-       IF (use_jacobi) THEN
-          scf_env%iter_method = "DIIS/Jacobi"
-       ELSE
-          scf_env%iter_method = "DIIS/Diag."
-       END IF
+       scf_env%iter_method = "DIIS/Filter"
     ELSE
-       IF(scf_env%mixing_method ==0) THEN
-          scf_env%iter_method = "NoMix/Diag."
-       ELSE IF(scf_env%mixing_method ==1) THEN
+       IF (scf_env%mixing_method == 0) THEN
+          scf_env%iter_method = "NoMix/Filter"
+       ELSE IF(scf_env%mixing_method == 1) THEN
           scf_env%iter_param = scf_env%p_mix_alpha
-          IF (use_jacobi) THEN
-             scf_env%iter_method = "P_Mix/Jacobi"
-          ELSE
-             scf_env%iter_method = "P_Mix/Diag."
-          END IF
-       ELSEIF(scf_env%mixing_method>1) THEN
+          scf_env%iter_method = "P_Mix/Filter"
+       ELSE IF(scf_env%mixing_method > 1) THEN
           scf_env%iter_param = scf_env%mixing_store%alpha
-          IF (use_jacobi) THEN
-             scf_env%iter_method = TRIM(scf_env%mixing_store%iter_method)//"/Jacobi"
-          ELSE
-             scf_env%iter_method = TRIM(scf_env%mixing_store%iter_method)//"/Diag."
-          END IF
+          scf_env%iter_method = TRIM(scf_env%mixing_store%iter_method)//"/Filter"
        END IF
     END IF
 
@@ -271,26 +256,20 @@ CONTAINS
     ! Construct Filter Matrix
     ! ----------------------------------------------------------------------
 
-    ! get filter temperature
     CALL fb_env_get(fb_env=fb_env, &
                     filter_temperature=filter_temp, &
-                    error=error)
-
-    ! get atomic halos
-    CALL fb_env_get(fb_env=fb_env, &
                     atomic_halos=atomic_halos, &
-                    error=error)
+                    eps_default=eps_default)
 
     ! construct trial functions
     CALL get_mo_set(mo_set=mos(1)%mo_set, maxocc=maxocc)
-    CALL fb_env_build_trial_fns_auto(fb_env, qs_env, maxocc, error)
+    CALL fb_env_build_trial_fns_auto(fb_env, qs_env, maxocc)
     CALL fb_env_get(fb_env=fb_env, &
-                    trial_fns=trial_fns, &
-                    error=error)
+                    trial_fns=trial_fns)
 
     ! allocate filter matrix (matrix_filter(ispin)%matrix are
     ! nullified by cp_dbcsr_allocate_matrix_set)
-    CALL cp_dbcsr_allocate_matrix_set(matrix_filter, nspin, error)
+    CALL cp_dbcsr_allocate_matrix_set(matrix_filter, nspin)
     DO ispin = 1, nspin
        ! get system-wide fermi energy and occupancy, we use this to
        ! define the filter function used for the filter matrix
@@ -306,12 +285,12 @@ CONTAINS
        !
        NULLIFY(matrix_ks_desymm%matrix)
        ALLOCATE(matrix_ks_desymm%matrix)
-       CALL cp_dbcsr_init(matrix_ks_desymm%matrix, error)
-       CALL cp_dbcsr_desymmetrize(matrix_ks(ispin)%matrix, matrix_ks_desymm%matrix, error)
+       CALL cp_dbcsr_init(matrix_ks_desymm%matrix)
+       CALL cp_dbcsr_desymmetrize(matrix_ks(ispin)%matrix, matrix_ks_desymm%matrix)
        NULLIFY(matrix_s_desymm%matrix)
        ALLOCATE(matrix_s_desymm%matrix)
-       CALL cp_dbcsr_init(matrix_s_desymm%matrix, error)
-       CALL cp_dbcsr_desymmetrize(matrix_s(1)%matrix, matrix_s_desymm%matrix, error)
+       CALL cp_dbcsr_init(matrix_s_desymm%matrix)
+       CALL cp_dbcsr_desymmetrize(matrix_s(1)%matrix, matrix_s_desymm%matrix)
        ! ----------------------------------------------------------------------
 
        ! get filter matrix name
@@ -331,13 +310,12 @@ CONTAINS
        !                       fermi_level=fermi_level, &
        !                       filter_temp=filter_temp, &
        !                       name=name, &
-       !                       filter_mat=matrix_filter(ispin)%matrix, &
-       !                       error=error)
+       !                       filter_mat=matrix_filter(ispin)%matrix,
+       !                       tolerance=eps_default)
 !END:ORIG:LT:2015/01/2
 !BEG:REPL:LT:2015/01/2
        CALL fb_env_get(fb_env=fb_env, &
-                       collective_com=collective_com, &
-                       error=error)
+                       collective_com=collective_com)
        IF (collective_com) THEN
           CALL fb_fltrmat_build_2(H_mat=matrix_ks_desymm%matrix, &
                                   S_mat=matrix_s_desymm%matrix, &
@@ -349,7 +327,7 @@ CONTAINS
                                   filter_temp=filter_temp, &
                                   name=name, &
                                   filter_mat=matrix_filter(ispin)%matrix, &
-                                  error=error)
+                                  tolerance=eps_default)
        ELSE
           CALL fb_fltrmat_build(H_mat=matrix_ks_desymm%matrix, &
                                 S_mat=matrix_s_desymm%matrix, &
@@ -361,14 +339,14 @@ CONTAINS
                                 filter_temp=filter_temp, &
                                 name=name, &
                                 filter_mat=matrix_filter(ispin)%matrix, &
-                                error=error)
+                                tolerance=eps_default)
        END IF
 !END:REPL:LT:2015/01/2
 
        ! ----------------------------------------------------------------------
        ! Deallocate the desymmetrised matrices
-       CALL cp_dbcsr_release(matrix_ks_desymm%matrix, error)
-       CALL cp_dbcsr_release(matrix_s_desymm%matrix, error)
+       CALL cp_dbcsr_release(matrix_ks_desymm%matrix)
+       CALL cp_dbcsr_release(matrix_s_desymm%matrix)
        DEALLOCATE(matrix_ks_desymm%matrix)
        DEALLOCATE(matrix_s_desymm%matrix)
        ! ----------------------------------------------------------------------
@@ -394,8 +372,7 @@ CONTAINS
     ! filter diagonalisation works on a smaller basis set, and thus
     ! requires a new mo_set (molecular orbitals | eigenvectors) and
     ! the corresponding matrix pools for the eigenvector coefficients
-    ALLOCATE(mos_filtered(nspin), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    ALLOCATE(mos_filtered(nspin))
     DO ispin = 1, nspin
        CALL get_mo_set(mo_set=mos(ispin)%mo_set, &
                        maxocc=maxocc, &
@@ -408,19 +385,17 @@ CONTAINS
                             nelectron=nelectron, &
                             n_el_f=REAL(nelectron, dp), &
                             maxocc=maxocc, &
-                            flexible_electron_count=flexible_electron_count, &
-                            error=error)
+                            flexible_electron_count=flexible_electron_count)
     END DO ! ispin
-    CALL mpools_create(mpools=my_mpools, error=error)
+    CALL mpools_create(mpools=my_mpools)
     CALL mpools_rebuild_fm_pools(mpools=my_mpools,&
                                  mos=mos_filtered,&
                                  blacs_env=blacs_env,&
-                                 para_env=para_env,&
-                                 error=error)
+                                 para_env=para_env)
 
     ! create DBCSR filtered KS matrix, this is reused for each spin
     ! channel
-    CALL cp_dbcsr_init(matrix_filtered_ks, error=error)
+    CALL cp_dbcsr_init(matrix_filtered_ks)
     ! both row_blk_size and col_blk_size should be that of
     ! col_blk_size of the filter matrix
     CALL cp_dbcsr_create(matrix=matrix_filtered_ks, &
@@ -429,10 +404,8 @@ CONTAINS
                          matrix_type=dbcsr_type_no_symmetry, &
                          row_blk_size=filtered_rowORcol_block_sizes, &
                          col_blk_size=filtered_rowORcol_block_sizes, &
-                         nblks=0, &
-                         nze=0, &
-                         error=error)
-    CALL cp_dbcsr_finalize(matrix_filtered_ks, error=error)
+                         nze=0)
+    CALL cp_dbcsr_finalize(matrix_filtered_ks)
 
     ! create DBCSR filtered S (overlap) matrix. Note that
     ! matrix_s(1)%matrix is the orginal overlap matrix---the rest in
@@ -441,7 +414,7 @@ CONTAINS
     ! matrix, and does depend on spin, the filtered S also becomes
     ! spin dependent. Nevertheless this matrix is reused for each spin
     ! channel
-    CALL cp_dbcsr_init(matrix_filtered_s, error=error)
+    CALL cp_dbcsr_init(matrix_filtered_s)
     ! both row_blk_size and col_blk_size should be that of
     ! col_blk_size of the filter matrix
     CALL cp_dbcsr_create(matrix=matrix_filtered_s, &
@@ -450,13 +423,11 @@ CONTAINS
                          matrix_type=dbcsr_type_no_symmetry, &
                          row_blk_size=filtered_rowORcol_block_sizes, &
                          col_blk_size=filtered_rowORcol_block_sizes, &
-                         nblks=0, &
-                         nze=0, &
-                         error=error)
-    CALL cp_dbcsr_finalize(matrix_filtered_s, error=error)
+                         nze=0)
+    CALL cp_dbcsr_finalize(matrix_filtered_s)
 
     ! create temporary matrix for constructing filtered KS and S
-    CALL cp_dbcsr_init(matrix_tmp, error=error)
+    CALL cp_dbcsr_init(matrix_tmp)
     ! the temporary matrix won't be square
     CALL cp_dbcsr_create(matrix=matrix_tmp, &
                          name=TRIM("TEMPORARY_MATRIX"), &
@@ -464,32 +435,28 @@ CONTAINS
                          matrix_type=dbcsr_type_no_symmetry, &
                          row_blk_size=original_rowORcol_block_sizes, &
                          col_blk_size=filtered_rowORcol_block_sizes, &
-                         nblks=0, &
-                         nze=0, &
-                         error=error)
-    CALL cp_dbcsr_finalize(matrix_tmp, error=error)
+                         nze=0)
+    CALL cp_dbcsr_finalize(matrix_tmp)
 
     ! create fm format matrices used for diagonalisation
     CALL cp_fm_struct_create(fmstruct=fm_struct, &
                              para_env=para_env, &
                              context=blacs_env, &
                              nrow_global=filtered_nfullrowsORcols_total, &
-                             ncol_global=filtered_nfullrowsORcols_total, &
-                             error=error)
+                             ncol_global=filtered_nfullrowsORcols_total)
     ! both fm_matrix_filtered_s and fm_matrix_filtered_ks are reused
     ! for each spin channel
     CALL cp_fm_create(fm_matrix_filtered_s, &
                       fm_struct, &
-                      name="FM_MATRIX_FILTERED_S", &
-                      error=error)
+                      name="FM_MATRIX_FILTERED_S")
     CALL cp_fm_create(fm_matrix_filtered_ks, &
                       fm_struct, &
-                      name="FM_MATRIX_FILTERED_KS", &
-                      error=error)
+                      name="FM_MATRIX_FILTERED_KS")
     ! creaate work matrix
-    CALL cp_fm_create(fm_matrix_work, fm_struct, name="FM_MATRIX_WORK", error=error)
+    CALL cp_fm_create(fm_matrix_work, fm_struct, name="FM_MATRIX_WORK")
+    CALL cp_fm_create(fm_matrix_ortho, fm_struct, name="FM_MATRIX_ORTHO")
     ! all fm matrices are created, so can release fm_struct
-    CALL cp_fm_struct_release(fm_struct, error=error)
+    CALL cp_fm_struct_release(fm_struct)
 
     ! construct filtered KS, S matrix and diagonalise
     DO ispin = 1, nspin
@@ -497,58 +464,48 @@ CONTAINS
        ! construct filtered KS matrix
        CALL cp_dbcsr_multiply("N", "N", 1.0_dp, &
                               matrix_ks(ispin)%matrix, matrix_filter(ispin)%matrix, &
-                              0.0_dp, matrix_tmp, error=error)
+                              0.0_dp, matrix_tmp)
        CALL cp_dbcsr_multiply("T", "N", 1.0_dp, &
                               matrix_filter(ispin)%matrix, matrix_tmp, &
-                              0.0_dp, matrix_filtered_ks, error=error)
+                              0.0_dp, matrix_filtered_ks)
        ! construct filtered S_matrix
        CALL cp_dbcsr_multiply("N", "N", 1.0_dp, &
                               matrix_s(1)%matrix, matrix_filter(ispin)%matrix, &
-                              0.0_dp, matrix_tmp, error=error)
+                              0.0_dp, matrix_tmp)
        CALL cp_dbcsr_multiply("T", "N", 1.0_dp, &
                               matrix_filter(ispin)%matrix, matrix_tmp, &
-                              0.0_dp, matrix_filtered_s, error=error)
+                              0.0_dp, matrix_filtered_s)
 
        ! now that we have the filtered KS and S matrices for this spin
        ! channel, perform ordinary diagonalisation
 
        ! convert DBCSR matrices to fm format
-       CALL copy_dbcsr_to_fm(matrix_filtered_s, fm_matrix_filtered_s, error=error)
-       CALL copy_dbcsr_to_fm(matrix_filtered_ks, fm_matrix_filtered_ks, error=error)
+       CALL copy_dbcsr_to_fm(matrix_filtered_s, fm_matrix_filtered_s)
+       CALL copy_dbcsr_to_fm(matrix_filtered_ks, fm_matrix_filtered_ks)
 
-       ! now diagonalise
-
-       ! calculate S^(-1/2) (cholesky decomposition)
-       CALL cp_fm_cholesky_decompose(fm_matrix_filtered_s, error=error)
-       CALL cp_fm_triangular_invert(fm_matrix_filtered_s, error=error)
        ! setup matrix pools for the molecular orbitals
        CALL init_mo_set(mos_filtered(ispin)%mo_set,&
                         my_mpools%ao_mo_fm_pools(ispin)%pool,&
-                        name="FILTERED_MOS",&
-                        error=error)
-       ! initialise work matrix
-       CALL cp_fm_set_all(matrix=fm_matrix_work, alpha=0.0_dp, error=error)
-       ! diagonalise
+                        name="FILTERED_MOS")
 
-       ! At the moment, can only use cholesky_inverse with no jacobi
-!TODO:LT:2015/02/04: make it more flexible
-       scf_env%cholesky_method = cholesky_inverse
-       use_jacobi = .FALSE.
-       CALL eigensolver(matrix_ks_fm=fm_matrix_filtered_ks, &
-                        mo_set=mos_filtered(ispin)%mo_set, &
-                        ortho=fm_matrix_filtered_s, &
-                        work=fm_matrix_work,&
-                        cholesky_method=scf_env%cholesky_method, &
-                        use_jacobi=use_jacobi, &
-                        error=error)
+       ! now diagonalise
+       CALL fb_env_eigensolver(fm_matrix_filtered_ks, &
+                               fm_matrix_filtered_s, &
+                               mos_filtered(ispin)%mo_set, &
+                               fm_matrix_ortho, &
+                               fm_matrix_work, &
+                               eps_eigval, &
+                               ndep, &
+                               scf_env%cholesky_method)
     END DO ! ispin
 
     ! release temporary matrices
-    CALL cp_dbcsr_release(matrix_filtered_s, error)
-    CALL cp_dbcsr_release(matrix_filtered_ks, error)
-    CALL cp_fm_release(fm_matrix_filtered_s, error=error)
-    CALL cp_fm_release(fm_matrix_filtered_ks, error=error)
-    CALL cp_fm_release(fm_matrix_work, error=error)
+    CALL cp_dbcsr_release(matrix_filtered_s)
+    CALL cp_dbcsr_release(matrix_filtered_ks)
+    CALL cp_fm_release(fm_matrix_filtered_s)
+    CALL cp_fm_release(fm_matrix_filtered_ks)
+    CALL cp_fm_release(fm_matrix_work)
+    CALL cp_fm_release(fm_matrix_ortho)
 
     ! ----------------------------------------------------------------------
     ! Construct New Density Matrix
@@ -557,15 +514,13 @@ CONTAINS
     ! calculate filtered molecular orbital occupation numbers and fermi
     ! level etc
     CALL set_mo_occupation(mo_array=mos_filtered, &
-                           smear=scf_control%smear, &
-                           error=error)
+                           smear=scf_control%smear)
 
     ! get the filtered density matrix and then convert back to the
     ! full basis version in scf_env ready to be used outside this
     ! subroutine
-    ALLOCATE(matrix_filtered_p, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    CALL cp_dbcsr_init(matrix_filtered_p, error=error)
+    ALLOCATE(matrix_filtered_p)
+    CALL cp_dbcsr_init(matrix_filtered_p)
     ! the filtered density matrix should have the same sparse
     ! structure as the original density matrix, we must copy the
     ! sparse structure here, since construction of the density matrix
@@ -579,40 +534,35 @@ CONTAINS
                          matrix_type=cp_dbcsr_get_matrix_type(scf_env%p_mix_new(1,1)%matrix), &
                          row_blk_size=filtered_rowORcol_block_sizes, &
                          col_blk_size=filtered_rowORcol_block_sizes, &
-                         nblks=0, &
-                         nze=0, &
-                         error=error)
-    CALL cp_dbcsr_finalize(matrix_filtered_p, error=error)
+                         nze=0)
+    CALL cp_dbcsr_finalize(matrix_filtered_p)
     CALL fb_dbcsr_copy_sparse_struct(matrix_filtered_p, &
-                                     scf_env%p_mix_new(1,1)%matrix, &
-                                     error)
+                                     scf_env%p_mix_new(1,1)%matrix)
     ! old implementation, using sab_orb to allocate the blocks in matrix_filtered_p
-    ! CALL get_qs_env(qs_env=qs_env, sab_orb=sab_orb, error=error)
-    ! CALL cp_dbcsr_alloc_block_from_nbl(matrix_filtered_p, sab_orb, error=error)
-    CALL cp_dbcsr_set(matrix_filtered_p, 0.0_dp, error=error)
+    ! CALL get_qs_env(qs_env=qs_env, sab_orb=sab_orb)
+    ! CALL cp_dbcsr_alloc_block_from_nbl(matrix_filtered_p, sab_orb)
+    CALL cp_dbcsr_set(matrix_filtered_p, 0.0_dp)
 
     DO ispin = 1, nspin
       ! calculate matrix_filtered_p
        CALL calculate_density_matrix(mos_filtered(ispin)%mo_set, &
-                                     matrix_filtered_p, &
-                                     error=error)
+                                     matrix_filtered_p)
        ! convert back to full basis p
        CALL cp_dbcsr_multiply("N", "N", 1.0_dp, &
                               matrix_filter(ispin)%matrix, matrix_filtered_p, &
-                              0.0_dp, matrix_tmp, error=error)
+                              0.0_dp, matrix_tmp)
        CALL cp_dbcsr_multiply("N", "T", 1.0_dp, &
                               matrix_tmp, matrix_filter(ispin)%matrix, &
                               0.0_dp, scf_env%p_mix_new(ispin,1)%matrix, &
-                              retain_sparsity=.TRUE., error=error)
+                              retain_sparsity=.TRUE.)
        ! note that we want to retain the sparse structure of
        ! scf_env%p_mix_new
     END DO ! ispin
 
     ! release temporary matrices
-    CALL cp_dbcsr_release(matrix_tmp, error)
-    CALL cp_dbcsr_release(matrix_filtered_p, error)
-    DEALLOCATE(matrix_filtered_p, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    CALL cp_dbcsr_release(matrix_tmp)
+    CALL cp_dbcsr_release(matrix_filtered_p)
+    DEALLOCATE(matrix_filtered_p)
 
     ! ----------------------------------------------------------------------
     ! Update MOs
@@ -640,13 +590,11 @@ CONTAINS
                              para_env=para_env, &
                              context=blacs_env, &
                              nrow_global=original_nfullrowsORcols_total, &
-                             ncol_global=filtered_nfullrowsORcols_total, &
-                             error=error)
+                             ncol_global=filtered_nfullrowsORcols_total)
     CALL cp_fm_create(fm_matrix_filter, &
                       filter_fm_struct, &
-                      name="FM_MATRIX_FILTER", &
-                      error=error)
-    CALL cp_fm_struct_release(filter_fm_struct, error=error)
+                      name="FM_MATRIX_FILTER")
+    CALL cp_fm_struct_release(filter_fm_struct)
 
     DO ispin = 1, nspin
        ! now the full basis mo_set should only contain the reduced
@@ -665,8 +613,7 @@ CONTAINS
                        homo=homo_filtered, &
                        lfomo=lfomo_filtered, &
                        kTS=kTS_filtered, &
-                       mu=mu_filtered, &
-                       error=error)
+                       mu=mu_filtered)
        ! now set the arrays and fm_matrices
        CALL get_mo_set(mo_set=mos(ispin)%mo_set, &
                        nmo=nmo, &
@@ -681,32 +628,30 @@ CONTAINS
        occ(:) = 0.0_dp
        occ(1:my_nmo) = occ_filtered(1:my_nmo)
        ! convert mo_coeff_filtered back to original basis
-       CALL cp_fm_set_all(matrix=mo_coeff, alpha=0.0_dp, error=error)
-       CALL copy_dbcsr_to_fm(matrix_filter(ispin)%matrix, fm_matrix_filter, error=error)
+       CALL cp_fm_set_all(matrix=mo_coeff, alpha=0.0_dp)
+       CALL copy_dbcsr_to_fm(matrix_filter(ispin)%matrix, fm_matrix_filter)
        CALL cp_fm_gemm("N", "N", &
                        original_nfullrowsORcols_total, &
                        my_nmo, &
                        filtered_nfullrowsORcols_total, &
                        1.0_dp, fm_matrix_filter, mo_coeff_filtered, &
-                       0.0_dp, mo_coeff, error=error)
+                       0.0_dp, mo_coeff)
 
     END DO ! ispin
 
     ! release temporary matrices
-    CALL cp_fm_release(fm_matrix_filter, error=error)
+    CALL cp_fm_release(fm_matrix_filter)
 
     ! ----------------------------------------------------------------------
     ! Final Clean Up
     ! ----------------------------------------------------------------------
 
-    CALL mpools_release(mpools=my_mpools, error=error)
+    CALL mpools_release(mpools=my_mpools)
     DO ispin = 1, nspin
-       CALL deallocate_mo_set(mo_set=mos_filtered(ispin)%mo_set, &
-                              error=error)
+       CALL deallocate_mo_set(mo_set=mos_filtered(ispin)%mo_set)
     END DO
-    DEALLOCATE(mos_filtered, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    CALL cp_dbcsr_deallocate_matrix_set(matrix_filter, error)
+    DEALLOCATE(mos_filtered)
+    CALL cp_dbcsr_deallocate_matrix_set(matrix_filter)
 
     CALL timestop(handle)
 
@@ -714,55 +659,188 @@ CONTAINS
 
 
 ! *****************************************************************************
+!> \brief The main parallel eigensolver engine for filter matrix diagonalisation
+!> \param fm_KS : the BLACS distributed Kohn-Sham matrix, input only
+!> \param fm_S  : the BLACS distributed overlap matrix, input only
+!> \param mo_set : upon output contains the molecular orbitals (eigenvectors)
+!>                 and eigenvalues
+!> \param fm_ortho : one of the work matrices, on output, the BLACS distributed
+!>                   matrix for orthogalising the eigen problem. E.g. if using
+!>                   Cholesky inversse, then the upper triangle part contains
+!>                   the inverse of Cholesky U; if not using Cholesky, then it
+!>                   contains the S^-1/2.
+!> \param fm_work : work matrix used by eigen solver
+!> \param eps_eigval : used for quenching the small numbers when computing S^-1/2
+!>                     any values less than eps_eigval is truncated to zero.
+!> \param ndep : if the overlap is not positive definite, then ndep > 0,
+!>               and equals to the number of linear dependent basis functions
+!>               in the filtered basis set
+!> \param method : method for solving generalised eigenvalue problem
+!> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
+! *****************************************************************************
+  SUBROUTINE fb_env_eigensolver(fm_KS, fm_S, mo_set, fm_ortho, &
+                                fm_work, eps_eigval, ndep, method)
+    TYPE(cp_fm_type), POINTER                :: fm_KS, fm_S
+    TYPE(mo_set_type), POINTER               :: mo_set
+    TYPE(cp_fm_type), POINTER                :: fm_ortho, fm_work
+    REAL(KIND=dp), INTENT(IN)                :: eps_eigval
+    INTEGER, INTENT(OUT)                     :: ndep
+    INTEGER, INTENT(IN)                      :: method
+
+    CHARACTER(len=*), PARAMETER :: routineN = 'fb_env_eigensolver', &
+      routineP = moduleN//':'//routineN
+
+    CHARACTER(len=8)                         :: ndep_string
+    INTEGER                                  :: handle, info, my_method, nao, &
+                                                nmo
+    REAL(KIND=dp), DIMENSION(:), POINTER     :: mo_eigenvalues
+    TYPE(cp_fm_type), POINTER                :: mo_coeff
+
+    CALL timeset(routineN, handle)
+
+    CALL get_mo_set(mo_set=mo_set, &
+                    nao=nao, &
+                    nmo=nmo, &
+                    eigenvalues=mo_eigenvalues, &
+                    mo_coeff=mo_coeff)
+    my_method = method
+    ndep = 0
+
+    ! first, obtain orthogonalisation (ortho) matrix
+    IF (my_method .NE. cholesky_off) THEN
+       CALL cp_fm_to_fm(fm_S, fm_ortho)
+       CALL cp_fm_cholesky_decompose(fm_ortho, info_out=info)
+       IF (info .NE. 0) THEN
+          CALL cp_warn(__LOCATION__,&
+               "Unable to perform Cholesky decomposition on the overlap "//&
+               "matrix. The new filtered basis may not be linearly "//&
+               "independent set. Revert to using inverse square-root "//&
+               "of the overlap. To avoid this warning, you can try"//&
+               "to use a higher filter termperature.")
+          my_method = cholesky_off
+       ELSE
+          SELECT CASE(my_method)
+          CASE(cholesky_dbcsr)
+             CALL cp_abort(__LOCATION__, &
+                  "filter matrix method with CHOLESKY_DBCSR is not yet implemented")
+          CASE(cholesky_reduce)
+             CALL cp_fm_cholesky_reduce(fm_KS, fm_ortho)
+             CALL choose_eigv_solver(fm_KS, fm_work, mo_eigenvalues)
+             CALL cp_fm_cholesky_restore(fm_work, nmo, fm_ortho, mo_coeff, "SOLVE")
+          CASE(cholesky_restore)
+             CALL cp_fm_upper_to_full(fm_KS, fm_work)
+             CALL cp_fm_cholesky_restore(fm_KS, nao, fm_ortho, fm_work, "SOLVE", &
+                                         pos="RIGHT")
+             CALL cp_fm_cholesky_restore(fm_work, nao, fm_ortho, fm_KS, "SOLVE", &
+                                         pos="LEFT", transa="T")
+             CALL choose_eigv_solver(fm_KS, fm_work, mo_eigenvalues)
+             CALL cp_fm_cholesky_restore(fm_work, nmo, fm_ortho, mo_coeff, "SOLVE")
+          CASE(cholesky_inverse)
+             CALL cp_fm_triangular_invert(fm_ortho)
+             CALL cp_fm_upper_to_full(fm_KS, fm_work)
+             CALL cp_fm_triangular_multiply(fm_ortho, &
+                                            fm_KS, &
+                                            side="R", &
+                                            transpose_tr=.FALSE., &
+                                            invert_tr=.FALSE., &
+                                            uplo_tr="U", &
+                                            n_rows=nao, &
+                                            n_cols=nao, &
+                                            alpha=1.0_dp)
+             CALL cp_fm_triangular_multiply(fm_ortho, &
+                                            fm_KS, &
+                                            side="L", &
+                                            transpose_tr=.TRUE., &
+                                            invert_tr=.FALSE., &
+                                            uplo_tr="U", &
+                                            n_rows=nao, &
+                                            n_cols=nao, &
+                                            alpha=1.0_dp)
+             CALL choose_eigv_solver(fm_KS, fm_work, mo_eigenvalues)
+             CALL cp_fm_triangular_multiply(fm_ortho, &
+                                            fm_work, &
+                                            side="L", &
+                                            transpose_tr=.FALSE., &
+                                            invert_tr=.FALSE., &
+                                            uplo_tr="U", &
+                                            n_rows=nao, &
+                                            n_cols=nmo, &
+                                            alpha=1.0_dp)
+             CALL cp_fm_to_fm(fm_work, mo_coeff, nmo, 1, 1)
+          END SELECT
+       END IF
+    END IF
+    IF (my_method == cholesky_off) THEN
+       ! calculating ortho as S^-1/2 using diagonalisation of S, and
+       ! solve accordingly
+       CALL cp_fm_to_fm(fm_S, fm_ortho)
+       CALL cp_fm_power(fm_ortho, fm_work, -0.5_dp, &
+                        eps_eigval, ndep)
+       IF (ndep > 0) THEN
+          WRITE (ndep_string, FMT="(I8)") ndep
+          CALL cp_warn(__LOCATION__, &
+               "Number of linearly dependent filtered orbitals: "//ndep_string)
+       END IF
+       ! solve eigen equatoin using S^-1/2
+       CALL cp_fm_symm("L", "U", nao, nao, 1.0_dp, fm_KS, fm_ortho, &
+                       0.0_dp, fm_work)
+       CALL cp_gemm("T", "N", nao, nao, nao, 1.0_dp, fm_ortho, &
+                    fm_work, 0.0_dp, fm_KS)
+       CALL choose_eigv_solver(fm_KS, fm_work, mo_eigenvalues)
+       CALL cp_gemm("N", "N", nao, nmo, nao, 1.0_dp, fm_ortho, &
+                    fm_work, 0.0_dp, mo_coeff)
+    END IF
+
+    CALL timestop(handle)
+
+  END SUBROUTINE fb_env_eigensolver
+
+
+! *****************************************************************************
 !> \brief Read input sections for filter matrix method
 !> \param fb_env : the filter matrix environment
 !> \param scf_section : SCF input section
-!> \param error : cp2k error container
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
-  SUBROUTINE fb_env_read_input(fb_env, scf_section, error)
+  SUBROUTINE fb_env_read_input(fb_env, scf_section)
 
     TYPE(fb_env_obj), INTENT(INOUT)          :: fb_env
     TYPE(section_vals_type), POINTER         :: scf_section
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_env_read_input', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle
-    LOGICAL                                  :: failure, l_val
+    LOGICAL                                  :: l_val
     REAL(KIND=dp)                            :: r_val
     TYPE(section_vals_type), POINTER         :: fb_section
 
     CALL timeset(routineN, handle)
 
-    failure = .FALSE.
 
     NULLIFY(fb_section)
     fb_section => section_vals_get_subs_vals(scf_section, &
-                                             "DIAGONALIZATION%FILTER_MATRIX", &
-                                             error=error)
+                                             "DIAGONALIZATION%FILTER_MATRIX")
     ! filter_temperature
     CALL section_vals_val_get(fb_section, "FILTER_TEMPERATURE", &
-                              r_val=r_val, &
-                              error=error)
+                              r_val=r_val)
     CALL fb_env_set(fb_env=fb_env, &
-                    filter_temperature=r_val, &
-                    error=error)
+                    filter_temperature=r_val)
     ! auto_cutoff_scale
     CALL section_vals_val_get(fb_section, "AUTO_CUTOFF_SCALE", &
-                              r_val=r_val, &
-                              error=error)
+                              r_val=r_val)
     CALL fb_env_set(fb_env=fb_env, &
-                    auto_cutoff_scale=r_val, &
-                    error=error)
+                    auto_cutoff_scale=r_val)
     ! communication model
     CALL section_vals_val_get(fb_section, "COLLECTIVE_COMMUNICATION", &
-                              l_val=l_val, &
-                              error=error)
+                              l_val=l_val)
     CALL fb_env_set(fb_env=fb_env, &
-                    collective_com=l_val, &
-                    error=error)
+                    collective_com=l_val)
+    ! eps_default
+    CALL section_vals_val_get(fb_section, "EPS_FB", &
+                              r_val=r_val)
+    CALL fb_env_set(fb_env=fb_env, &
+                    eps_default=r_val)
 
     CALL timestop(handle)
 
@@ -775,20 +853,16 @@ CONTAINS
 !>        ranges for each kind
 !> \param fb_env : the filter matrix environment
 !> \param qs_env : quickstep environment
-!> \param error : cp2k error container
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
-  SUBROUTINE fb_env_build_rcut_auto(fb_env, qs_env, error)
+  SUBROUTINE fb_env_build_rcut_auto(fb_env, qs_env)
     TYPE(fb_env_obj), INTENT(INOUT)          :: fb_env
     TYPE(qs_environment_type), POINTER       :: qs_env
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_env_build_rcut_auto', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: basis_set_id, handle, ikind, &
-                                                nkinds, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: handle, ikind, nkinds
     REAL(KIND=dp)                            :: auto_cutoff_scale, kind_radius
     REAL(KIND=dp), DIMENSION(:), POINTER     :: rcut
     TYPE(dft_control_type), POINTER          :: dft_control
@@ -800,54 +874,43 @@ CONTAINS
 
     CALL timeset(routineN, handle)
 
-    failure = .FALSE.
 
     NULLIFY(rcut, qs_kind_set, dft_control)
 
     CALL get_qs_env(qs_env=qs_env, &
                     qs_kind_set=qs_kind_set, &
-                    dft_control=dft_control, &
-                    error=error)
+                    dft_control=dft_control)
     CALL fb_env_get(fb_env=fb_env, &
-                    auto_cutoff_scale=auto_cutoff_scale, &
-                    error=error)
+                    auto_cutoff_scale=auto_cutoff_scale)
 
     nkinds = SIZE(qs_kind_set)
-    ALLOCATE(rcut(nkinds), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    ALLOCATE(rcut(nkinds))
 
     ! reading from the other parts of the code, it seemed that
     ! aux_fit_basis_set is only used when do_admm is TRUE. This can be
     ! seen from the calls to generate_qs_task_list subroutine in
     ! qs_create_task_list, found in qs_environment_methods.F:
-    ! basis_set_id is only set as input parameter for do_admm
+    ! basis_type is only set as input parameter for do_admm
     ! calculations, and if not set, the task list is generated using
-    ! the default basis_set_id=use_orb_basis_set.
+    ! the default basis_set="ORB".
+    ALLOCATE(basis_set_list(nkinds))
     IF (dft_control%do_admm) THEN
-       basis_set_id = use_aux_fit_basis_set
+       CALL basis_set_list_setup(basis_set_list, "AUX_FIT", qs_kind_set)
     ELSE
-       basis_set_id = use_orb_basis_set
+       CALL basis_set_list_setup(basis_set_list, "ORB", qs_kind_set)
     END IF
-
-    ALLOCATE(basis_set_list(nkinds), STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-
-    CALL basis_set_list_setup(basis_set_list, basis_set_id, qs_kind_set)
 
     DO ikind = 1, nkinds
        basis_set => basis_set_list(ikind)%gto_basis_set
-       CALL get_gto_basis_set(gto_basis_set=basis_set, &
-                              kind_radius=kind_radius)
+       CALL get_gto_basis_set(gto_basis_set=basis_set,kind_radius=kind_radius)
        rcut(ikind) = kind_radius * auto_cutoff_scale
     END DO
 
     CALL fb_env_set(fb_env=fb_env, &
-                    rcut=rcut, &
-                    error=error)
+                    rcut=rcut)
 
     ! cleanup
-    DEALLOCATE(basis_set_list, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    DEALLOCATE(basis_set_list)
 
     CALL timestop(handle)
 
@@ -862,23 +925,19 @@ CONTAINS
 !>                 positions and their kinds as well as which particles
 !>                 are local to this process
 !> \param scf_section : SCF input section, for printing output
-!> \param error : cp2k error container
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
-  SUBROUTINE fb_env_build_atomic_halos(fb_env, qs_env, scf_section, error)
+  SUBROUTINE fb_env_build_atomic_halos(fb_env, qs_env, scf_section)
     TYPE(fb_env_obj), INTENT(INOUT)          :: fb_env
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(section_vals_type), POINTER         :: scf_section
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_env_build_atomic_halos', &
       routineP = moduleN//':'//routineN
 
     INTEGER :: handle, iatom, ihalo, max_natoms_local, natoms_global, &
-      natoms_local, nelectrons, nhalo_atoms, nkinds_global, owner_id_in_halo, &
-      stat
+      natoms_local, nelectrons, nhalo_atoms, nkinds_global, owner_id_in_halo
     INTEGER, DIMENSION(:), POINTER           :: halo_atoms, local_atoms
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: cost
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :)                        :: pair_radii
@@ -895,9 +954,8 @@ CONTAINS
 
     CALL timeset(routineN, handle)
 
-    failure = .FALSE.
 
-    CPPrecondition(fb_env_has_data(fb_env), cp_failure_level, routineP, error, failure)
+    CPASSERT(fb_env_has_data(fb_env))
 
     NULLIFY(cell, halos, halo_atoms, rcut, particle_set, para_env, &
             qs_kind_set, local_atoms)
@@ -907,11 +965,10 @@ CONTAINS
     CALL fb_env_get(fb_env=fb_env, &
                     rcut=rcut, &
                     local_atoms=local_atoms, &
-                    nlocal_atoms=natoms_local, &
-                    error=error)
+                    nlocal_atoms=natoms_local)
 
     ! create atomic_halos
-    CALL fb_atomic_halo_list_create(atomic_halos, error)
+    CALL fb_atomic_halo_list_create(atomic_halos)
 
     ! get the number of atoms and kinds:
     CALL get_qs_env(qs_env=qs_env, &
@@ -920,27 +977,23 @@ CONTAINS
                     qs_kind_set=qs_kind_set, &
                     nkind=nkinds_global, &
                     para_env=para_env, &
-                    cell=cell, &
-                    error=error)
+                    cell=cell)
 
     ! get the maximum number of local atoms across the procs.
     max_natoms_local = natoms_local
     CALL mp_max(max_natoms_local, para_env%group)
 
     ! create the halos, one for each local atom
-    ALLOCATE(halos(natoms_local), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    ALLOCATE(halos(natoms_local))
     DO ihalo = 1, natoms_local
        CALL fb_atomic_halo_nullify(halos(ihalo))
-       CALL fb_atomic_halo_create(halos(ihalo), error)
+       CALL fb_atomic_halo_create(halos(ihalo))
     END DO
     CALL fb_atomic_halo_list_set(atomic_halos=atomic_halos, &
                                  nhalos=natoms_local, &
-                                 max_nhalos=max_natoms_local, &
-                                 error=error)
+                                 max_nhalos=max_natoms_local)
     ! build halos
-    ALLOCATE(pair_radii(nkinds_global,nkinds_global), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    ALLOCATE(pair_radii(nkinds_global,nkinds_global))
     CALL fb_build_pair_radii(rcut, nkinds_global, pair_radii)
     ihalo = 0
     DO iatom = 1, natoms_local
@@ -951,14 +1004,12 @@ CONTAINS
                                             pair_radii, &
                                             halo_atoms, &
                                             nhalo_atoms, &
-                                            owner_id_in_halo, &
-                                            error)
+                                            owner_id_in_halo)
        CALL fb_atomic_halo_set(atomic_halo=halos(ihalo), &
                                owner_atom=local_atoms(iatom), &
                                owner_id_in_halo=owner_id_in_halo, &
                                natoms=nhalo_atoms, &
-                               halo_atoms=halo_atoms, &
-                               error=error)
+                               halo_atoms=halo_atoms)
        ! prepare halo_atoms for another halo, do not deallocate, as
        ! original data is being pointed at by the atomic halo data
        ! structure
@@ -970,28 +1021,23 @@ CONTAINS
        cost = fb_atomic_halo_cost(halos(ihalo), particle_set, qs_kind_set)
        CALL fb_atomic_halo_set(atomic_halo=halos(ihalo), &
                                nelectrons=nelectrons, &
-                               cost=cost, &
-                               error=error)
+                               cost=cost)
        ! sort atomic halo
-       CALL fb_atomic_halo_sort(halos(ihalo), error)
+       CALL fb_atomic_halo_sort(halos(ihalo))
     END DO ! iatom
-    DEALLOCATE(pair_radii, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    DEALLOCATE(pair_radii)
 
     ! finalise
     CALL fb_atomic_halo_list_set(atomic_halos=atomic_halos, &
-                                 halos=halos, &
-                                 error=error)
+                                 halos=halos)
     CALL fb_env_set(fb_env=fb_env, &
-                    atomic_halos=atomic_halos, &
-                    error=error)
-    CALL fb_atomic_halo_list_release(atomic_halos, error)
+                    atomic_halos=atomic_halos)
+    CALL fb_atomic_halo_list_release(atomic_halos)
 
     ! print info
     CALL fb_atomic_halo_list_write_info(atomic_halos, &
                                         para_env, &
-                                        scf_section, &
-                                        error)
+                                        scf_section)
 
     CALL timestop(handle)
 
@@ -1005,24 +1051,21 @@ CONTAINS
 !> \param fb_env : the filter matrix environment
 !> \param qs_env : quickstep environment
 !> \param maxocc : maximum occupancy for an orbital
-!> \param error : cp2k error container
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
-  SUBROUTINE fb_env_build_trial_fns_auto(fb_env, qs_env, maxocc, error)
+  SUBROUTINE fb_env_build_trial_fns_auto(fb_env, qs_env, maxocc)
 
     TYPE(fb_env_obj), INTENT(INOUT)          :: fb_env
     TYPE(qs_environment_type), POINTER       :: qs_env
     REAL(KIND=dp), INTENT(IN)                :: maxocc
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_env_build_trial_fns_auto', &
       routineP = moduleN//':'//routineN
 
-    INTEGER :: basis_set_id, counter, handle, icgf, ico, ikind, iset, ishell, &
-      itrial, lshell, max_n_trial, nkinds, nset, old_lshell, stat
+    INTEGER :: counter, handle, icgf, ico, ikind, iset, ishell, itrial, &
+      lshell, max_n_trial, nkinds, nset, old_lshell
     INTEGER, DIMENSION(:), POINTER           :: lmax, nfunctions, nshell
     INTEGER, DIMENSION(:, :), POINTER        :: functions
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: zeff
     TYPE(dft_control_type), POINTER          :: dft_control
     TYPE(fb_trial_fns_obj)                   :: trial_fns
@@ -1034,41 +1077,35 @@ CONTAINS
 
     CALL timeset(routineN, handle)
 
-    failure = .FALSE.
-    CPPrecondition(fb_env_has_data(fb_env), cp_failure_level, routineP, error, failure)
+    CPASSERT(fb_env_has_data(fb_env))
     NULLIFY(nfunctions, functions, basis_set, basis_set_list, qs_kind_set, dft_control)
     CALL fb_trial_fns_nullify(trial_fns)
 
     ! create a new trial_fn object
-    CALL fb_trial_fns_create(trial_fns, error)
+    CALL fb_trial_fns_create(trial_fns)
 
     CALL get_qs_env(qs_env=qs_env, &
                     qs_kind_set=qs_kind_set, &
-                    dft_control=dft_control, &
-                    error=error)
+                    dft_control=dft_control)
+
+    nkinds = SIZE(qs_kind_set)
 
     ! reading from the other parts of the code, it seemed that
     ! aux_fit_basis_set is only used when do_admm is TRUE. This can be
     ! seen from the calls to generate_qs_task_list subroutine in
     ! qs_create_task_list, found in qs_environment_methods.F:
-    ! basis_set_id is only set as input parameter for do_admm
+    ! basis_type is only set as input parameter for do_admm
     ! calculations, and if not set, the task list is generated using
-    ! the default basis_set_id=use_orb_basis_set.
+    ! the default basis_set="ORB".
+    ALLOCATE(basis_set_list(nkinds))
     IF (dft_control%do_admm) THEN
-       basis_set_id = use_aux_fit_basis_set
+       CALL basis_set_list_setup(basis_set_list, "AUX_FIT", qs_kind_set)
     ELSE
-       basis_set_id = use_orb_basis_set
+       CALL basis_set_list_setup(basis_set_list, "ORB", qs_kind_set)
     END IF
 
-    nkinds = SIZE(qs_kind_set)
-
-    ALLOCATE(nfunctions(nkinds), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    ALLOCATE(nfunctions(nkinds))
     nfunctions = 0
-
-    ALLOCATE(basis_set_list(nkinds), STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    CALL basis_set_list_setup(basis_set_list, basis_set_id, qs_kind_set)
 
     DO ikind = 1, nkinds
        ! "gto = gaussian type orbital"
@@ -1110,8 +1147,7 @@ CONTAINS
     ! now that we have the number of trial functions get the trial
     ! functions
     max_n_trial = MAXVAL(nfunctions)
-    ALLOCATE(functions(max_n_trial,nkinds), STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(functions(max_n_trial,nkinds))
     functions(:,:) = 0
     ! redo the loops to get the trial function indices within the basis set
     DO ikind = 1, nkinds
@@ -1157,17 +1193,14 @@ CONTAINS
     ! set trial_functions
     CALL fb_trial_fns_set(trial_fns=trial_fns, &
                           nfunctions=nfunctions, &
-                          functions=functions, &
-                          error=error)
+                          functions=functions)
     ! set fb_env
     CALL fb_env_set(fb_env=fb_env, &
-                    trial_fns=trial_fns, &
-                    error=error)
-    CALL fb_trial_fns_release(trial_fns, error)
+                    trial_fns=trial_fns)
+    CALL fb_trial_fns_release(trial_fns)
 
     ! cleanup
-    DEALLOCATE(basis_set_list, STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(basis_set_list)
 
     CALL timestop(handle)
 
@@ -1182,37 +1215,30 @@ CONTAINS
 !> \param matrix_out : DBCSR matrix whose blocks are to be allocated
 !> \param matrix_in  : DBCSR matrix with exising sparse structure that
 !>                     is to be copied
-!> \param error : cp2k error container
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
-  SUBROUTINE fb_dbcsr_copy_sparse_struct(matrix_out, matrix_in, error)
+  SUBROUTINE fb_dbcsr_copy_sparse_struct(matrix_out, matrix_in)
 
     TYPE(cp_dbcsr_type), INTENT(INOUT)       :: matrix_out
     TYPE(cp_dbcsr_type), INTENT(IN)          :: matrix_in
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_dbcsr_copy_sparse_struct', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: iatom, iblk, jatom, &
                                                 nblkcols_total, &
-                                                nblkrows_total, nblks, stat
+                                                nblkrows_total, nblks
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: cols, rows
-    LOGICAL                                  :: failure
     REAL(dp), DIMENSION(:, :), POINTER       :: mat_block
     TYPE(cp_dbcsr_iterator)                  :: iter
-
-    failure = .FALSE.
 
     CALL cp_dbcsr_get_info(matrix=matrix_in, &
                            nblkrows_total=nblkrows_total, &
                            nblkcols_total=nblkcols_total)
 
     nblks = nblkrows_total * nblkcols_total
-    ALLOCATE(rows(nblks), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    ALLOCATE(cols(nblks), STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    ALLOCATE(rows(nblks))
+    ALLOCATE(cols(nblks))
     rows(:) = 0
     cols(:) = 0
     iblk = 0
@@ -1225,14 +1251,12 @@ CONTAINS
        nblks = nblks + 1
     END DO
     CALL cp_dbcsr_iterator_stop(iter)
-    CALL cp_dbcsr_reserve_blocks(matrix_out, rows(1:nblks), cols(1:nblks), error=error)
-    CALL cp_dbcsr_finalize(matrix_out, error=error)
+    CALL cp_dbcsr_reserve_blocks(matrix_out, rows(1:nblks), cols(1:nblks))
+    CALL cp_dbcsr_finalize(matrix_out)
 
     ! cleanup
-    DEALLOCATE(rows, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
-    DEALLOCATE(cols, STAT=stat)
-    CPPostcondition(stat==0, cp_failure_level, routineP, error, failure)
+    DEALLOCATE(rows)
+    DEALLOCATE(cols)
 
   END SUBROUTINE fb_dbcsr_copy_sparse_struct
 
@@ -1243,21 +1267,19 @@ CONTAINS
 !> \param fb_env : the filter matrix environment
 !> \param qs_env : quickstep environment
 !> \param scf_section : SCF input section
-!> \param error : cp2k error container
 !> \author Lianheng Tong (LT) lianheng.tong@kcl.ac.uk
 ! *****************************************************************************
-  SUBROUTINE fb_env_write_info(fb_env, qs_env, scf_section, error)
+  SUBROUTINE fb_env_write_info(fb_env, qs_env, scf_section)
     TYPE(fb_env_obj), INTENT(IN)             :: fb_env
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(section_vals_type), POINTER         :: scf_section
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fb_env_write_info', &
       routineP = moduleN//':'//routineN
 
     CHARACTER(LEN=2)                         :: element_symbol
     INTEGER                                  :: handle, ikind, nkinds, unit_nr
-    LOGICAL                                  :: collective_com, failure
+    LOGICAL                                  :: collective_com
     REAL(KIND=dp)                            :: auto_cutoff_scale, &
                                                 filter_temperature
     REAL(KIND=dp), DIMENSION(:), POINTER     :: rcut
@@ -1267,26 +1289,22 @@ CONTAINS
 
     CALL timeset(routineN, handle)
 
-    failure = .FALSE.
     NULLIFY(rcut, atomic_kind_set, logger)
 
     CALL get_qs_env(qs_env=qs_env, &
-                    atomic_kind_set=atomic_kind_set, &
-                    error=error)
+                    atomic_kind_set=atomic_kind_set)
     CALL fb_env_get(fb_env=fb_env, &
                     filter_temperature=filter_temperature, &
                     auto_cutoff_scale=auto_cutoff_scale, &
                     rcut=rcut, &
-                    collective_com=collective_com, &
-                    error=error)
+                    collective_com=collective_com)
 
     nkinds = SIZE(atomic_kind_set)
 
-    logger => cp_error_get_logger(error=error)
+    logger => cp_get_default_logger()
     unit_nr = cp_print_key_unit_nr(logger, scf_section, &
                                    "PRINT%FILTER_MATRIX", &
-                                   extension="", &
-                                   error=error)
+                                   extension="")
     IF (unit_nr > 0) THEN
        IF (collective_com) THEN
           WRITE (UNIT=unit_nr, FMT="(/,A,T71,A)") &
@@ -1299,7 +1317,7 @@ CONTAINS
        END IF
        WRITE (UNIT=unit_nr, FMT="(A,T71,g10.4)") &
              " FILTER_MAT_DIAG| Filter temperature [K]:", &
-             cp_unit_from_cp2k(filter_temperature, "K", error=error)
+             cp_unit_from_cp2k(filter_temperature, "K")
        WRITE (UNIT=unit_nr, FMT="(A,T71,f10.4)") &
              " FILTER_MAT_DIAG| Filter temperature [a.u.]:", &
              filter_temperature
@@ -1316,7 +1334,7 @@ CONTAINS
        END DO ! ikind
     END IF
     CALL cp_print_key_finished_output(unit_nr, logger, scf_section, &
-                                      "PRINT%FILTER_MATRIX", error=error)
+                                      "PRINT%FILTER_MATRIX")
 
     CALL timestop(handle)
 

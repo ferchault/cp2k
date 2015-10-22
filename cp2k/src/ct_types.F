@@ -20,6 +20,7 @@ MODULE ct_types
                                              tensor_up_down
   USE kinds,                           ONLY: dp
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -130,12 +131,10 @@ CONTAINS
 ! *****************************************************************************
 !> \brief ...
 !> \param env ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE ct_step_env_init(env,error)
+  SUBROUTINE ct_step_env_init(env)
   
     TYPE(ct_step_env_type)                   :: env
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'ct_step_env_init', &
       routineP = moduleN//':'//routineN
@@ -203,23 +202,20 @@ CONTAINS
 !> \param matrix_pq_template ...
 !> \param matrix_t ...
 !> \param matrix_v ...
-!> \param matrix_x ...
 !> \param copy_matrix_x ...
 !> \param energy_correction ...
 !> \param calculate_energy_corr ...
 !> \param converged ...
 !> \param qq_preconditioner_full ...
 !> \param pp_preconditioner_full ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE ct_step_env_get(env,use_occ_orbs,use_virt_orbs,tensor_type,&
     occ_orbs_orthogonal,virt_orbs_orthogonal,neglect_quadratic_term,&
     update_p,update_q,eps_convergence,eps_filter,max_iter,&
     p_index_up,p_index_down,q_index_up,q_index_down,matrix_ks,matrix_p,&
     matrix_qp_template,matrix_pq_template,&
-    matrix_t,matrix_v,matrix_x,copy_matrix_x,energy_correction,calculate_energy_corr,&
-    converged,qq_preconditioner_full,pp_preconditioner_full,&
-    error)
+    matrix_t,matrix_v,copy_matrix_x,energy_correction,calculate_energy_corr,&
+    converged,qq_preconditioner_full,pp_preconditioner_full)
 
     TYPE(ct_step_env_type)                   :: env
     LOGICAL, OPTIONAL                        :: use_occ_orbs, use_virt_orbs
@@ -230,14 +226,13 @@ CONTAINS
     INTEGER, OPTIONAL                        :: max_iter
     TYPE(cp_dbcsr_type), OPTIONAL, POINTER :: p_index_up, p_index_down, &
       q_index_up, q_index_down, matrix_ks, matrix_p, matrix_qp_template, &
-      matrix_pq_template, matrix_t, matrix_v, matrix_x
+      matrix_pq_template, matrix_t, matrix_v
     TYPE(cp_dbcsr_type), OPTIONAL            :: copy_matrix_x
     REAL(KIND=dp), OPTIONAL                  :: energy_correction
     LOGICAL, OPTIONAL                        :: calculate_energy_corr, &
                                                 converged, &
                                                 qq_preconditioner_full, &
                                                 pp_preconditioner_full
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'ct_step_env_get', &
       routineP = moduleN//':'//routineN
@@ -293,8 +288,8 @@ CONTAINS
     IF (PRESENT(q_index_down)) q_index_down => env%q_index_down
     IF (PRESENT(copy_matrix_x)) THEN
        !DO ispin=1,env%nspins
-          !CALL cp_dbcsr_copy(copy_matrix_x(ispin),env%matrix_x(ispin),error=error)
-          CALL cp_dbcsr_copy(copy_matrix_x,env%matrix_x,error=error)
+          !CALL cp_dbcsr_copy(copy_matrix_x(ispin),env%matrix_x(ispin))
+          CALL cp_dbcsr_copy(copy_matrix_x,env%matrix_x)
        !ENDDO
     ENDIF
     !IF (PRESENT(matrix_x)) matrix_x => env%matrix_x
@@ -334,7 +329,6 @@ CONTAINS
 !> \param conjugator ...
 !> \param qq_preconditioner_full ...
 !> \param pp_preconditioner_full ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE ct_step_env_set(env,para_env,blacs_env,use_occ_orbs,&
     use_virt_orbs,tensor_type,&
@@ -343,8 +337,7 @@ CONTAINS
     p_index_up,p_index_down,q_index_up,q_index_down,matrix_ks,matrix_p,&
     matrix_qp_template,matrix_pq_template,&
     matrix_t,matrix_v,matrix_x_guess,calculate_energy_corr,conjugator,&
-    qq_preconditioner_full,pp_preconditioner_full,&
-    error)
+    qq_preconditioner_full,pp_preconditioner_full)
 
     TYPE(ct_step_env_type)                   :: env
     TYPE(cp_para_env_type), POINTER          :: para_env
@@ -362,7 +355,6 @@ CONTAINS
     INTEGER, OPTIONAL                        :: conjugator
     LOGICAL, OPTIONAL                        :: qq_preconditioner_full, &
                                                 pp_preconditioner_full
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'ct_step_env_set', &
       routineP = moduleN//':'//routineN
@@ -425,12 +417,10 @@ CONTAINS
 ! *****************************************************************************
 !> \brief ...
 !> \param env ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE ct_step_env_clean(env,error) 
+  SUBROUTINE ct_step_env_clean(env) 
 
     TYPE(ct_step_env_type)                   :: env
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'ct_step_env_clean', &
       routineP = moduleN//':'//routineN
@@ -441,10 +431,10 @@ CONTAINS
     NULLIFY(env%blacs_env)
 
     !DO ispin=1,env%nspins
-       CALL cp_dbcsr_release(env%matrix_x,error=error)
-       CALL cp_dbcsr_release(env%matrix_res,error=error)
-       !CALL cp_dbcsr_release(env%matrix_x(ispin),error=error)
-       !CALL cp_dbcsr_release(env%matrix_res(ispin),error=error)
+       CALL cp_dbcsr_release(env%matrix_x)
+       CALL cp_dbcsr_release(env%matrix_res)
+       !CALL cp_dbcsr_release(env%matrix_x(ispin))
+       !CALL cp_dbcsr_release(env%matrix_res(ispin))
     !ENDDO
     !DEALLOCATE(env%matrix_x,env%matrix_res)
     

@@ -53,11 +53,9 @@ MODULE mc_types
                                              joule
   USE string_utilities,                ONLY: uppercase,&
                                              xstring
-  USE termination,                     ONLY: stop_memory,&
-                                             stop_program
-  USE timings,                         ONLY: timeset,&
-                                             timestop
+  USE termination,                     ONLY: stop_memory
 #include "../../common/cp_common_uses.f90"
+#include "../../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -936,72 +934,32 @@ SUBROUTINE set_mc_par ( mc_par, rm,cl,&
     CHARACTER(len=*), PARAMETER :: routineN = 'mc_sim_par_destroy', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: istat
+    DEALLOCATE (mc_par%mc_input_file)
+    DEALLOCATE (mc_par%mc_bias_file)
 
-    DEALLOCATE (mc_par%mc_input_file,STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-         "mc_par%mc_input_file")
-    DEALLOCATE (mc_par%mc_bias_file,STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-         "mc_par%mc_bias_file")
+   DEALLOCATE (mc_par%pmtraion_mol)
+    DEALLOCATE (mc_par%pmtrans_mol)
+    DEALLOCATE (mc_par%pmrot_mol)
+    DEALLOCATE (mc_par%pmswap_mol)
 
-   DEALLOCATE (mc_par%pmtraion_mol,STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-         "mc_par%pmtraion_mol")
-    DEALLOCATE (mc_par%pmtrans_mol,STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-         "mc_par%pmtrans_mol")
-    DEALLOCATE (mc_par%pmrot_mol,STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-         "mc_par%pmrot_mol")
-    DEALLOCATE (mc_par%pmswap_mol,STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-         "mc_par%pmswap_mol")
+    DEALLOCATE (mc_par%eta)
 
-    DEALLOCATE (mc_par%eta,STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-         "mc_par%eta")
+    DEALLOCATE (mc_par%rmbond)
+    DEALLOCATE (mc_par%rmangle)
+    DEALLOCATE (mc_par%rmdihedral)
+    DEALLOCATE (mc_par%rmtrans)
+    DEALLOCATE (mc_par%rmrot)
 
-    DEALLOCATE (mc_par%rmbond,STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-         "mc_par%rmbond")
-    DEALLOCATE (mc_par%rmangle,STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-         "mc_par%rmangle")
-    DEALLOCATE (mc_par%rmdihedral,STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-         "mc_par%rmdihedral")
-    DEALLOCATE (mc_par%rmtrans,STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-         "mc_par%rmtrans")
-    DEALLOCATE (mc_par%rmrot,STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-         "mc_par%rmrot")
-
-    DEALLOCATE (mc_par%avbmc_atom,STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-         "mc_par%avbmc_atom")
-    DEALLOCATE (mc_par%avbmc_rmin,STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-         "mc_par%avbmc_rmin")
-    DEALLOCATE (mc_par%avbmc_rmax,STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-         "mc_par%avbmc_rmax")
-    DEALLOCATE (mc_par%pmavbmc_mol,STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-         "mc_par%pmavbmc_mol")
-    DEALLOCATE (mc_par%pbias,STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-         "mc_par%pbias")
+    DEALLOCATE (mc_par%avbmc_atom)
+    DEALLOCATE (mc_par%avbmc_rmin)
+    DEALLOCATE (mc_par%avbmc_rmax)
+    DEALLOCATE (mc_par%pmavbmc_mol)
+    DEALLOCATE (mc_par%pbias)
    IF(mc_par%ensemble == "VIRIAL") THEN
-    DEALLOCATE (mc_par%virial_temps,STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-         "mc_par%virial_temps")
+    DEALLOCATE (mc_par%virial_temps)
    END IF
 
-   DEALLOCATE (mc_par,STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-         "mc_par")
+   DEALLOCATE (mc_par)
     NULLIFY(mc_par)
 
  END SUBROUTINE mc_sim_par_destroy
@@ -1013,18 +971,16 @@ SUBROUTINE set_mc_par ( mc_par, rm,cl,&
 !> \param mc_molecule_info ...
 !> \param empty_coords ...
 !> \param lhmc ...
-!> \param error ...
 !> \author MJM
 ! *****************************************************************************
   SUBROUTINE mc_input_file_create (mc_input_file,input_file_name,&
-       mc_molecule_info,empty_coords,lhmc,error)
+       mc_molecule_info,empty_coords,lhmc)
 
     TYPE(mc_input_file_type), POINTER        :: mc_input_file
     CHARACTER(LEN=*), INTENT(IN)             :: input_file_name
     TYPE(mc_molecule_info_type), POINTER     :: mc_molecule_info
     REAL(dp), DIMENSION(:, :)                :: empty_coords
     LOGICAL, INTENT(IN)                      :: lhmc
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'mc_input_file_create', &
       routineP = moduleN//':'//routineN
@@ -1036,12 +992,10 @@ SUBROUTINE set_mc_par ( mc_par, rm,cl,&
       io_stat, irep, istat, iunit, iw, line_number, nlines, nmol_types, &
       nstart, row_number, unit
     INTEGER, DIMENSION(:), POINTER           :: nunits
-    TYPE(cp_logger_type), POINTER            :: logger
 
 ! some stuff in case we need to write error messages to the screen
 
-    logger=>cp_error_get_logger(error)
-    iw = cp_logger_get_default_io_unit(logger)
+    iw = cp_logger_get_default_io_unit()
 
 ! allocate the array we'll need in case we have an empty box
     CALL get_mc_molecule_info(mc_molecule_info,nmol_types=nmol_types,&
@@ -1098,7 +1052,7 @@ SUBROUTINE set_mc_par ( mc_par, rm,cl,&
           WRITE(iw,*)
           WRITE(iw,*) 'File name ',input_file_name
        END IF
-       CALL stop_program(routineN,moduleN,__LINE__,&
+       CALL cp_abort(__LOCATION__,&
             'Could not find &END after &GLOBAL (make sure & is in the same column) and last line is blank')
     ENDIF
 
@@ -1112,7 +1066,7 @@ SUBROUTINE set_mc_par ( mc_par, rm,cl,&
           WRITE(iw,*)
           WRITE(iw,*) 'File name ',input_file_name,mc_input_file%motion_row_start
        END IF
-       CALL stop_program(routineN,moduleN,__LINE__,&
+       CALL cp_abort(__LOCATION__,&
             'Could not find &END after &MOTION (make sure & is in the same column) and last line is blank')
     ENDIF
 
@@ -1127,7 +1081,7 @@ SUBROUTINE set_mc_par ( mc_par, rm,cl,&
           WRITE(iw,*)
           WRITE(iw,*) 'File name ',input_file_name
        END IF
-       CALL stop_program(routineN,moduleN,__LINE__,&
+       CALL cp_abort(__LOCATION__,&
             'Could not find &END after &COORD (make sure & is the first in the same column after &COORD)')
     ENDIF
 
@@ -1140,7 +1094,7 @@ SUBROUTINE set_mc_par ( mc_par, rm,cl,&
           WRITE(iw,*)
           WRITE(iw,*) 'File name ',input_file_name
        END IF
-       CALL stop_program(routineN,moduleN,__LINE__,&
+       CALL cp_abort(__LOCATION__,&
             'Could not find RUN_TYPE in the input file (should be in the &GLOBAL section).')
     ENDIF
 
@@ -1167,7 +1121,7 @@ SUBROUTINE set_mc_par ( mc_par, rm,cl,&
           WRITE(iw,*)
           WRITE(iw,*) 'File name ',input_file_name
        END IF
-       CALL stop_program(routineN,moduleN,__LINE__,&
+       CALL cp_abort(__LOCATION__,&
             'Could not find &CELL section in the input file.  Or could not find the ABC line after it.')
     ENDIF
 
@@ -1194,7 +1148,7 @@ SUBROUTINE set_mc_par ( mc_par, rm,cl,&
              WRITE(iw,*) 'Number of molecule types ',nmol_types
              WRITE(iw,*) '&MOLECULE sections found ',irep
           END IF
-          CALL stop_program(routineN,moduleN,__LINE__,&
+          CALL cp_abort(__LOCATION__,&
                'Did not find MOLECULE sections for every molecule in the simulation (make sure both input files have all types)')
        ENDIF
     ENDIF
@@ -1211,8 +1165,7 @@ SUBROUTINE set_mc_par ( mc_par, rm,cl,&
     CASE("QS","QUICKSTEP")
        mc_input_file%in_use=use_qs_force
     CASE default
-       CALL stop_program(routineN,moduleN,__LINE__,&
-            'Cannot determine the type of force_env we are using (check METHOD)')
+       CPABORT('Cannot determine the type of force_env we are using (check METHOD)')
     END SELECT
 
   END SUBROUTINE mc_input_file_create
@@ -1229,23 +1182,11 @@ SUBROUTINE set_mc_par ( mc_par, rm,cl,&
     CHARACTER(len=*), PARAMETER :: routineN = 'mc_input_file_destroy', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: istat
-
-    DEALLOCATE (mc_input_file%mol_set_nmol_row,STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-         "mc_input_file%mol_set_nmol_row")
-    DEALLOCATE (mc_input_file%mol_set_nmol_column,STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-         "mc_input_file%mol_set_nmol_column")
-    DEALLOCATE (mc_input_file%text,STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-         "mc_input_file%text")
-    DEALLOCATE (mc_input_file%atom_names_empty,STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-         "mc_input_file%atom_names_empty")
-    DEALLOCATE (mc_input_file%coordinates_empty,STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-         "mc_input_file%coordinates_empty")
+    DEALLOCATE (mc_input_file%mol_set_nmol_row)
+    DEALLOCATE (mc_input_file%mol_set_nmol_column)
+    DEALLOCATE (mc_input_file%text)
+    DEALLOCATE (mc_input_file%atom_names_empty)
+    DEALLOCATE (mc_input_file%coordinates_empty)
 
   END SUBROUTINE mc_input_file_destroy
 
@@ -1322,18 +1263,15 @@ END SUBROUTINE mc_parse_text
 !> \param input_file_name the name of the input_file
 !> \param input_file the structure that contains all the keywords in the input file
 !> \param force_env_section used to grab the type of force_env
-!> \param error the cp_error_type
 !> \author MJM
 ! *****************************************************************************
-SUBROUTINE read_mc_section ( mc_par, para_env, globenv, input_file_name, input_file, force_env_section,&
-     error )
+SUBROUTINE read_mc_section ( mc_par, para_env, globenv, input_file_name, input_file, force_env_section)
 
     TYPE(mc_simpar_type), POINTER            :: mc_par
     TYPE(cp_para_env_type), POINTER          :: para_env
     TYPE(global_environment_type), POINTER   :: globenv
     CHARACTER(LEN=*), INTENT(IN)             :: input_file_name
     TYPE(section_vals_type), POINTER         :: input_file, force_env_section
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'read_mc_section', &
       routineP = moduleN//':'//routineN
@@ -1348,20 +1286,18 @@ SUBROUTINE read_mc_section ( mc_par, para_env, globenv, input_file_name, input_f
                                                 itype, iw, method_name_id, &
                                                 nmol_types, stop_num
     INTEGER, DIMENSION(:), POINTER           :: temp_i_array
-    LOGICAL                                  :: failure
     REAL(dp), DIMENSION(:), POINTER          :: temp_r_array
-    TYPE(cp_logger_type), POINTER            :: logger
     TYPE(section_vals_type), POINTER         :: mc_section
 
 ! begin the timing of the subroutine
 
-    CPPrecondition(ASSOCIATED(input_file),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(input_file))
 
       CALL timeset(routineN,handle)
 
       NULLIFY(mc_section)
       mc_section => section_vals_get_subs_vals(input_file,&
-         "MOTION%MC",error=error)
+         "MOTION%MC")
 
 ! need the input file sturcutre that we're reading from for when we make
 ! dat files
@@ -1377,7 +1313,7 @@ SUBROUTINE read_mc_section ( mc_par, para_env, globenv, input_file_name, input_f
 
 !..defaults...most are set in input_cp2k_motion
       mc_par % nstart = 0
-      CALL section_vals_val_get(force_env_section,"METHOD",i_val=method_name_id,error=error)
+      CALL section_vals_val_get(force_env_section,"METHOD",i_val=method_name_id)
       SELECT CASE (method_name_id)
       CASE (do_fist)
          mc_par % iprint = 100
@@ -1385,8 +1321,7 @@ SUBROUTINE read_mc_section ( mc_par, para_env, globenv, input_file_name, input_f
          mc_par % iprint = 1
       END SELECT
 
-      logger=>cp_error_get_logger(error)
-      iw = cp_logger_get_default_io_unit(logger)
+      iw = cp_logger_get_default_io_unit()
       IF(iw>0) WRITE ( iw, * )
 
 !..filenames
@@ -1405,19 +1340,19 @@ SUBROUTINE read_mc_section ( mc_par, para_env, globenv, input_file_name, input_f
 
 ! set them into the input parameter structure as the new defaults
       CALL section_vals_val_set(mc_section,"COORDINATE_FILE_NAME",&
-             c_val=mc_par%coords_file,error=error)
+             c_val=mc_par%coords_file)
       CALL section_vals_val_set(mc_section,"DATA_FILE_NAME",&
-             c_val=mc_par%data_file,error=error)
+             c_val=mc_par%data_file)
       CALL section_vals_val_set(mc_section,"CELL_FILE_NAME",&
-             c_val=mc_par%cell_file,error=error)
+             c_val=mc_par%cell_file)
       CALL section_vals_val_set(mc_section,"MAX_DISP_FILE_NAME",&
-             c_val=mc_par%displacement_file,error=error)
+             c_val=mc_par%displacement_file)
       CALL section_vals_val_set(mc_section,"MOVES_FILE_NAME",&
-             c_val=mc_par%moves_file,error=error)
+             c_val=mc_par%moves_file)
       CALL section_vals_val_set(mc_section,"MOLECULES_FILE_NAME",&
-             c_val=mc_par%molecules_file,error=error)
+             c_val=mc_par%molecules_file)
       CALL section_vals_val_set(mc_section,"ENERGY_FILE_NAME",&
-             c_val=mc_par%energy_file,error=error)
+             c_val=mc_par%energy_file)
 
 ! grab the FFT library name and print level...this is used for writing the dat file
 ! and hopefully will be changed
@@ -1428,26 +1363,26 @@ SUBROUTINE read_mc_section ( mc_par, para_env, globenv, input_file_name, input_f
 
 ! find out if we're only doing HMC moves...we can ignore a lot of extra information
 ! then, which would ordinarily be cause for concern
-      CALL section_vals_val_get(mc_section,"MOVE_PROBABILITIES%PMHMC",r_val=mc_par%pmhmc,error=error)
-      CALL section_vals_val_get(mc_section,"MOVE_PROBABILITIES%PMSWAP",r_val=mc_par%pmswap,error=error)
-      CALL section_vals_val_get(mc_section,"MOVE_PROBABILITIES%PMVOLUME",r_val=mc_par%pmvolume,error=error)
-      CALL section_vals_val_get(mc_section,"MOVE_PROBABILITIES%PMAVBMC",r_val=mc_par%pmavbmc,error=error)
-      CALL section_vals_val_get(mc_section,"MOVE_PROBABILITIES%PMTRANS",r_val=mc_par%pmtrans,error=error)
-      CALL section_vals_val_get(mc_section,"MOVE_PROBABILITIES%PMTRAION",r_val=mc_par%pmtraion,error=error)
+      CALL section_vals_val_get(mc_section,"MOVE_PROBABILITIES%PMHMC",r_val=mc_par%pmhmc)
+      CALL section_vals_val_get(mc_section,"MOVE_PROBABILITIES%PMSWAP",r_val=mc_par%pmswap)
+      CALL section_vals_val_get(mc_section,"MOVE_PROBABILITIES%PMVOLUME",r_val=mc_par%pmvolume)
+      CALL section_vals_val_get(mc_section,"MOVE_PROBABILITIES%PMAVBMC",r_val=mc_par%pmavbmc)
+      CALL section_vals_val_get(mc_section,"MOVE_PROBABILITIES%PMTRANS",r_val=mc_par%pmtrans)
+      CALL section_vals_val_get(mc_section,"MOVE_PROBABILITIES%PMTRAION",r_val=mc_par%pmtraion)
 
 
  ! first, grab all the integer values
-      CALL section_vals_val_get(mc_section,"NSTEP",i_val=mc_par%nstep,error=error)
-      CALL section_vals_val_get(mc_section,"NMOVES",i_val=mc_par%nmoves,error=error)
-      CALL section_vals_val_get(mc_section,"NSWAPMOVES",i_val=mc_par%nswapmoves,error=error)
+      CALL section_vals_val_get(mc_section,"NSTEP",i_val=mc_par%nstep)
+      CALL section_vals_val_get(mc_section,"NMOVES",i_val=mc_par%nmoves)
+      CALL section_vals_val_get(mc_section,"NSWAPMOVES",i_val=mc_par%nswapmoves)
       CALL section_vals_val_get(mc_section,"MOVE_UPDATES%IUPVOLUME",&
-           i_val=mc_par%iupvolume,error=error)
-      CALL section_vals_val_get(mc_section,"NVIRIAL",i_val=mc_par%nvirial,error=error)
+           i_val=mc_par%iupvolume)
+      CALL section_vals_val_get(mc_section,"NVIRIAL",i_val=mc_par%nvirial)
       CALL section_vals_val_get(mc_section,"MOVE_UPDATES%IUPTRANS",&
-           i_val=mc_par%iuptrans,error=error)
-      CALL section_vals_val_get(mc_section,"IPRINT",i_val=mc_par%iprint,error=error)
+           i_val=mc_par%iuptrans)
+      CALL section_vals_val_get(mc_section,"IPRINT",i_val=mc_par%iprint)
 ! now an integer array
-      CALL section_vals_val_get(mc_section,"AVBMC%AVBMC_ATOM",i_vals=temp_i_array,error=error)
+      CALL section_vals_val_get(mc_section,"AVBMC%AVBMC_ATOM",i_vals=temp_i_array)
 
 
       IF(mc_par%pmhmc - mc_par%pmswap >= 1.0_dp .AND. mc_par%pmhmc == 1.0_dp)THEN
@@ -1458,8 +1393,7 @@ SUBROUTINE read_mc_section ( mc_par, para_env, globenv, input_file_name, input_f
 
       IF( .NOT. mc_par%lhmc)THEN
          IF(SIZE(temp_i_array) .NE. nmol_types)THEN
-            CALL stop_program(routineN,moduleN,__LINE__,&
-                 'AVBMC_ATOM must have as many values as there are molecule types.')
+            CPABORT('AVBMC_ATOM must have as many values as there are molecule types.')
          ENDIF
       ENDIF
       DO imol=1,SIZE(temp_i_array)
@@ -1467,32 +1401,32 @@ SUBROUTINE read_mc_section ( mc_par, para_env, globenv, input_file_name, input_f
       ENDDO
 
 ! now the real values
-      CALL section_vals_val_get(mc_section,"PRESSURE",r_val=mc_par%pressure,error=error)
-      CALL section_vals_val_get(mc_section,"TEMPERATURE",r_val=mc_par%temperature,error=error)
+      CALL section_vals_val_get(mc_section,"PRESSURE",r_val=mc_par%pressure)
+      CALL section_vals_val_get(mc_section,"TEMPERATURE",r_val=mc_par%temperature)
       CALL section_vals_val_get(mc_section,"MOVE_PROBABILITIES%BOX_PROBABILITIES%PMHMC_BOX",&
-           r_val=mc_par%pmhmc_box,error=error)
+           r_val=mc_par%pmhmc_box)
       CALL section_vals_val_get(mc_section,"MOVE_PROBABILITIES%BOX_PROBABILITIES%PMVOL_BOX",&
-           r_val=mc_par%pmvol_box,error=error)
-      CALL section_vals_val_get(mc_section,"DISCRETE_STEP",r_val=mc_par%discrete_step,error=error)
+           r_val=mc_par%pmvol_box)
+      CALL section_vals_val_get(mc_section,"DISCRETE_STEP",r_val=mc_par%discrete_step)
       CALL section_vals_val_get(mc_section,"MAX_DISPLACEMENTS%BOX_DISPLACEMENTS%RMVOLUME",&
-           r_val=mc_par%rmvolume,error=error)
+           r_val=mc_par%rmvolume)
 
 ! finally the character values
-      CALL section_vals_val_get(mc_section,"ENSEMBLE",c_val=mc_par%ensemble,error=error)
-      CALL section_vals_val_get(mc_section,"RESTART_FILE_NAME",c_val=mc_par%restart_file_name,error=error)
-      CALL section_vals_val_get(mc_section,"COORDINATE_FILE_NAME",c_val=mc_par%coords_file,error=error)
-      CALL section_vals_val_get(mc_section,"ENERGY_FILE_NAME",c_val=mc_par%energy_file,error=error)
-      CALL section_vals_val_get(mc_section,"MOVES_FILE_NAME",c_val=mc_par%moves_file,error=error)
-      CALL section_vals_val_get(mc_section,"MOLECULES_FILE_NAME",c_val=mc_par%molecules_file,error=error)
-      CALL section_vals_val_get(mc_section,"CELL_FILE_NAME",c_val=mc_par%cell_file,error=error)
-      CALL section_vals_val_get(mc_section,"DATA_FILE_NAME",c_val=mc_par%data_file,error=error)
-      CALL section_vals_val_get(mc_section,"MAX_DISP_FILE_NAME",c_val=mc_par%displacement_file,error=error)
-      CALL section_vals_val_get(mc_section,"BOX2_FILE_NAME",c_val=mc_par%box2_file,error=error)
+      CALL section_vals_val_get(mc_section,"ENSEMBLE",c_val=mc_par%ensemble)
+      CALL section_vals_val_get(mc_section,"RESTART_FILE_NAME",c_val=mc_par%restart_file_name)
+      CALL section_vals_val_get(mc_section,"COORDINATE_FILE_NAME",c_val=mc_par%coords_file)
+      CALL section_vals_val_get(mc_section,"ENERGY_FILE_NAME",c_val=mc_par%energy_file)
+      CALL section_vals_val_get(mc_section,"MOVES_FILE_NAME",c_val=mc_par%moves_file)
+      CALL section_vals_val_get(mc_section,"MOLECULES_FILE_NAME",c_val=mc_par%molecules_file)
+      CALL section_vals_val_get(mc_section,"CELL_FILE_NAME",c_val=mc_par%cell_file)
+      CALL section_vals_val_get(mc_section,"DATA_FILE_NAME",c_val=mc_par%data_file)
+      CALL section_vals_val_get(mc_section,"MAX_DISP_FILE_NAME",c_val=mc_par%displacement_file)
+      CALL section_vals_val_get(mc_section,"BOX2_FILE_NAME",c_val=mc_par%box2_file)
 
 ! set the values of the arrays...if we just point, we have problems when we start fooling around
 ! with releasing force_envs and wonky values get set (despite that these are private)
       IF(mc_par%ensemble == "VIRIAL") THEN
-        CALL section_vals_val_get(mc_section,"VIRIAL_TEMPS",r_vals=temp_r_array,error=error)
+        CALL section_vals_val_get(mc_section,"VIRIAL_TEMPS",r_vals=temp_r_array)
 ! yes, I'm allocating here...I cannot find a better place to do it, though
         ALLOCATE (mc_par%virial_temps(1:SIZE(temp_r_array)),STAT=istat)
         IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
@@ -1502,107 +1436,97 @@ SUBROUTINE read_mc_section ( mc_par, para_env, globenv, input_file_name, input_f
         ENDDO
       END IF
 ! all of these arrays should have one value for each type of molecule...so check that
-      CALL section_vals_val_get(mc_section,"AVBMC%AVBMC_RMIN",r_vals=temp_r_array,error=error)
+      CALL section_vals_val_get(mc_section,"AVBMC%AVBMC_RMIN",r_vals=temp_r_array)
       IF( .NOT. mc_par%lhmc)THEN
          IF(SIZE(temp_r_array) .NE. nmol_types)THEN
-            CALL stop_program(routineN,moduleN,__LINE__,&
-                 'AVBMC_RMIN must have as many values as there are molecule types.')
+            CPABORT('AVBMC_RMIN must have as many values as there are molecule types.')
          ENDIF
       ENDIF
       DO imol=1,SIZE(temp_r_array)
          mc_par%avbmc_rmin(imol)=temp_r_array(imol)
       ENDDO
-      CALL section_vals_val_get(mc_section,"AVBMC%AVBMC_RMAX",r_vals=temp_r_array,error=error)
+      CALL section_vals_val_get(mc_section,"AVBMC%AVBMC_RMAX",r_vals=temp_r_array)
       IF( .NOT. mc_par%lhmc)THEN
          IF(SIZE(temp_r_array) .NE. nmol_types)THEN
-            CALL stop_program(routineN,moduleN,__LINE__,&
-                 'AVBMC_RMAXL must have as many values as there are molecule types.')
+            CPABORT('AVBMC_RMAXL must have as many values as there are molecule types.')
          ENDIF
       ENDIF
       DO imol=1,SIZE(temp_r_array)
          mc_par%avbmc_rmax(imol)=temp_r_array(imol)
       ENDDO
-      CALL section_vals_val_get(mc_section,"AVBMC%PBIAS",r_vals=temp_r_array,error=error)
+      CALL section_vals_val_get(mc_section,"AVBMC%PBIAS",r_vals=temp_r_array)
       IF( .NOT. mc_par%lhmc)THEN
          IF(SIZE(temp_r_array) .NE. nmol_types)THEN
-            CALL stop_program(routineN,moduleN,__LINE__,&
-                 'PBIAS must have as many values as there are molecule types.')
+            CPABORT('PBIAS must have as many values as there are molecule types.')
          ENDIF
       ENDIF
       DO imol=1,SIZE(temp_r_array)
          mc_par%pbias(imol)=temp_r_array(imol)
       ENDDO
       CALL section_vals_val_get(mc_section,"MOVE_PROBABILITIES%MOL_PROBABILITIES%PMAVBMC_MOL",&
-           r_vals=temp_r_array,error=error)
+           r_vals=temp_r_array)
       IF( .NOT. mc_par%lhmc)THEN
          IF(SIZE(temp_r_array) .NE. nmol_types)THEN
-            CALL stop_program(routineN,moduleN,__LINE__,&
-                 'PMAVBMC_MOL must have as many values as there are molecule types.')
+            CPABORT('PMAVBMC_MOL must have as many values as there are molecule types.')
          ENDIF
       ENDIF
       DO imol=1,SIZE(temp_r_array)
          mc_par%pmavbmc_mol(imol)=temp_r_array(imol)
       ENDDO
-      CALL section_vals_val_get(mc_section,"ETA",r_vals=temp_r_array,error=error)
+      CALL section_vals_val_get(mc_section,"ETA",r_vals=temp_r_array)
       IF( .NOT. mc_par%lhmc)THEN
          IF(SIZE(temp_r_array) .NE. nmol_types)THEN
-            CALL stop_program(routineN,moduleN,__LINE__,&
-                 'ETA must have as many values as there are molecule types.')
+            CPABORT('ETA must have as many values as there are molecule types.')
          ENDIF
       ENDIF
       DO imol=1,SIZE(temp_r_array)
          mc_par%eta(imol)=temp_r_array(imol)
       ENDDO
       CALL section_vals_val_get(mc_section,"MAX_DISPLACEMENTS%MOL_DISPLACEMENTS%RMBOND",&
-           r_vals=temp_r_array,error=error)
+           r_vals=temp_r_array)
       IF( .NOT. mc_par%lhmc)THEN
          IF(SIZE(temp_r_array) .NE. nmol_types)THEN
-            CALL stop_program(routineN,moduleN,__LINE__,&
-                 'RMBOND must have as many values as there are molecule types.')
+            CPABORT('RMBOND must have as many values as there are molecule types.')
          ENDIF
       ENDIF
       DO imol=1,SIZE(temp_r_array)
          mc_par%rmbond(imol)=temp_r_array(imol)
       ENDDO
       CALL section_vals_val_get(mc_section,"MAX_DISPLACEMENTS%MOL_DISPLACEMENTS%RMANGLE",&
-           r_vals=temp_r_array,error=error)
+           r_vals=temp_r_array)
       IF( .NOT. mc_par%lhmc)THEN
          IF(SIZE(temp_r_array) .NE. nmol_types)THEN
-            CALL stop_program(routineN,moduleN,__LINE__,&
-                 'RMANGLE must have as many values as there are molecule types.')
+            CPABORT('RMANGLE must have as many values as there are molecule types.')
          ENDIF
       ENDIF
       DO imol=1,SIZE(temp_r_array)
          mc_par%rmangle(imol)=temp_r_array(imol)
       ENDDO
       CALL section_vals_val_get(mc_section,"MAX_DISPLACEMENTS%MOL_DISPLACEMENTS%RMDIHEDRAL",&
-           r_vals=temp_r_array,error=error)
+           r_vals=temp_r_array)
       IF( .NOT. mc_par%lhmc)THEN
          IF(SIZE(temp_r_array) .NE. nmol_types)THEN
-            CALL stop_program(routineN,moduleN,__LINE__,&
-                 'RMDIHEDRAL must have as many values as there are molecule types.')
+            CPABORT('RMDIHEDRAL must have as many values as there are molecule types.')
          ENDIF
       ENDIF
       DO imol=1,SIZE(temp_r_array)
          mc_par%rmdihedral(imol)=temp_r_array(imol)
       ENDDO
       CALL section_vals_val_get(mc_section,"MAX_DISPLACEMENTS%MOL_DISPLACEMENTS%RMROT",&
-           r_vals=temp_r_array,error=error)
+           r_vals=temp_r_array)
       IF( .NOT. mc_par%lhmc)THEN
          IF(SIZE(temp_r_array) .NE. nmol_types)THEN
-            CALL stop_program(routineN,moduleN,__LINE__,&
-                 'RMROT must have as many values as there are molecule types.')
+            CPABORT('RMROT must have as many values as there are molecule types.')
          ENDIF
       ENDIF
       DO imol=1,SIZE(temp_r_array)
          mc_par%rmrot(imol)=temp_r_array(imol)
       ENDDO
       CALL section_vals_val_get(mc_section,"MAX_DISPLACEMENTS%MOL_DISPLACEMENTS%RMTRANS",&
-           r_vals=temp_r_array,error=error)
+           r_vals=temp_r_array)
       IF( .NOT. mc_par%lhmc)THEN
          IF(SIZE(temp_r_array) .NE. nmol_types)THEN
-            CALL stop_program(routineN,moduleN,__LINE__,&
-                 'RMTRANS must have as many values as there are molecule types.')
+            CPABORT('RMTRANS must have as many values as there are molecule types.')
          ENDIF
       ENDIF
       DO imol=1,SIZE(temp_r_array)
@@ -1610,11 +1534,10 @@ SUBROUTINE read_mc_section ( mc_par, para_env, globenv, input_file_name, input_f
       ENDDO
 
       CALL section_vals_val_get(mc_section,"MOVE_PROBABILITIES%MOL_PROBABILITIES%PMTRAION_MOL",&
-           r_vals=temp_r_array,error=error)
+           r_vals=temp_r_array)
       IF( .NOT. mc_par%lhmc)THEN
          IF(SIZE(temp_r_array) .NE. nmol_types)THEN
-            CALL stop_program(routineN,moduleN,__LINE__,&
-                 'PMTRAION_MOL must have as many values as there are molecule types.')
+            CPABORT('PMTRAION_MOL must have as many values as there are molecule types.')
          ENDIF
       ENDIF
       DO imol=1,SIZE(temp_r_array)
@@ -1622,11 +1545,10 @@ SUBROUTINE read_mc_section ( mc_par, para_env, globenv, input_file_name, input_f
       ENDDO
 
       CALL section_vals_val_get(mc_section,"MOVE_PROBABILITIES%MOL_PROBABILITIES%PMTRANS_MOL",&
-           r_vals=temp_r_array,error=error)
+           r_vals=temp_r_array)
       IF( .NOT. mc_par%lhmc)THEN
          IF(SIZE(temp_r_array) .NE. nmol_types)THEN
-            CALL stop_program(routineN,moduleN,__LINE__,&
-                 'PMTRANS_MOL must have as many values as there are molecule types.')
+            CPABORT('PMTRANS_MOL must have as many values as there are molecule types.')
          ENDIF
       ENDIF
       DO imol=1,SIZE(temp_r_array)
@@ -1634,11 +1556,10 @@ SUBROUTINE read_mc_section ( mc_par, para_env, globenv, input_file_name, input_f
       ENDDO
 
       CALL section_vals_val_get(mc_section,"MOVE_PROBABILITIES%MOL_PROBABILITIES%PMROT_MOL",&
-           r_vals=temp_r_array,error=error)
+           r_vals=temp_r_array)
       IF( .NOT. mc_par%lhmc)THEN
          IF(SIZE(temp_r_array) .NE. nmol_types)THEN
-            CALL stop_program(routineN,moduleN,__LINE__,&
-                 'PMROT_MOL must have as many values as there are molecule types.')
+            CPABORT('PMROT_MOL must have as many values as there are molecule types.')
          ENDIF
       ENDIF
       DO imol=1,SIZE(temp_r_array)
@@ -1646,11 +1567,10 @@ SUBROUTINE read_mc_section ( mc_par, para_env, globenv, input_file_name, input_f
       ENDDO
 
       CALL section_vals_val_get(mc_section,"MOVE_PROBABILITIES%MOL_PROBABILITIES%PMSWAP_MOL",&
-           r_vals=temp_r_array,error=error)
+           r_vals=temp_r_array)
       IF( .NOT. mc_par%lhmc)THEN
          IF(SIZE(temp_r_array) .NE. nmol_types)THEN
-            CALL stop_program(routineN,moduleN,__LINE__,&
-                 'PMSWAP_MOL must have as many values as there are molecule types.')
+            CPABORT('PMSWAP_MOL must have as many values as there are molecule types.')
          ENDIF
       ENDIF
       DO imol=1,SIZE(temp_r_array)
@@ -1658,11 +1578,11 @@ SUBROUTINE read_mc_section ( mc_par, para_env, globenv, input_file_name, input_f
       ENDDO
 
 ! now some logical values
-      CALL section_vals_val_get(mc_section,"LBIAS",l_val=mc_par%lbias,error=error)
-      CALL section_vals_val_get(mc_section,"LDISCRETE",l_val=mc_par%ldiscrete,error=error)
-      CALL section_vals_val_get(mc_section,"LSTOP",l_val=mc_par%lstop,error=error)
-      CALL section_vals_val_get(mc_section,"RESTART",l_val=mc_par%lrestart,error=error)
-      CALL section_vals_val_get(mc_section,"LBIAS",l_val=mc_par%lbias,error=error)
+      CALL section_vals_val_get(mc_section,"LBIAS",l_val=mc_par%lbias)
+      CALL section_vals_val_get(mc_section,"LDISCRETE",l_val=mc_par%ldiscrete)
+      CALL section_vals_val_get(mc_section,"LSTOP",l_val=mc_par%lstop)
+      CALL section_vals_val_get(mc_section,"RESTART",l_val=mc_par%lrestart)
+      CALL section_vals_val_get(mc_section,"LBIAS",l_val=mc_par%lbias)
 
 !..end of parsing the input section
 
@@ -1816,7 +1736,7 @@ SUBROUTINE read_mc_section ( mc_par, para_env, globenv, input_file_name, input_f
       mc_par % min_val     = 0.0_dp
 
 ! convert from bar to a.u.
-      mc_par%pressure = cp_unit_to_cp2k(mc_par%pressure,"bar",error=error)
+      mc_par%pressure = cp_unit_to_cp2k(mc_par%pressure,"bar")
 ! convert from angstrom to a.u.
       DO itype=1,mc_par%mc_molecule_info%nmol_types
 ! convert from Kelvin to a.u.
@@ -1825,14 +1745,14 @@ SUBROUTINE read_mc_section ( mc_par, para_env, globenv, input_file_name, input_f
          mc_par%rmrot(itype) = mc_par%rmrot(itype)/180.0e0_dp*pi
          mc_par%rmangle(itype) = mc_par%rmangle(itype)/180.0e0_dp*pi
          mc_par%rmdihedral(itype) = mc_par%rmdihedral(itype)/180.0e0_dp*pi
-         mc_par%rmtrans(itype) = cp_unit_to_cp2k(mc_par%rmtrans(itype),"angstrom",error=error)
-         mc_par%rmbond(itype) = cp_unit_to_cp2k(mc_par%rmbond(itype),"angstrom",error=error)
-         mc_par%eta(itype) = cp_unit_to_cp2k(mc_par%eta(itype),"K_e",error=error)
-         mc_par%avbmc_rmin(itype) = cp_unit_to_cp2k(mc_par%avbmc_rmin(itype),"angstrom",error=error)
-         mc_par%avbmc_rmax(itype) = cp_unit_to_cp2k(mc_par%avbmc_rmax(itype),"angstrom",error=error)
+         mc_par%rmtrans(itype) = cp_unit_to_cp2k(mc_par%rmtrans(itype),"angstrom")
+         mc_par%rmbond(itype) = cp_unit_to_cp2k(mc_par%rmbond(itype),"angstrom")
+         mc_par%eta(itype) = cp_unit_to_cp2k(mc_par%eta(itype),"K_e")
+         mc_par%avbmc_rmin(itype) = cp_unit_to_cp2k(mc_par%avbmc_rmin(itype),"angstrom")
+         mc_par%avbmc_rmax(itype) = cp_unit_to_cp2k(mc_par%avbmc_rmax(itype),"angstrom")
       ENDDO
-      mc_par%rmvolume = cp_unit_to_cp2k(mc_par%rmvolume,"angstrom^3",error=error)
-      mc_par%discrete_step = cp_unit_to_cp2k(mc_par%discrete_step,"angstrom",error=error)
+      mc_par%rmvolume = cp_unit_to_cp2k(mc_par%rmvolume,"angstrom^3")
+      mc_par%discrete_step = cp_unit_to_cp2k(mc_par%discrete_step,"angstrom")
 
 ! end the timing
       CALL timestop(handle)
@@ -1864,7 +1784,6 @@ SUBROUTINE find_mc_rcut ( mc_par, force_env, lterminate )
     REAL(KIND=dp)                            :: rcutsq_max
     REAL(KIND=dp), DIMENSION(1:3)            :: abc
     TYPE(cell_type), POINTER                 :: cell
-    TYPE(cp_error_type)                      :: error
     TYPE(fist_environment_type), POINTER     :: fist_env
     TYPE(fist_nonbond_env_type), POINTER     :: fist_nonbond_env
     TYPE(pair_potential_pp_type), POINTER    :: potparm
@@ -1872,10 +1791,10 @@ SUBROUTINE find_mc_rcut ( mc_par, force_env, lterminate )
       NULLIFY(cell,potparm,fist_nonbond_env,fist_env)
 
       lterminate=.FALSE.
-      CALL force_env_get(force_env,fist_env=fist_env,error=error)
+      CALL force_env_get(force_env,fist_env=fist_env)
       CALL fist_env_get(fist_env,cell=cell,&
-         fist_nonbond_env=fist_nonbond_env,error=error)
-      CALL fist_nonbond_env_get (fist_nonbond_env, potparm=potparm,error=error)
+         fist_nonbond_env=fist_nonbond_env)
+      CALL fist_nonbond_env_get (fist_nonbond_env, potparm=potparm)
       CALL get_cell(cell,abc=abc)
 
 ! find the largest value of rcutsq
@@ -1909,18 +1828,16 @@ END SUBROUTINE find_mc_rcut
 !>          for the molecule types
 !>
 !>    Suitable for parallel.
-!> \param error ...
 !> \param box_number ...
 !> \param coordinates_empty ...
 !> \author MJM
 ! *****************************************************************************
-SUBROUTINE mc_determine_molecule_info(force_env,mc_molecule_info,error,box_number,&
+SUBROUTINE mc_determine_molecule_info(force_env,mc_molecule_info,box_number,&
      coordinates_empty)
 
     TYPE(force_env_p_type), DIMENSION(:), &
       POINTER                                :: force_env
     TYPE(mc_molecule_info_type), POINTER     :: mc_molecule_info
-    TYPE(cp_error_type), INTENT(inout)       :: error
     INTEGER, INTENT(IN), OPTIONAL            :: box_number
     REAL(dp), DIMENSION(:, :), OPTIONAL, &
       POINTER                                :: coordinates_empty
@@ -1981,10 +1898,10 @@ SUBROUTINE mc_determine_molecule_info(force_env,mc_molecule_info,error,box_numbe
     DO ibox=1,nboxes
        IF(ibox == skip_box) CYCLE
        CALL force_env_get(force_env(ibox)%force_env,&
-            subsys=subsys,error=error)
+            subsys=subsys)
        CALL cp_subsys_get(subsys, &
             molecule_kinds_new=molecule_kinds_new(ibox)%list,&
-            particles=particles(ibox)%list,error=error)
+            particles=particles(ibox)%list)
        ntypes=ntypes+SIZE(molecule_kinds_new(ibox)%list%els(:))
     ENDDO
 
@@ -2150,12 +2067,9 @@ SUBROUTINE mc_determine_molecule_info(force_env,mc_molecule_info,error,box_numbe
     ENDDO
 
 ! get rid of stuff we don't need
-    DEALLOCATE(names_init,stat=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"names_init")
-    DEALLOCATE(molecule_kinds_new,stat=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"molecule_kinds_new")
-    DEALLOCATE(particles,stat=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"particles")
+    DEALLOCATE(names_init)
+    DEALLOCATE(molecule_kinds_new)
+    DEALLOCATE(particles)
 
 END SUBROUTINE MC_DETERMINE_MOLECULE_INFO
 
@@ -2173,29 +2087,17 @@ SUBROUTINE mc_molecule_info_destroy(mc_molecule_info)
     CHARACTER(LEN=*), PARAMETER :: routineN = 'mc_molecule_info_destroy', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: istat
+    DEALLOCATE(mc_molecule_info%nchains)
+    DEALLOCATE(mc_molecule_info%nunits)
+    DEALLOCATE(mc_molecule_info%mol_type)
+    DEALLOCATE(mc_molecule_info%in_box)
+    DEALLOCATE(mc_molecule_info%names)
+    DEALLOCATE(mc_molecule_info%atom_names)
+    DEALLOCATE(mc_molecule_info%conf_prob)
+    DEALLOCATE(mc_molecule_info%nunits_tot)
+    DEALLOCATE(mc_molecule_info%mass)
 
-    DEALLOCATE(mc_molecule_info%nchains,stat=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"nchains")
-    DEALLOCATE(mc_molecule_info%nunits,stat=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"nunits")
-    DEALLOCATE(mc_molecule_info%mol_type,stat=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"mol_type")
-    DEALLOCATE(mc_molecule_info%in_box,stat=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"in_box")
-    DEALLOCATE(mc_molecule_info%names,stat=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"names")
-    DEALLOCATE(mc_molecule_info%atom_names,stat=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"atom_names")
-    DEALLOCATE(mc_molecule_info%conf_prob,stat=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"conf_prob")
-    DEALLOCATE(mc_molecule_info%nunits_tot,stat=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"nunits_tot")
-    DEALLOCATE(mc_molecule_info%mass,stat=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"mass")
-
-    DEALLOCATE(mc_molecule_info,stat=istat)
-    IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"mc_molecule_info")
+    DEALLOCATE(mc_molecule_info)
     NULLIFY(mc_molecule_info)
 
   END SUBROUTINE mc_molecule_info_destroy
@@ -2235,24 +2137,19 @@ SUBROUTINE mc_molecule_info_destroy(mc_molecule_info)
 ! the final value of these arrays needs to be 1.0, otherwise there is
 ! a chance we won't select a molecule type for a move
     IF(mc_par%pmavbmc_mol(nmol_types) .LT. 0.9999E0_dp) THEN
-       CALL stop_program(routineN,moduleN,__LINE__,&
-            'The last value of PMAVBMC_MOL needs to be 1.0')
+       CPABORT('The last value of PMAVBMC_MOL needs to be 1.0')
     ENDIF
     IF(mc_par%pmswap_mol(nmol_types) .LT. 0.9999E0_dp) THEN
-       CALL stop_program(routineN,moduleN,__LINE__,&
-            'The last value of PMSWAP_MOL needs to be 1.0')
+       CPABORT('The last value of PMSWAP_MOL needs to be 1.0')
     ENDIF
     IF(mc_par%pmtraion_mol(nmol_types) .LT. 0.9999E0_dp) THEN
-       CALL stop_program(routineN,moduleN,__LINE__,&
-            'The last value of PMTRAION_MOL needs to be 1.0')
+       CPABORT('The last value of PMTRAION_MOL needs to be 1.0')
     ENDIF
     IF(mc_par%pmtrans_mol(nmol_types) .LT. 0.9999E0_dp) THEN
-       CALL stop_program(routineN,moduleN,__LINE__,&
-            'The last value of PMTRANS_MOL needs to be 1.0')
+       CPABORT('The last value of PMTRANS_MOL needs to be 1.0')
     ENDIF
     IF(mc_par%pmrot_mol(nmol_types) .LT. 0.9999E0_dp) THEN
-       CALL stop_program(routineN,moduleN,__LINE__,&
-            'The last value of PMROT_MOL needs to be 1.0')
+       CPABORT('The last value of PMROT_MOL needs to be 1.0')
     ENDIF
 
 ! check to make sure we have all the desired values for various
@@ -2261,31 +2158,25 @@ SUBROUTINE mc_molecule_info_destroy(mc_molecule_info)
     SELECT CASE(mc_par%ensemble)
     CASE("GEMC_NPT")
        IF(nmol_types .LE. 1) &
-            CALL stop_program(routineN,moduleN,__LINE__,&
-            'Cannot have GEMC-NPT simulation with only one molecule type')
+            CPABORT('Cannot have GEMC-NPT simulation with only one molecule type')
        IF(nboxes .LE. 1) &
-            CALL stop_program(routineN,moduleN,__LINE__,&
-            'Cannot have GEMC-NPT simulation with only one box')
+            CPABORT('Cannot have GEMC-NPT simulation with only one box')
     CASE("GEMC_NVT")
        IF(nboxes .LE. 1) &
-            CALL stop_program(routineN,moduleN,__LINE__,&
-            'Cannot have GEMC-NVT simulation with only one box')
+            CPABORT('Cannot have GEMC-NVT simulation with only one box')
     CASE("TRADITIONAL")
        IF(mc_par%pmswap .GT. 0.0E0_dp)&
-            CALL stop_program(routineN,moduleN,__LINE__,&
-            'You cannot do swap moves in a system with only one box')
+            CPABORT('You cannot do swap moves in a system with only one box')
     CASE("VIRIAL")
        IF(nchain_total .NE. 2)&
-            CALL stop_program(routineN,moduleN,__LINE__,&
-            'You need exactly two molecules in the box to compute the second virial.')
+            CPABORT('You need exactly two molecules in the box to compute the second virial.')
     END SELECT
 
 ! can't choose an AVBMC target atom number higher than the number
 ! of units in that molecule
     DO imol_type=1,nmol_types
        IF(mc_par%avbmc_atom(imol_type) .GT. nunits(imol_type)) THEN
-          CALL stop_program(routineN,moduleN,__LINE__,&
-               'Cannot have avbmc_atom higher than the number of atoms for that molecule type!')
+          CPABORT('Cannot have avbmc_atom higher than the number of atoms for that molecule type!')
        ENDIF
     ENDDO
 

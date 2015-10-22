@@ -13,13 +13,12 @@ MODULE qs_integral_utils
 
   USE basis_set_types,                 ONLY: gto_basis_set_p_type,&
                                              gto_basis_set_type
-  USE input_constants,                 ONLY: use_aux_fit_basis_set,&
-                                             use_orb_basis_set
   USE orbital_pointers,                ONLY: init_orbital_pointers
   USE qs_kind_types,                   ONLY: get_qs_kind,&
                                              get_qs_kind_set,&
                                              qs_kind_type
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -45,14 +44,14 @@ CONTAINS
 ! *****************************************************************************
 !> \brief Return the maximum memory usage in integral calculations
 !> \param qs_kind_set The info for all atomic kinds
-!> \param basis_set_id_a  Type of basis
+!> \param basis_type_a  Type of basis
 !> \retval ldmem          Result
 ! *****************************************************************************
-  FUNCTION get_memory_usage_a(qs_kind_set,basis_set_id_a) RESULT(ldmem)
+  FUNCTION get_memory_usage_a(qs_kind_set,basis_type_a) RESULT(ldmem)
 
     TYPE(qs_kind_type), DIMENSION(:), &
       POINTER                                :: qs_kind_set
-    INTEGER, INTENT(IN)                      :: basis_set_id_a
+    CHARACTER(LEN=*), INTENT(IN)             :: basis_type_a
     INTEGER                                  :: ldmem
 
     CHARACTER(len=*), PARAMETER :: routineN = 'get_memory_usage_a', &
@@ -62,7 +61,7 @@ CONTAINS
 
     CALL get_qs_kind_set(qs_kind_set=qs_kind_set,&
                              maxco=maxc, maxlgto=maxl, maxsgf=maxs,&
-                             basis_set_id=basis_set_id_a)
+                             basis_type=basis_type_a)
     ldmem = MAX(maxc,maxs)
 
     CALL init_orbital_pointers(maxl+2)
@@ -72,15 +71,15 @@ CONTAINS
 ! *****************************************************************************
 !> \brief Return the maximum memory usage in integral calculations
 !> \param qs_kind_set The info for all atomic kinds
-!> \param basis_set_id_a  Type of basis
-!> \param basis_set_id_b  Type of basis
+!> \param basis_type_a  Type of basis
+!> \param basis_type_b  Type of basis
 !> \retval ldmem          Result
 ! *****************************************************************************
-  FUNCTION get_memory_usage_ab(qs_kind_set,basis_set_id_a,basis_set_id_b) RESULT(ldmem)
+  FUNCTION get_memory_usage_ab(qs_kind_set,basis_type_a,basis_type_b) RESULT(ldmem)
 
     TYPE(qs_kind_type), DIMENSION(:), &
       POINTER                                :: qs_kind_set
-    INTEGER, INTENT(IN)                      :: basis_set_id_a, basis_set_id_b
+    CHARACTER(LEN=*), INTENT(IN)             :: basis_type_a, basis_type_b
     INTEGER                                  :: ldmem
 
     CHARACTER(len=*), PARAMETER :: routineN = 'get_memory_usage_ab', &
@@ -88,8 +87,8 @@ CONTAINS
 
     INTEGER                                  :: lda, ldb
 
-    lda = get_memory_usage_a(qs_kind_set,basis_set_id_a)
-    ldb = get_memory_usage_a(qs_kind_set,basis_set_id_b)
+    lda = get_memory_usage_a(qs_kind_set,basis_type_a)
+    ldb = get_memory_usage_a(qs_kind_set,basis_type_b)
     ldmem = MAX(lda,ldb)
 
   END FUNCTION get_memory_usage_ab
@@ -97,18 +96,18 @@ CONTAINS
 ! *****************************************************************************
 !> \brief Return the maximum memory usage in integral calculations
 !> \param qs_kind_set The info for all atomic kinds
-!> \param basis_set_id_a  Type of basis
-!> \param basis_set_id_b  Type of basis
-!> \param basis_set_id_c  Type of basis
+!> \param basis_type_a  Type of basis
+!> \param basis_type_b  Type of basis
+!> \param basis_type_c  Type of basis
 !> \retval ldmem          Result
 ! *****************************************************************************
-  FUNCTION get_memory_usage_abc(qs_kind_set,basis_set_id_a,&
-                                basis_set_id_b,basis_set_id_c) RESULT(ldmem)
+  FUNCTION get_memory_usage_abc(qs_kind_set,basis_type_a,&
+                                basis_type_b,basis_type_c) RESULT(ldmem)
 
     TYPE(qs_kind_type), DIMENSION(:), &
       POINTER                                :: qs_kind_set
-    INTEGER, INTENT(IN)                      :: basis_set_id_a, &
-                                                basis_set_id_b, basis_set_id_c
+    CHARACTER(LEN=*), INTENT(IN)             :: basis_type_a, basis_type_b, &
+                                                basis_type_c
     INTEGER                                  :: ldmem
 
     CHARACTER(len=*), PARAMETER :: routineN = 'get_memory_usage_abc', &
@@ -116,9 +115,9 @@ CONTAINS
 
     INTEGER                                  :: lda, ldb, ldc
 
-    lda = get_memory_usage_a(qs_kind_set,basis_set_id_a)
-    ldb = get_memory_usage_a(qs_kind_set,basis_set_id_b)
-    ldc = get_memory_usage_a(qs_kind_set,basis_set_id_c)
+    lda = get_memory_usage_a(qs_kind_set,basis_type_a)
+    ldb = get_memory_usage_a(qs_kind_set,basis_type_b)
+    ldc = get_memory_usage_a(qs_kind_set,basis_type_c)
     ldmem = MAX(lda,ldb,ldc)
 
   END FUNCTION get_memory_usage_abc
@@ -126,20 +125,19 @@ CONTAINS
 ! *****************************************************************************
 !> \brief Return the maximum memory usage in integral calculations
 !> \param qs_kind_set The info for all atomic kinds
-!> \param basis_set_id_a  Type of basis
-!> \param basis_set_id_b  Type of basis
-!> \param basis_set_id_c  Type of basis
-!> \param basis_set_id_d  Type of basis
+!> \param basis_type_a  Type of basis
+!> \param basis_type_b  Type of basis
+!> \param basis_type_c  Type of basis
+!> \param basis_type_d  Type of basis
 !> \retval ldmem          Result
 ! *****************************************************************************
-  FUNCTION get_memory_usage_abcd(qs_kind_set,basis_set_id_a,&
-           basis_set_id_b,basis_set_id_c,basis_set_id_d) RESULT(ldmem)
+  FUNCTION get_memory_usage_abcd(qs_kind_set,basis_type_a,&
+           basis_type_b,basis_type_c,basis_type_d) RESULT(ldmem)
 
     TYPE(qs_kind_type), DIMENSION(:), &
       POINTER                                :: qs_kind_set
-    INTEGER, INTENT(IN)                      :: basis_set_id_a, &
-                                                basis_set_id_b, &
-                                                basis_set_id_c, basis_set_id_d
+    CHARACTER(LEN=*), INTENT(IN)             :: basis_type_a, basis_type_b, &
+                                                basis_type_c, basis_type_d
     INTEGER                                  :: ldmem
 
     CHARACTER(len=*), PARAMETER :: routineN = 'get_memory_usage_abcd', &
@@ -147,10 +145,10 @@ CONTAINS
 
     INTEGER                                  :: lda, ldb, ldc, ldd
 
-    lda = get_memory_usage_a(qs_kind_set,basis_set_id_a)
-    ldb = get_memory_usage_a(qs_kind_set,basis_set_id_b)
-    ldc = get_memory_usage_a(qs_kind_set,basis_set_id_c)
-    ldd = get_memory_usage_a(qs_kind_set,basis_set_id_d)
+    lda = get_memory_usage_a(qs_kind_set,basis_type_a)
+    ldb = get_memory_usage_a(qs_kind_set,basis_type_b)
+    ldc = get_memory_usage_a(qs_kind_set,basis_type_c)
+    ldd = get_memory_usage_a(qs_kind_set,basis_type_d)
     ldmem = MAX(lda,ldb,ldc,ldd)
 
   END FUNCTION get_memory_usage_abcd
@@ -160,14 +158,14 @@ CONTAINS
 ! *****************************************************************************
 !> \brief RSet up an easy accessible list of the basis sets for all kinds
 !> \param basis_set_list    The basis set list
-!> \param basis_set_id      Type of basis
+!> \param basis_type ...
 !> \param qs_kind_set   Kind information, the basis is used
 ! *****************************************************************************
-  SUBROUTINE basis_set_list_setup(basis_set_list,basis_set_id,qs_kind_set)
+  SUBROUTINE basis_set_list_setup(basis_set_list,basis_type,qs_kind_set)
 
     TYPE(gto_basis_set_p_type), &
       DIMENSION(:), POINTER                  :: basis_set_list
-    INTEGER, INTENT(IN)                      :: basis_set_id
+    CHARACTER(len=*), INTENT(IN)             :: basis_type
     TYPE(qs_kind_type), DIMENSION(:), &
       POINTER                                :: qs_kind_set
 
@@ -180,20 +178,13 @@ CONTAINS
 
 ! set up basis sets
 
-     DO ikind=1,SIZE(qs_kind_set)
-
+    DO ikind=1,SIZE(qs_kind_set)
        qs_kind => qs_kind_set(ikind)
-
-       SELECT CASE (basis_set_id)
-       CASE (use_orb_basis_set)
-         CALL get_qs_kind(qs_kind=qs_kind,orb_basis_set=basis_set)
-       CASE (use_aux_fit_basis_set)
-         CALL get_qs_kind(qs_kind=qs_kind,aux_fit_basis_set=basis_set)
-       END SELECT
+       CALL get_qs_kind(qs_kind=qs_kind,basis_set=basis_set,&
+                        basis_type=basis_type)
        NULLIFY(basis_set_list(ikind)%gto_basis_set)
        IF (ASSOCIATED(basis_set)) basis_set_list(ikind)%gto_basis_set => basis_set
-
-     END DO
+    END DO
 
   END SUBROUTINE basis_set_list_setup
 

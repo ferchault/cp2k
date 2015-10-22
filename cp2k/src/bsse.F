@@ -47,6 +47,7 @@ MODULE bsse
                                              qs_environment_type
   USE string_utilities,                ONLY: compress
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -68,87 +69,79 @@ CONTAINS
 !>                                                          [CP-corrected total energy of AB]
 !> \param force_env ...
 !> \param globenv ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      06.2005 created [tlaino]
 !> \author Teodoro Laino
 ! *****************************************************************************
-  SUBROUTINE do_bsse_calculation(force_env, globenv, error)
+  SUBROUTINE do_bsse_calculation(force_env, globenv)
     TYPE(force_env_type), POINTER            :: force_env
     TYPE(global_environment_type), POINTER   :: globenv
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'do_bsse_calculation', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: i, istart, k, num_of_conf, &
-                                                Num_of_Frag, stat
+                                                Num_of_Frag
     INTEGER, DIMENSION(:, :), POINTER        :: conf
-    LOGICAL                                  :: explicit, failure, should_stop
+    LOGICAL                                  :: explicit, should_stop
     REAL(KIND=dp), DIMENSION(:), POINTER     :: Em
     TYPE(cp_logger_type), POINTER            :: logger
     TYPE(section_vals_type), POINTER         :: bsse_section, &
                                                 fragment_energies_section, &
                                                 n_frags, root_section
 
-    failure = .FALSE.
     NULLIFY(bsse_section, n_frags, Em, conf)
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
     root_section => force_env%root_section
-    bsse_section => section_vals_get_subs_vals(force_env%force_env_section,"BSSE",error=error)
-    n_frags => section_vals_get_subs_vals(bsse_section,"FRAGMENT",error=error)
-    CALL section_vals_get(n_frags,n_repetition=Num_of_Frag,error=error)
+    bsse_section => section_vals_get_subs_vals(force_env%force_env_section,"BSSE")
+    n_frags => section_vals_get_subs_vals(bsse_section,"FRAGMENT")
+    CALL section_vals_get(n_frags,n_repetition=Num_of_Frag)
 
     ! Number of configurations
     num_of_conf = 0
     DO k = 1, Num_of_frag
       num_of_conf = num_of_conf + FACT(Num_of_frag) / (FACT(k)*FACT(Num_of_frag-k))
     END DO
-    ALLOCATE(conf(num_of_conf,Num_of_frag),stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(Em(num_of_conf), stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(conf(num_of_conf,Num_of_frag))
+    ALLOCATE(Em(num_of_conf))
     CALL gen_Nbody_conf(Num_of_frag, conf)
 
     should_stop = .FALSE.
     istart      = 0
-    fragment_energies_section => section_vals_get_subs_vals(bsse_section,"FRAGMENT_ENERGIES",error=error)
-    CALL section_vals_get(fragment_energies_section, explicit=explicit, error=error)
+    fragment_energies_section => section_vals_get_subs_vals(bsse_section,"FRAGMENT_ENERGIES")
+    CALL section_vals_get(fragment_energies_section, explicit=explicit)
     IF (explicit) THEN
-       CALL section_vals_val_get(fragment_energies_section,"_DEFAULT_KEYWORD_",n_rep_val=istart,error=error)
+       CALL section_vals_val_get(fragment_energies_section,"_DEFAULT_KEYWORD_",n_rep_val=istart)
        DO i = 1, istart
           CALL section_vals_val_get(fragment_energies_section,"_DEFAULT_KEYWORD_",r_val=Em(i),&
-               i_rep_val=i, error=error)
+               i_rep_val=i)
        END DO
     END IF
     ! Setup the iteration level for BSSE
-    CALL cp_add_iter_level(logger%iter_info,"BSSE",error=error)
-    CALL cp_iterate(logger%iter_info,last=.FALSE.,iter_nr=istart,error=error)
+    CALL cp_add_iter_level(logger%iter_info,"BSSE")
+    CALL cp_iterate(logger%iter_info,last=.FALSE.,iter_nr=istart)
 
     ! Evaluating the energy of the N-body cluster terms
     DO i = istart+1, num_of_conf
-       CALL cp_iterate(logger%iter_info,last=(i==num_of_conf),iter_nr=i,error=error)
+       CALL cp_iterate(logger%iter_info,last=(i==num_of_conf),iter_nr=i)
        CALL eval_bsse_energy(conf(i,:),Em(i),force_env, n_frags, &
-            root_section,globenv, should_stop, error=error)
+            root_section,globenv, should_stop)
        IF (should_stop) EXIT
 
        ! If no signal was received in the inner loop let's check also at this stage
-       CALL external_control(should_stop,"BSSE",globenv=globenv,error=error)
+       CALL external_control(should_stop,"BSSE",globenv=globenv)
        IF (should_stop) EXIT
 
        ! Dump Restart info only if the calculation of the energy of a configuration
        ! ended nicely..
        CALL section_vals_val_set(fragment_energies_section,"_DEFAULT_KEYWORD_",r_val=Em(i),&
-            i_rep_val=i,error=error)
-       CALL write_bsse_restart(bsse_section, root_section, error=error)
+            i_rep_val=i)
+       CALL write_bsse_restart(bsse_section, root_section)
     END DO
-    IF (.NOT.should_stop) CALL dump_bsse_results(conf, Em, num_of_frag,  bsse_section, error)
-    CALL cp_rm_iter_level(logger%iter_info,"BSSE",error=error)
-    DEALLOCATE(Em,   stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    DEALLOCATE(conf, stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    IF (.NOT.should_stop) CALL dump_bsse_results(conf, Em, num_of_frag,  bsse_section)
+    CALL cp_rm_iter_level(logger%iter_info,"BSSE")
+    DEALLOCATE(Em)
+    DEALLOCATE(conf)
 
   END SUBROUTINE do_bsse_calculation
 
@@ -161,57 +154,50 @@ CONTAINS
 !> \param root_section ...
 !> \param globenv ...
 !> \param should_stop ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      07.2005 created [tlaino]
 !> \author Teodoro Laino
 ! *****************************************************************************
   SUBROUTINE eval_bsse_energy(conf, Em, force_env, n_frags, root_section,&
-       globenv, should_stop, error)
+       globenv, should_stop)
     INTEGER, DIMENSION(:), INTENT(IN)        :: conf
     REAL(KIND=dp), INTENT(OUT)               :: Em
     TYPE(force_env_type), POINTER            :: force_env
     TYPE(section_vals_type), POINTER         :: n_frags, root_section
     TYPE(global_environment_type), POINTER   :: globenv
     LOGICAL, INTENT(OUT)                     :: should_stop
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'eval_bsse_energy', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: i, j, k, Num_of_sub_conf, &
-                                                Num_of_sub_frag, stat
+                                                Num_of_sub_frag
     INTEGER, DIMENSION(:, :), POINTER        :: conf_loc
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: my_energy
     REAL(KIND=dp), DIMENSION(:), POINTER     :: Em_loc
 
-    failure = .FALSE.
     NULLIFY(conf_loc, Em_loc)
     should_stop = .FALSE.
     ! Count the number of subconfiguration to evaluate..
     Num_of_sub_frag = COUNT(conf == 1)
     Num_of_sub_conf = 0
     IF (Num_of_sub_frag == 1) THEN
-       CALL eval_bsse_energy_low(force_env, conf, conf, n_frags, root_section, globenv, Em, error)
+       CALL eval_bsse_energy_low(force_env, conf, conf, n_frags, root_section, globenv, Em)
     ELSE
        my_energy = 0.0_dp
        DO k = 1, Num_of_sub_frag
           Num_of_sub_conf = Num_of_sub_conf + &
                             FACT(Num_of_sub_frag) / (FACT(k)*FACT(Num_of_sub_frag-k))
        END DO
-       ALLOCATE(conf_loc(Num_of_sub_conf,Num_of_sub_frag), stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       ALLOCATE(Em_loc(Num_of_sub_conf), stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       ALLOCATE(conf_loc(Num_of_sub_conf,Num_of_sub_frag))
+       ALLOCATE(Em_loc(Num_of_sub_conf))
        Em_loc = 0.0_dp
        CALL gen_Nbody_conf(Num_of_sub_frag, conf_loc)
        CALL make_plan_conf(conf, conf_loc)
        DO i = 1, Num_of_sub_conf
           CALL eval_bsse_energy_low(force_env, conf, conf_loc(i,:), n_frags,&
-               root_section,globenv, Em_loc(i), error)
-          CALL external_control(should_stop,"BSSE",globenv=globenv,error=error)
+               root_section,globenv, Em_loc(i))
+          CALL external_control(should_stop,"BSSE",globenv=globenv)
           IF (should_stop) EXIT
        END DO
        ! Energy
@@ -221,10 +207,8 @@ CONTAINS
           my_energy = my_energy + (-1.0_dp)**(k+j) * Em_loc(i)
        END DO
        Em = my_energy
-       DEALLOCATE(Em_loc, stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       DEALLOCATE(conf_loc, stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE(Em_loc)
+       DEALLOCATE(conf_loc)
     END IF
 
   END SUBROUTINE eval_bsse_energy
@@ -238,21 +222,18 @@ CONTAINS
 !> \param root_section ...
 !> \param globenv ...
 !> \param energy ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      07.2005 created [tlaino]
 !>      2014/09/17 made atom list to be read from repeated occurance of LIST [LTong]
 !> \author Teodoro Laino
 ! *****************************************************************************
   SUBROUTINE eval_bsse_energy_low(force_env, conf, conf_loc, n_frags, &
-       root_section, globenv, energy, error)
+       root_section, globenv, energy)
     TYPE(force_env_type), POINTER            :: force_env
     INTEGER, DIMENSION(:), INTENT(IN)        :: conf, conf_loc
     TYPE(section_vals_type), POINTER         :: n_frags, root_section
     TYPE(global_environment_type), POINTER   :: globenv
     REAL(KIND=dp), INTENT(OUT)               :: energy
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'eval_bsse_energy_low', &
       routineP = moduleN//':'//routineN
@@ -261,10 +242,9 @@ CONTAINS
     CHARACTER(len=default_string_length), &
       DIMENSION(:), POINTER                  :: atom_type
     INTEGER :: i, ir, isize, j, k, method_name_id, my_targ, n_rep, &
-      num_of_frag, old_size, present_charge, present_multpl, stat
+      num_of_frag, old_size, present_charge, present_multpl
     INTEGER, DIMENSION(:), POINTER           :: atom_index, atom_list, &
                                                 my_conf, tmplist
-    LOGICAL                                  :: failure
     TYPE(cell_type), POINTER                 :: cell
     TYPE(cp_para_env_type), POINTER          :: para_env
     TYPE(cp_subsys_type), POINTER            :: subsys, subsys_loc
@@ -275,52 +255,48 @@ CONTAINS
                                                 force_env_section, &
                                                 subsys_section
 
-    failure = .FALSE.
-    CALL section_vals_get(n_frags,n_repetition=num_of_frag,error=error)
-    CPPostcondition(SIZE(conf)==num_of_frag,cp_failure_level,routineP,error,failure)
+    CALL section_vals_get(n_frags,n_repetition=num_of_frag)
+    CPASSERT(SIZE(conf)==num_of_frag)
     NULLIFY(subsys_loc, subsys, particles, para_env, cell, atom_index, atom_type, tmplist,&
            force_env_section )
-    CALL force_env_get(force_env, force_env_section=force_env_section, error=error)
-    CALL section_vals_val_get(force_env_section,"METHOD",i_val=method_name_id,error=error)
-    bsse_section   => section_vals_get_subs_vals(force_env_section,"BSSE",error=error)
-    subsys_section => section_vals_get_subs_vals(force_env_section,"SUBSYS",error=error)
-    dft_section    => section_vals_get_subs_vals(force_env_section,"DFT",error=error)
+    CALL force_env_get(force_env, force_env_section=force_env_section)
+    CALL section_vals_val_get(force_env_section,"METHOD",i_val=method_name_id)
+    bsse_section   => section_vals_get_subs_vals(force_env_section,"BSSE")
+    subsys_section => section_vals_get_subs_vals(force_env_section,"SUBSYS")
+    dft_section    => section_vals_get_subs_vals(force_env_section,"DFT")
 
-    ALLOCATE(my_conf(SIZE(conf)), stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(my_conf(SIZE(conf)))
     my_conf = conf
     CALL force_env_get(force_env=force_env, subsys=subsys, para_env=para_env,&
-         cell=cell, error=error)
-    CALL cp_subsys_get(subsys, particles=particles, error=error)
+         cell=cell)
+    CALL cp_subsys_get(subsys, particles=particles)
     isize = 0
-    ALLOCATE(atom_index(isize),stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(atom_index(isize))
     DO i = 1, num_of_frag
        IF (conf(i) == 1) THEN
           !
           ! Get the list of atoms creating the present fragment
           !
           old_size=isize
-          CALL section_vals_val_get(n_frags, "LIST", i_rep_section=i, n_rep_val=n_rep, error=error)
+          CALL section_vals_val_get(n_frags, "LIST", i_rep_section=i, n_rep_val=n_rep)
           IF (n_rep /= 0) THEN
              DO ir = 1, n_rep
-               CALL section_vals_val_get(n_frags, "LIST", i_rep_section=i, i_rep_val=ir, i_vals=tmplist, error=error)
+               CALL section_vals_val_get(n_frags, "LIST", i_rep_section=i, i_rep_val=ir, i_vals=tmplist)
                CALL reallocate(atom_index,1,isize+SIZE(tmplist))
                atom_index(isize+1:isize+SIZE(tmplist)) = tmplist
                isize = SIZE(atom_index)
              END DO
           END IF
           my_conf(i) = isize - old_size
-          CPPostcondition(conf(i)/=0,cp_failure_level,routineP,error,failure)
+          CPASSERT(conf(i)/=0)
       END IF
     END DO
     CALL conf_info_setup(present_charge, present_multpl, conf, conf_loc, bsse_section,&
-        dft_section, error)
+        dft_section)
     !
     ! Get names and modify the ghost ones
     !
-    ALLOCATE(atom_type(isize), stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(atom_type(isize))
     DO j = 1, isize
        my_targ = atom_index(j)
        DO k = 1, SIZE(particles%els)
@@ -337,7 +313,7 @@ CONTAINS
        END IF
     END DO
     CALL dump_bsse_info(atom_index, atom_type, conf, conf_loc, bsse_section,&
-                       present_charge, present_multpl,  error)
+                       present_charge, present_multpl)
     !
     ! Let's start setting up environments and calculations
     !
@@ -346,30 +322,27 @@ CONTAINS
        CALL create_small_subsys(subsys_loc, big_subsys=subsys,&
             small_para_env=para_env, small_cell=cell,sub_atom_index=atom_index,&
             sub_atom_kind_name=atom_type,para_env=para_env,&
-            force_env_section=force_env_section,subsys_section=subsys_section,error=error)
+            force_env_section=force_env_section,subsys_section=subsys_section)
 
-       CALL qs_env_create(qs_env, globenv,error=error)
+       CALL qs_env_create(qs_env, globenv)
        CALL qs_init(qs_env, para_env, globenv, root_section, cp_subsys=subsys_loc,&
             force_env_section=force_env_section, subsys_section=subsys_section,&
-            use_motion_section=.FALSE., error=error)
-       CALL cp_subsys_release(subsys_loc,error=error)
+            use_motion_section=.FALSE.)
+       CALL cp_subsys_release(subsys_loc)
 
        !
        ! Evaluate Energy
        !
-       CALL qs_energies(qs_env, error=error)
-       CALL get_qs_env(qs_env, energy=qs_energy, error=error)
+       CALL qs_energies(qs_env)
+       CALL get_qs_env(qs_env, energy=qs_energy)
        energy = qs_energy%total
-       CALL qs_env_release(qs_env,error=error)
+       CALL qs_env_release(qs_env)
     ELSE
-       CPPostcondition(.FALSE.,cp_failure_level,routineP,error,failure)
+       CPABORT("")
     END IF
-    DEALLOCATE(atom_index, stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    DEALLOCATE(atom_type, stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    DEALLOCATE(my_conf, stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(atom_index)
+    DEALLOCATE(atom_type)
+    DEALLOCATE(my_conf)
 
   END SUBROUTINE eval_bsse_energy_low
 
@@ -382,35 +355,30 @@ CONTAINS
 !> \param bsse_section ...
 !> \param present_charge ...
 !> \param present_multpl ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      07.2005 created [tlaino]
 !> \author Teodoro Laino
 ! *****************************************************************************
   SUBROUTINE  dump_bsse_info(atom_index, atom_type, conf, conf_loc, bsse_section, &
-                             present_charge, present_multpl, error)
+                             present_charge, present_multpl)
     INTEGER, DIMENSION(:), POINTER           :: atom_index
     CHARACTER(len=default_string_length), &
       DIMENSION(:), POINTER                  :: atom_type
     INTEGER, DIMENSION(:), INTENT(IN)        :: conf, conf_loc
     TYPE(section_vals_type), POINTER         :: bsse_section
     INTEGER, INTENT(IN)                      :: present_charge, present_multpl
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'dump_bsse_info', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: i, istat, iw
     CHARACTER(len=20*SIZE(conf))             :: conf_loc_s, conf_s
-    LOGICAL                                  :: failure
     TYPE(cp_logger_type), POINTER            :: logger
 
-    failure = .FALSE.
     NULLIFY(logger)
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
     iw=cp_print_key_unit_nr(logger,bsse_section,"PRINT%PROGRAM_RUN_INFO",&
-                                     extension=".log",error=error)
+                                     extension=".log")
     IF (iw>0) THEN
        WRITE (conf_s,fmt="(1000I0)",iostat=istat)conf ;
        IF(istat.NE.0) conf_s="exceeded"
@@ -434,7 +402,7 @@ CONTAINS
        WRITE (UNIT=iw,FMT="(T2,A)") REPEAT("-",79)
 
        CALL cp_print_key_finished_output(iw,logger,bsse_section,&
-            "PRINT%PROGRAM_RUN_INFO", error=error)
+            "PRINT%PROGRAM_RUN_INFO")
 
     END IF
   END SUBROUTINE dump_bsse_info
@@ -447,59 +415,53 @@ CONTAINS
 !> \param conf_loc ...
 !> \param bsse_section ...
 !> \param dft_section ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      09.2007 created [tlaino]
 !> \author Teodoro Laino - University of Zurich
 ! *****************************************************************************
   SUBROUTINE  conf_info_setup(present_charge, present_multpl, conf, conf_loc,&
-       bsse_section, dft_section, error)
+       bsse_section, dft_section)
     INTEGER, INTENT(OUT)                     :: present_charge, present_multpl
     INTEGER, DIMENSION(:), INTENT(IN)        :: conf, conf_loc
     TYPE(section_vals_type), POINTER         :: bsse_section, dft_section
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'conf_info_setup', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: i, nconf
     INTEGER, DIMENSION(:), POINTER           :: glb_conf, sub_conf
-    LOGICAL                                  :: explicit, failure
+    LOGICAL                                  :: explicit
     TYPE(section_vals_type), POINTER         :: configurations
 
     present_charge = 0
     present_multpl = 0
-    failure = .FALSE.
     NULLIFY(configurations, glb_conf, sub_conf)
     ! Loop over all configurations to pick up the right one
-    configurations => section_vals_get_subs_vals(bsse_section,"CONFIGURATION",error=error)
-    CALL section_vals_get(configurations,explicit=explicit,n_repetition=nconf,error=error)
+    configurations => section_vals_get_subs_vals(bsse_section,"CONFIGURATION")
+    CALL section_vals_get(configurations,explicit=explicit,n_repetition=nconf)
     IF (explicit) THEN
        DO i=1, nconf
-          CALL section_vals_val_get(configurations,"GLB_CONF", i_rep_section=i, i_vals=glb_conf, error=error)
-          CALL cp_assert(SIZE(glb_conf)==SIZE(conf),cp_fatal_level,cp_assertion_failed,routineP,&
-               "GLB_CONF requires a binary description of the configuration. Number of integer "//&
-               "different from the number of fragments defined!"//&
-CPSourceFileRef,&
-               only_ionode=.TRUE.)
-          CALL section_vals_val_get(configurations,"SUB_CONF", i_rep_section=i, i_vals=sub_conf, error=error)
-          CALL cp_assert(SIZE(sub_conf)==SIZE(conf),cp_fatal_level,cp_assertion_failed,routineP,&
-               "SUB_CONF requires a binary description of the configuration. Number of integer "//&
-               "different from the number of fragments defined!"//&
-CPSourceFileRef,&
-               only_ionode=.TRUE.)
+          CALL section_vals_val_get(configurations,"GLB_CONF", i_rep_section=i, i_vals=glb_conf)
+          IF(SIZE(glb_conf)/=SIZE(conf))&
+             CALL cp_abort(__LOCATION__,&
+                  "GLB_CONF requires a binary description of the configuration. Number of integer "//&
+                  "different from the number of fragments defined!")
+          CALL section_vals_val_get(configurations,"SUB_CONF", i_rep_section=i, i_vals=sub_conf)
+          IF(SIZE(sub_conf)/=SIZE(conf))&
+             CALL cp_abort(__LOCATION__,&
+                  "SUB_CONF requires a binary description of the configuration. Number of integer "//&
+                  "different from the number of fragments defined!")
           IF (ALL(conf==glb_conf).AND.ALL(conf_loc==sub_conf)) THEN
              CALL section_vals_val_get(configurations,"CHARGE", i_rep_section=i,&
-                                       i_val=present_charge, error=error)
+                                       i_val=present_charge)
              CALL section_vals_val_get(configurations,"MULTIPLICITY", i_rep_section=i,&
-                                       i_val=present_multpl, error=error)
+                                       i_val=present_multpl)
           END IF
        END DO
     END IF
     ! Setup parameter for this configuration
-    CALL section_vals_val_set(dft_section,"CHARGE",i_val=present_charge, error=error)
-    CALL section_vals_val_set(dft_section,"MULTIPLICITY",i_val=present_multpl, error=error)
+    CALL section_vals_val_set(dft_section,"CHARGE",i_val=present_charge)
+    CALL section_vals_val_set(dft_section,"MULTIPLICITY",i_val=present_multpl)
   END SUBROUTINE conf_info_setup
 
 ! *****************************************************************************
@@ -508,31 +470,26 @@ CPSourceFileRef,&
 !> \param Em ...
 !> \param num_of_frag ...
 !> \param bsse_section ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      09.2007 created [tlaino]
 !> \author Teodoro Laino - University of Zurich
 ! *****************************************************************************
-  SUBROUTINE  dump_bsse_results(conf, Em,  num_of_frag, bsse_section, error)
+  SUBROUTINE  dump_bsse_results(conf, Em,  num_of_frag, bsse_section)
     INTEGER, DIMENSION(:, :), INTENT(IN)     :: conf
     REAL(KIND=dp), DIMENSION(:), POINTER     :: Em
     INTEGER, INTENT(IN)                      :: num_of_frag
     TYPE(section_vals_type), POINTER         :: bsse_section
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'dump_bsse_results', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: i, iw
-    LOGICAL                                  :: failure
     TYPE(cp_logger_type), POINTER            :: logger
 
-    failure = .FALSE.
     NULLIFY(logger)
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
     iw=cp_print_key_unit_nr(logger,bsse_section,"PRINT%PROGRAM_RUN_INFO",&
-                                      extension=".log",error=error)
+                                      extension=".log")
 
     IF (iw>0) THEN
        WRITE (UNIT=iw,FMT="(/,T2,A)") REPEAT("-",79)
@@ -555,7 +512,7 @@ CPSourceFileRef,&
     END IF
 
     CALL cp_print_key_finished_output(iw,logger,bsse_section,&
-         "PRINT%PROGRAM_RUN_INFO", error=error)
+         "PRINT%PROGRAM_RUN_INFO")
 
   END SUBROUTINE dump_bsse_results
 
@@ -663,36 +620,31 @@ CPSourceFileRef,&
 !> \brief Writes restart for BSSE calculations
 !> \param bsse_section ...
 !> \param root_section ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      01.2008 created [tlaino]
 !> \author Teodoro Laino
 ! *****************************************************************************
-  SUBROUTINE write_bsse_restart(bsse_section, root_section, error)
+  SUBROUTINE write_bsse_restart(bsse_section, root_section)
 
     TYPE(section_vals_type), POINTER         :: bsse_section, root_section
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'write_bsse_restart', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: ires
-    LOGICAL                                  :: failure
     TYPE(cp_logger_type), POINTER            :: logger
 
-    failure = .FALSE.
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
     ires = cp_print_key_unit_nr(logger,bsse_section,"PRINT%RESTART",&
-         extension=".restart",  do_backup=.FALSE., file_position="REWIND",error=error)
+         extension=".restart",  do_backup=.FALSE., file_position="REWIND")
 
     IF (ires>0) THEN
        CALL write_restart_header(ires)
-       CALL section_vals_write(root_section, unit_nr=ires, hide_root=.TRUE., error=error)
+       CALL section_vals_write(root_section, unit_nr=ires, hide_root=.TRUE.)
     ENDIF
 
     CALL cp_print_key_finished_output(ires,logger,bsse_section,&
-         "PRINT%RESTART", error=error)
+         "PRINT%RESTART")
 
   END SUBROUTINE write_bsse_restart
 

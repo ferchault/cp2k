@@ -26,9 +26,8 @@ MODULE qs_gapw_densities
                                              rho0_mpole_type
   USE qs_rho_atom_methods,             ONLY: calculate_rho_atom
   USE qs_rho_atom_types,               ONLY: rho_atom_type
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -45,27 +44,24 @@ CONTAINS
 !> \param qs_env ...
 !> \param local_rho_set ...
 !> \param do_rho0 ...
-!> \param error ...
 ! *****************************************************************************
- SUBROUTINE prepare_gapw_den(qs_env,local_rho_set,do_rho0,error)
+ SUBROUTINE prepare_gapw_den(qs_env,local_rho_set,do_rho0)
 
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(local_rho_type), OPTIONAL, POINTER  :: local_rho_set
     LOGICAL, INTENT(IN), OPTIONAL            :: do_rho0
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'prepare_gapw_den', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: handle, ikind, ispin, istat, &
-                                                natom, nspins, output_unit
+    INTEGER                                  :: handle, ikind, ispin, natom, &
+                                                nspins, output_unit
     INTEGER, DIMENSION(:), POINTER           :: atom_list
-    LOGICAL                                  :: failure, my_do_rho0, paw_atom
+    LOGICAL                                  :: my_do_rho0, paw_atom
     REAL(dp)                                 :: rho0_h_tot, tot_rs_int
     REAL(dp), DIMENSION(:), POINTER          :: rho1_h_tot, rho1_s_tot
     TYPE(atomic_kind_type), DIMENSION(:), &
       POINTER                                :: atomic_kind_set
-    TYPE(cp_logger_type), POINTER            :: logger
     TYPE(cp_para_env_type), POINTER          :: para_env
     TYPE(dft_control_type), POINTER          :: dft_control
     TYPE(gapw_control_type), POINTER         :: gapw_control
@@ -94,15 +90,12 @@ CONTAINS
     NULLIFY(rho1_h_tot,rho1_s_tot)
     NULLIFY(rho_atom_set)
     NULLIFY(rho0_atom_set)
-    NULLIFY(logger)
 
-    failure = .FALSE.
 
     my_do_rho0 = .TRUE.
     IF (PRESENT(do_rho0)) my_do_rho0 = do_rho0
 
-    logger => cp_error_get_logger(error)
-    output_unit = cp_logger_get_default_io_unit(logger)
+    output_unit = cp_logger_get_default_io_unit()
 
     CALL get_qs_env(qs_env=qs_env,dft_control=dft_control,&
                     para_env=para_env,&
@@ -111,7 +104,7 @@ CONTAINS
                     atomic_kind_set=atomic_kind_set,&
                     rho0_mpole=rho0_mpole,&
                     rho_atom_set=rho_atom_set,&
-                    rho0_atom_set=rho0_atom_set,error=error)
+                    rho0_atom_set=rho0_atom_set)
 
     gapw_control => dft_control%qs_control%gapw_control
 
@@ -126,8 +119,7 @@ CONTAINS
     nspins = dft_control%nspins
 
     rho0_h_tot = 0.0_dp
-    ALLOCATE(rho1_h_tot(1:nspins), rho1_s_tot(1:nspins),STAT=istat)
-    CPPrecondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(rho1_h_tot(1:nspins), rho1_s_tot(1:nspins))
     rho1_h_tot = 0.0_dp
     rho1_s_tot = 0.0_dp
 
@@ -140,13 +132,13 @@ CONTAINS
 !     Calculate rho1_h and rho1_s on the radial grids centered on the atomic position
       IF(paw_atom) &
         CALL calculate_rho_atom(para_env,rho_atom_set,qs_kind_set(ikind),&
-        atom_list,grid_atom,natom,nspins,rho1_h_tot,rho1_s_tot,error=error)
+        atom_list,grid_atom,natom,nspins,rho1_h_tot,rho1_s_tot)
 
 !     Calculate rho0_h and rho0_s on the radial grids centered on the atomic position
       IF (my_do_rho0) &
            CALL calculate_rho0_atom(gapw_control,rho_atom_set,rho0_atom_set,rho0_mpole,&
                 atom_list,grid_atom, paw_atom,natom,ikind,qs_kind_set(ikind),&
-                harmonics,rho0_h_tot, error=error)
+                harmonics,rho0_h_tot)
 
     ENDDO
 
@@ -160,7 +152,7 @@ CONTAINS
     IF (my_do_rho0) THEN
        rho0_mpole%total_rho0_h = -rho0_h_tot
 !      Put the rho0_soft on the global grid
-       CALL put_rho0_on_grid(qs_env,rho0_mpole,tot_rs_int,error)
+       CALL put_rho0_on_grid(qs_env,rho0_mpole,tot_rs_int)
        IF(ABS(rho0_h_tot) .GE. 1.0E-5_dp)THEN
         IF(ABS(1.0_dp-ABS(tot_rs_int/rho0_h_tot)).GT.1.0E-3_dp) THEN
           IF (output_unit>0) THEN
@@ -180,8 +172,7 @@ CONTAINS
        qs_charges%total_rho0_hard_lebedev = 0.0_dp
     END IF
 
-   DEALLOCATE(rho1_h_tot,rho1_s_tot,STAT=istat)
-   CPPrecondition(istat==0,cp_failure_level,routineP,error,failure)
+   DEALLOCATE(rho1_h_tot,rho1_s_tot)
 
    CALL timestop(handle)
 

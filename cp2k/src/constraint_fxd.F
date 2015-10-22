@@ -35,10 +35,9 @@ MODULE constraint_fxd
                                              local_g4x6_constraint_type
   USE particle_list_types,             ONLY: particle_list_type
   USE particle_types,                  ONLY: particle_type
-  USE timings,                         ONLY: timeset,&
-                                             timestop
   USE util,                            ONLY: sort
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -57,15 +56,13 @@ CONTAINS
 ! *****************************************************************************
 !> \brief allows for fix atom constraints
 !> \param force_env ...
-!> \param error ...
 !> \param w ...
 !> \par History
 !>      - optionally apply fix atom constraint to random forces (Langevin)
 !>        (04.10.206,MK)
 ! *****************************************************************************
-  SUBROUTINE fix_atom_control( force_env, error, w)
+  SUBROUTINE fix_atom_control( force_env,w)
     TYPE(force_env_type), POINTER            :: force_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
     REAL(KIND=dp), DIMENSION(:, :), OPTIONAL :: w
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fix_atom_control', &
@@ -73,8 +70,8 @@ CONTAINS
 
     INTEGER :: handle, i, ifixd, ii, ikind, iparticle, iparticle_local, &
       my_atm_fixed, natom, ncore, nfixed_atoms, nkind, nparticle, &
-      nparticle_local, nshell, shell_index, stat
-    LOGICAL                                  :: failure, shell_present
+      nparticle_local, nshell, shell_index
+    LOGICAL                                  :: shell_present
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :)                        :: force
     TYPE(atomic_kind_list_type), POINTER     :: atomic_kinds
@@ -95,8 +92,6 @@ CONTAINS
                                                 particle_set, &
                                                 shell_particle_set
 
-    failure = .FALSE.
-
     CALL timeset(routineN,handle)
 
     NULLIFY (atomic_kinds)
@@ -105,161 +100,155 @@ CONTAINS
     NULLIFY (shell_particles)
     shell_present = .FALSE.
 
-    IF (.NOT.failure) THEN
-       NULLIFY(lfixd_list)
-       CALL force_env_get(force_env=force_env,&
-                          subsys=subsys,&
-                          error=error)
-       CALL cp_subsys_get(subsys=subsys,&
-                          atomic_kinds=atomic_kinds,&
-                          core_particles=core_particles,&
-                          local_particles=local_particles,&
-                          molecule_kinds_new=molecule_kinds,&
-                          natom=natom,&
-                          ncore=ncore,&
-                          nshell=nshell,&
-                          particles=particles,&
-                          shell_particles=shell_particles,&
-                          error=error)
-       CALL get_atomic_kind_set(atomic_kind_set=atomic_kinds%els,&
-                                shell_present=shell_present)
+    NULLIFY(lfixd_list)
+    CALL force_env_get(force_env=force_env,&
+                       subsys=subsys)
+    CALL cp_subsys_get(subsys=subsys,&
+                       atomic_kinds=atomic_kinds,&
+                       core_particles=core_particles,&
+                       local_particles=local_particles,&
+                       molecule_kinds_new=molecule_kinds,&
+                       natom=natom,&
+                       ncore=ncore,&
+                       nshell=nshell,&
+                       particles=particles,&
+                       shell_particles=shell_particles)
+    CALL get_atomic_kind_set(atomic_kind_set=atomic_kinds%els,&
+                             shell_present=shell_present)
 
-       particle_set => particles%els
-       CPPostcondition((SIZE(particle_set) == natom),cp_failure_level,routineP,error,failure)
-       IF (shell_present) THEN
-          core_particle_set => core_particles%els
-          CPPostcondition((SIZE(core_particle_set) == ncore),cp_failure_level,routineP,error,failure)
-          shell_particle_set => shell_particles%els
-          CPPostcondition((SIZE(shell_particle_set) == nshell),cp_failure_level,routineP,error,failure)
-       END IF
-       nparticle = natom + nshell
-       molecule_kind_set => molecule_kinds%els
+    particle_set => particles%els
+    CPASSERT((SIZE(particle_set) == natom))
+    IF (shell_present) THEN
+       core_particle_set => core_particles%els
+       CPASSERT((SIZE(core_particle_set) == ncore))
+       shell_particle_set => shell_particles%els
+       CPASSERT((SIZE(shell_particle_set) == nshell))
+    END IF
+    nparticle = natom + nshell
+    molecule_kind_set => molecule_kinds%els
 
-       nkind = molecule_kinds%n_els
-       my_atm_fixed = 0
-       DO ikind=1,nkind
-          molecule_kind => molecule_kind_set(ikind)
-          CALL get_molecule_kind(molecule_kind,nfixd=nfixed_atoms)
-          my_atm_fixed = my_atm_fixed + nfixed_atoms
-       END DO
+    nkind = molecule_kinds%n_els
+    my_atm_fixed = 0
+    DO ikind=1,nkind
+       molecule_kind => molecule_kind_set(ikind)
+       CALL get_molecule_kind(molecule_kind,nfixd=nfixed_atoms)
+       my_atm_fixed = my_atm_fixed + nfixed_atoms
+    END DO
 
-       IF (my_atm_fixed /= 0) THEN
-          IF (.NOT.PRESENT(w)) THEN
-             ! Allocate scratch array
-             ALLOCATE (force(3,nparticle),STAT=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-             force(:,:) = 0.0_dp
-             DO i=1,SIZE(local_particles%n_el)
-                nparticle_local = local_particles%n_el(i)
-                DO iparticle_local=1,nparticle_local
-                   iparticle = local_particles%list(i)%array(iparticle_local)
-                   shell_index = particle_set(iparticle)%shell_index
-                   IF (shell_index == 0) THEN
-                      force(:,iparticle) = particle_set(iparticle)%f(:)
-                   ELSE
-                      force(:,iparticle) = core_particle_set(shell_index)%f(:)
-                      force(:,natom+shell_index) = shell_particle_set(shell_index)%f(:)
-                   END IF
-                END DO
-             END DO
-          END IF
-
-          ! Create the list of locally fixed atoms
-          CALL create_local_fixd_list(lfixd_list,nkind,molecule_kind_set,local_particles,error)
-
-          ! Apply fixed atom constraint
-          DO ifixd=1,SIZE(lfixd_list)
-             ikind = lfixd_list(ifixd)%ikind
-             ii = lfixd_list(ifixd)%ifixd_index
-             molecule_kind => molecule_kind_set(ikind)
-             CALL get_molecule_kind(molecule_kind,fixd_list=fixd_list)
-             IF (.NOT.fixd_list(ii)%restraint%active) THEN
-                iparticle = fixd_list(ii)%fixd
-                shell_index = particle_set(iparticle)%shell_index
-                ! Select constraint type
-                IF (PRESENT(w)) THEN
-                   SELECT CASE(fixd_list(ii)%itype)
-                   CASE (use_perd_x)
-                      w(1,iparticle)     = 0.0_dp
-                   CASE (use_perd_y)
-                      w(2,iparticle)     = 0.0_dp
-                   CASE (use_perd_z)
-                      w(3,iparticle)     = 0.0_dp
-                   CASE (use_perd_xy)
-                      w(1,iparticle)     = 0.0_dp
-                      w(2,iparticle)     = 0.0_dp
-                   CASE (use_perd_xz)
-                      w(1,iparticle)     = 0.0_dp
-                      w(3,iparticle)     = 0.0_dp
-                   CASE (use_perd_yz)
-                      w(2,iparticle)     = 0.0_dp
-                      w(3,iparticle)     = 0.0_dp
-                   CASE (use_perd_xyz)
-                      w(:,iparticle)     = 0.0_dp
-                   END SELECT
-                ELSE
-                   SELECT CASE(fixd_list(ii)%itype)
-                   CASE (use_perd_x)
-                      force(1,iparticle) = 0.0_dp
-                      IF (shell_index /= 0) THEN
-                         force(1,natom+shell_index) = 0.0_dp
-                      END IF
-                   CASE (use_perd_y)
-                      force(2,iparticle) = 0.0_dp
-                      IF (shell_index /= 0) THEN
-                         force(2,natom+shell_index) = 0.0_dp
-                      END IF
-                   CASE (use_perd_z)
-                      force(3,iparticle) = 0.0_dp
-                      IF (shell_index /= 0) THEN
-                         force(3,natom+shell_index) = 0.0_dp
-                      END IF
-                   CASE (use_perd_xy)
-                      force(1,iparticle) = 0.0_dp
-                      force(2,iparticle) = 0.0_dp
-                      IF (shell_index /= 0) THEN
-                         force(1,natom+shell_index) = 0.0_dp
-                         force(2,natom+shell_index) = 0.0_dp
-                      END IF
-                   CASE (use_perd_xz)
-                      force(1,iparticle) = 0.0_dp
-                      force(3,iparticle) = 0.0_dp
-                      IF (shell_index /= 0) THEN
-                         force(1,natom+shell_index) = 0.0_dp
-                         force(3,natom+shell_index) = 0.0_dp
-                      END IF
-                   CASE (use_perd_yz)
-                      force(2,iparticle) = 0.0_dp
-                      force(3,iparticle) = 0.0_dp
-                      IF (shell_index /= 0) THEN
-                         force(2,natom+shell_index) = 0.0_dp
-                         force(3,natom+shell_index) = 0.0_dp
-                      END IF
-                   CASE (use_perd_xyz)
-                      force(:,iparticle) = 0.0_dp
-                      IF (shell_index /= 0) THEN
-                         force(:,natom+shell_index) = 0.0_dp
-                      END IF
-                   END SELECT
-                END IF
-             END IF
-          END DO
-          CALL release_local_fixd_list(lfixd_list,error=error)
-
-          IF (.NOT.PRESENT(w)) THEN
-             CALL mp_sum(force,force_env%para_env%group)
-             DO iparticle=1,natom
+    IF (my_atm_fixed /= 0) THEN
+       IF (.NOT.PRESENT(w)) THEN
+          ! Allocate scratch array
+          ALLOCATE (force(3,nparticle))
+          force(:,:) = 0.0_dp
+          DO i=1,SIZE(local_particles%n_el)
+             nparticle_local = local_particles%n_el(i)
+             DO iparticle_local=1,nparticle_local
+                iparticle = local_particles%list(i)%array(iparticle_local)
                 shell_index = particle_set(iparticle)%shell_index
                 IF (shell_index == 0) THEN
-                   particle_set(iparticle)%f(:) = force(:,iparticle)
+                   force(:,iparticle) = particle_set(iparticle)%f(:)
                 ELSE
-                   core_particle_set(shell_index)%f(:) = force(:,iparticle)
-                   shell_particle_set(shell_index)%f(:) = force(:,natom+shell_index)
+                   force(:,iparticle) = core_particle_set(shell_index)%f(:)
+                   force(:,natom+shell_index) = shell_particle_set(shell_index)%f(:)
                 END IF
              END DO
-             DEALLOCATE (force,STAT=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          END DO
+       END IF
+
+       ! Create the list of locally fixed atoms
+       CALL create_local_fixd_list(lfixd_list,nkind,molecule_kind_set,local_particles)
+
+       ! Apply fixed atom constraint
+       DO ifixd=1,SIZE(lfixd_list)
+          ikind = lfixd_list(ifixd)%ikind
+          ii = lfixd_list(ifixd)%ifixd_index
+          molecule_kind => molecule_kind_set(ikind)
+          CALL get_molecule_kind(molecule_kind,fixd_list=fixd_list)
+          IF (.NOT.fixd_list(ii)%restraint%active) THEN
+             iparticle = fixd_list(ii)%fixd
+             shell_index = particle_set(iparticle)%shell_index
+             ! Select constraint type
+             IF (PRESENT(w)) THEN
+                SELECT CASE(fixd_list(ii)%itype)
+                CASE (use_perd_x)
+                   w(1,iparticle)     = 0.0_dp
+                CASE (use_perd_y)
+                   w(2,iparticle)     = 0.0_dp
+                CASE (use_perd_z)
+                   w(3,iparticle)     = 0.0_dp
+                CASE (use_perd_xy)
+                   w(1,iparticle)     = 0.0_dp
+                   w(2,iparticle)     = 0.0_dp
+                CASE (use_perd_xz)
+                   w(1,iparticle)     = 0.0_dp
+                   w(3,iparticle)     = 0.0_dp
+                CASE (use_perd_yz)
+                   w(2,iparticle)     = 0.0_dp
+                   w(3,iparticle)     = 0.0_dp
+                CASE (use_perd_xyz)
+                   w(:,iparticle)     = 0.0_dp
+                END SELECT
+             ELSE
+                SELECT CASE(fixd_list(ii)%itype)
+                CASE (use_perd_x)
+                   force(1,iparticle) = 0.0_dp
+                   IF (shell_index /= 0) THEN
+                      force(1,natom+shell_index) = 0.0_dp
+                   END IF
+                CASE (use_perd_y)
+                   force(2,iparticle) = 0.0_dp
+                   IF (shell_index /= 0) THEN
+                      force(2,natom+shell_index) = 0.0_dp
+                   END IF
+                CASE (use_perd_z)
+                   force(3,iparticle) = 0.0_dp
+                   IF (shell_index /= 0) THEN
+                      force(3,natom+shell_index) = 0.0_dp
+                   END IF
+                CASE (use_perd_xy)
+                   force(1,iparticle) = 0.0_dp
+                   force(2,iparticle) = 0.0_dp
+                   IF (shell_index /= 0) THEN
+                      force(1,natom+shell_index) = 0.0_dp
+                      force(2,natom+shell_index) = 0.0_dp
+                   END IF
+                CASE (use_perd_xz)
+                   force(1,iparticle) = 0.0_dp
+                   force(3,iparticle) = 0.0_dp
+                   IF (shell_index /= 0) THEN
+                      force(1,natom+shell_index) = 0.0_dp
+                      force(3,natom+shell_index) = 0.0_dp
+                   END IF
+                CASE (use_perd_yz)
+                   force(2,iparticle) = 0.0_dp
+                   force(3,iparticle) = 0.0_dp
+                   IF (shell_index /= 0) THEN
+                      force(2,natom+shell_index) = 0.0_dp
+                      force(3,natom+shell_index) = 0.0_dp
+                   END IF
+                CASE (use_perd_xyz)
+                   force(:,iparticle) = 0.0_dp
+                   IF (shell_index /= 0) THEN
+                      force(:,natom+shell_index) = 0.0_dp
+                   END IF
+                END SELECT
+             END IF
           END IF
+       END DO
+       CALL release_local_fixd_list(lfixd_list)
+
+       IF (.NOT.PRESENT(w)) THEN
+          CALL mp_sum(force,force_env%para_env%group)
+          DO iparticle=1,natom
+             shell_index = particle_set(iparticle)%shell_index
+             IF (shell_index == 0) THEN
+                particle_set(iparticle)%f(:) = force(:,iparticle)
+             ELSE
+                core_particle_set(shell_index)%f(:) = force(:,iparticle)
+                shell_particle_set(shell_index)%f(:) = force(:,natom+shell_index)
+             END IF
+          END DO
+          DEALLOCATE (force)
        END IF
     END IF
 
@@ -439,35 +428,31 @@ CONTAINS
 !> \param nkind ...
 !> \param molecule_kind_set ...
 !> \param local_particles ...
-!> \param error ...
 !> \author Teodoro Laino [tlaino] - 11.2008
 ! *****************************************************************************
   SUBROUTINE create_local_fixd_list(lfixd_list, nkind, molecule_kind_set, &
-       local_particles, error)
+       local_particles)
     TYPE(local_fixd_constraint_type), &
       POINTER                                :: lfixd_list(:)
     INTEGER, INTENT(IN)                      :: nkind
     TYPE(molecule_kind_type), POINTER        :: molecule_kind_set(:)
     TYPE(distribution_1d_type), POINTER      :: local_particles
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'create_local_fixd_list', &
       routineP = moduleN//':'//routineN
 
     INTEGER :: handle, i, ikind, iparticle, iparticle_local, isize, jsize, &
-      ncnst, nparticle_local, nparticle_local_all, nsize, stat
+      ncnst, nparticle_local, nparticle_local_all, nsize
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: fixed_atom_all, &
                                                 kind_index_all, &
                                                 local_particle_all, work0, &
                                                 work1, work2
-    LOGICAL                                  :: failure
     TYPE(fixd_constraint_type), &
       DIMENSION(:), POINTER                  :: fixd_list
     TYPE(molecule_kind_type), POINTER        :: molecule_kind
 
     CALL timeset(routineN,handle)
-    failure = .FALSE.
-    CPPostcondition(.NOT.ASSOCIATED(lfixd_list),cp_failure_level,routineP,error,failure)
+    CPASSERT(.NOT.ASSOCIATED(lfixd_list))
     nsize = 0
     DO ikind = 1, nkind
        molecule_kind => molecule_kind_set(ikind)
@@ -477,14 +462,10 @@ CONTAINS
        END IF
     END DO
     IF (nsize/=0) THEN
-       ALLOCATE(fixed_atom_all(nsize), stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       ALLOCATE(work0(nsize), stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       ALLOCATE(work1(nsize), stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       ALLOCATE(kind_index_all(nsize), stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       ALLOCATE(fixed_atom_all(nsize))
+       ALLOCATE(work0(nsize))
+       ALLOCATE(work1(nsize))
+       ALLOCATE(kind_index_all(nsize))
        nsize = 0
        DO ikind = 1, nkind
           molecule_kind => molecule_kind_set(ikind)
@@ -506,10 +487,8 @@ CONTAINS
        DO i = 1, SIZE(local_particles%n_el)
           nparticle_local_all   = nparticle_local_all + local_particles%n_el(i)
        END DO
-       ALLOCATE(local_particle_all(nparticle_local_all),stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       ALLOCATE(work2(nparticle_local_all),stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       ALLOCATE(local_particle_all(nparticle_local_all))
+       ALLOCATE(work2(nparticle_local_all))
        nparticle_local_all = 0
        DO i = 1, SIZE(local_particles%n_el)
           nparticle_local   = local_particles%n_el(i)
@@ -536,8 +515,7 @@ CONTAINS
        END DO Loop_count
 
        ! Allocate local fixed atom array
-       ALLOCATE(lfixd_list(ncnst),stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       ALLOCATE(lfixd_list(ncnst))
 
        ! Fill array with constraints infos
        ncnst = 0
@@ -558,20 +536,14 @@ CONTAINS
        END DO Loop_fill
 
        ! Deallocate working arrays
-       DEALLOCATE(local_particle_all,stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       DEALLOCATE(work2,stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       DEALLOCATE(fixed_atom_all, stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       DEALLOCATE(work1, stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       DEALLOCATE(kind_index_all, stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE(local_particle_all)
+       DEALLOCATE(work2)
+       DEALLOCATE(fixed_atom_all)
+       DEALLOCATE(work1)
+       DEALLOCATE(kind_index_all)
     ELSE
        ! Allocate local fixed atom array with dimension 0
-       ALLOCATE(lfixd_list(0),stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       ALLOCATE(lfixd_list(0))
     END IF
     CALL timestop(handle)
   END SUBROUTINE create_local_fixd_list
@@ -580,23 +552,16 @@ CONTAINS
 !> \brief destroy the list of local atoms on which to apply constraints/restraints
 !>      Teodoro Laino [tlaino] - 11.2008
 !> \param lfixd_list ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE release_local_fixd_list(lfixd_list, error)
+  SUBROUTINE release_local_fixd_list(lfixd_list)
     TYPE(local_fixd_constraint_type), &
       POINTER                                :: lfixd_list(:)
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'release_local_fixd_list', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    CPPostcondition(ASSOCIATED(lfixd_list),cp_failure_level,routineP,error,failure)
-    DEALLOCATE(lfixd_list, stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(lfixd_list))
+    DEALLOCATE(lfixd_list)
   END SUBROUTINE release_local_fixd_list
 
 END MODULE constraint_fxd

@@ -10,8 +10,9 @@
 ! *****************************************************************************
 MODULE acc_stream
 #if defined (__ACC)
-  USE ISO_C_BINDING
+  USE ISO_C_BINDING, ONLY: C_INT, C_CHAR, C_PTR, C_NULL_PTR, C_NULL_CHAR, C_ASSOCIATED
 #endif
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -39,7 +40,7 @@ MODULE acc_stream
 
   INTERFACE
      FUNCTION cuda_stream_create(stream_ptr, name, priority) RESULT (istat) BIND(C, name="acc_stream_create")
-       USE ISO_C_BINDING
+    IMPORT
     TYPE(C_PTR)                              :: stream_ptr
     CHARACTER(KIND=C_CHAR), DIMENSION(*)     :: name
     INTEGER(KIND=C_INT), VALUE               :: priority
@@ -50,7 +51,7 @@ MODULE acc_stream
 
   INTERFACE
      FUNCTION cuda_stream_priority_range(least, greatest) RESULT (istat) BIND(C, name="acc_stream_priority_range")
-       USE ISO_C_BINDING
+    IMPORT
     INTEGER(KIND=C_INT)                      :: least, greatest, istat
 
     END FUNCTION cuda_stream_priority_range
@@ -58,7 +59,7 @@ MODULE acc_stream
 
   INTERFACE
      FUNCTION cuda_stream_destroy(stream_ptr) RESULT (istat) BIND(C, name="acc_stream_destroy")
-       USE ISO_C_BINDING
+    IMPORT
     TYPE(C_PTR), VALUE                       :: stream_ptr
     INTEGER(KIND=C_INT)                      :: istat
 
@@ -67,7 +68,7 @@ MODULE acc_stream
 
   INTERFACE
     FUNCTION cuda_stream_sync(stream_ptr) RESULT (istat) BIND(C, name="acc_stream_sync")
-       USE ISO_C_BINDING
+    IMPORT
     TYPE(C_PTR), VALUE                       :: stream_ptr
     INTEGER(KIND=C_INT)                      :: istat
 
@@ -91,6 +92,7 @@ FUNCTION acc_stream_cptr(this) RESULT(res)
     INTEGER, INTENT(in)                      :: this
     LOGICAL                                  :: res
 
+    MARK_USED(this)
     res = .FALSE.
 END FUNCTION acc_stream_cptr
 
@@ -123,7 +125,10 @@ SUBROUTINE acc_stream_create(this, name, priority)
     INTEGER, INTENT(IN), OPTIONAL            :: priority
 
 #if ! defined (__ACC)
-    STOP "__ACC not compiled in."
+    MARK_USED(this)
+    MARK_USED(name)
+    MARK_USED(priority)
+    CPABORT("__ACC not compiled in.")
 #else
     INTEGER                                  :: istat, my_priority
 
@@ -131,11 +136,13 @@ SUBROUTINE acc_stream_create(this, name, priority)
     IF(PRESENT(priority)) &
        my_priority = priority
 
-    IF(C_ASSOCIATED(this%cptr)) STOP "acc_stream_create: stream already allocated"
+    IF(C_ASSOCIATED(this%cptr))&
+       CPABORT("acc_stream_create: stream already allocated")
 
     istat = cuda_stream_create(this%cptr, name//c_null_char, my_priority)
 
-    IF(istat /= 0 .OR. .NOT. C_ASSOCIATED(this%cptr)) STOP "acc_stream_create failed"
+    IF(istat /= 0 .OR. .NOT. C_ASSOCIATED(this%cptr))&
+       CPABORT("acc_stream_create failed")
 #endif
 END SUBROUTINE acc_stream_create
 
@@ -149,12 +156,15 @@ SUBROUTINE acc_stream_destroy(this)
       INTENT(INOUT)                          :: this
 
 #if ! defined (__ACC)
-    STOP "__ACC not compiled in."
+    MARK_USED(this)
+    CPABORT("__ACC not compiled in.")
 #else
     INTEGER                                  :: istat
-    IF(.NOT. C_ASSOCIATED(this%cptr)) STOP "acc_stream_destroy: stream not allocated"
+    IF(.NOT. C_ASSOCIATED(this%cptr))&
+       CPABORT("acc_stream_destroy: stream not allocated")
     istat = cuda_stream_destroy(this%cptr)
-    IF(istat /= 0) STOP "acc_stream_destroy failed"
+    IF(istat /= 0)&
+       CPABORT("acc_stream_destroy failed")
     this%cptr = C_NULL_PTR
 #endif
 END SUBROUTINE acc_stream_destroy
@@ -170,12 +180,15 @@ SUBROUTINE acc_stream_synchronize(this)
       INTENT(IN)                             :: this
 
 #if ! defined (__ACC)
-    STOP "__ACC not compiled in."
+    MARK_USED(this)
+    CPABORT("__ACC not compiled in.")
 #else
     INTEGER                                  :: istat
-    IF(.NOT. C_ASSOCIATED(this%cptr)) STOP "acc_stream_synchronize: stream not allocated"
+    IF(.NOT. C_ASSOCIATED(this%cptr))&
+       CPABORT("acc_stream_synchronize: stream not allocated")
     istat = cuda_stream_sync(this%cptr)
-    IF(istat /= 0) STOP "acc_stream_synchronize failed"
+    IF(istat /= 0)&
+       CPABORT("acc_stream_synchronize failed")
 #endif
 END SUBROUTINE acc_stream_synchronize
 
@@ -191,11 +204,12 @@ SUBROUTINE acc_stream_priority_range(least, greatest)
 
 #if ! defined (__ACC)
     least=-1; greatest=-1 ! assign intent-out arguments to silence compiler warnings
-    STOP "__ACC not compiled in."
+    CPABORT("__ACC not compiled in.")
 #else
     INTEGER                                  :: istat
     istat = cuda_stream_priority_range(least, greatest)
-    IF(istat /= 0) STOP "acc_stream_priority_range failed"
+    IF(istat /= 0)&
+       CPABORT("acc_stream_priority_range failed")
 #endif
 END SUBROUTINE acc_stream_priority_range
 
@@ -211,6 +225,8 @@ FUNCTION acc_stream_equal(this, other) RESULT(res)
     TYPE(acc_stream_type), INTENT(IN) :: this, other
     LOGICAL                                  :: res
 #if ! defined (__ACC)
+    MARK_USED(this)
+    MARK_USED(other)
     res = .TRUE.
 #else
     res = C_ASSOCIATED(this%cptr, other%cptr)
@@ -228,6 +244,7 @@ FUNCTION acc_stream_associated(this) RESULT(res)
     TYPE(acc_stream_type), INTENT(IN) :: this
     LOGICAL                                  :: res
 #if ! defined (__ACC)
+    MARK_USED(this)
     res = .FALSE.
 #else
     res = C_ASSOCIATED(this%cptr)

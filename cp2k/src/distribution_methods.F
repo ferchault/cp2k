@@ -44,6 +44,7 @@ MODULE distribution_methods
                                              section_vals_type,&
                                              section_vals_val_get
   USE kinds,                           ONLY: dp,&
+                                             int_8,&
                                              int_size
   USE machine,                         ONLY: m_flush
   USE mathconstants,                   ONLY: pi
@@ -64,10 +65,9 @@ MODULE distribution_methods
   USE qs_kind_types,                   ONLY: get_qs_kind,&
                                              qs_kind_type
   USE termination,                     ONLY: stop_memory
-  USE timings,                         ONLY: timeset,&
-                                             timestop
   USE util,                            ONLY: sort
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -97,8 +97,6 @@ CONTAINS
 !>        prev_local_molecules
 !> \param prev_local_molecules previous distribution of molecules, new one will 
 !>        be identical if all the prev_* arguments are present and associated
-!> \param error variable to control error logging, stopping, ...
-!>               see module cp_error_handling
 !> \par History
 !>      none
 !> \author MK (Jun. 2003)
@@ -108,8 +106,7 @@ CONTAINS
                                      molecule_kind_set, molecule_set, &
                                      local_molecules, force_env_section, &
                                      prev_molecule_kind_set, &
-                                     prev_local_molecules, &
-                                     error)
+                                     prev_local_molecules)
 
     TYPE(atomic_kind_type), DIMENSION(:), &
       POINTER                                :: atomic_kind_set
@@ -126,7 +123,6 @@ CONTAINS
       OPTIONAL, POINTER                      :: prev_molecule_kind_set
     TYPE(distribution_1d_type), OPTIONAL, &
       POINTER                                :: prev_local_molecules
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'distribute_molecules_1d', &
       routineP = moduleN//':'//routineN
@@ -162,7 +158,7 @@ CONTAINS
        ENDIF
     ENDIF
 
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
 
     group = logger%para_env%group
     mype = logger%para_env%mepos + 1
@@ -198,21 +194,17 @@ CONTAINS
 
     nbins=npe
 
-    CALL heap_new (bin_heap_count, nbins, heap_error)
-    CALL cp_assert (.NOT. heap_error, cp_fatal_level, cp_internal_error, &
-         routineN, "Error creating heap.", error=error)
+    CALL heap_new (bin_heap_count, nbins)
     CALL heap_fill (bin_heap_count, &
          (/(bin, bin=1, nbins)/), workload_count , heap_error)
-    CALL cp_assert (.NOT. heap_error, cp_fatal_level, cp_internal_error, &
-         routineN, "Error initially filling the heap.", error=error)
+    IF(heap_error)&
+       CPABORT("Error initially filling the heap.")
 
-    CALL heap_new (bin_heap_fill, nbins, heap_error)
-    CALL cp_assert (.NOT. heap_error, cp_fatal_level, cp_internal_error, &
-         routineN, "Error creating heap.", error=error)
+    CALL heap_new (bin_heap_fill, nbins)
     CALL heap_fill (bin_heap_fill, &
          (/(bin, bin=1, nbins)/), workload_fill , heap_error)
-    CALL cp_assert (.NOT. heap_error, cp_fatal_level, cp_internal_error, &
-         routineN, "Error initially filling the heap.", error=error)
+    IF(heap_error)&
+       CPABORT("Error initially filling the heap.")
 
     DO imolecule_kind=1, nmolecule_kind
 
@@ -247,14 +239,14 @@ CONTAINS
             END DO
          ELSE
             CALL heap_get_first (bin_heap_count, bin, bin_price, found, heap_error)
-            CALL cp_assert (.NOT. heap_error, cp_fatal_level, cp_internal_error, &
-                 routineN, "Error getting topmost heap element.", error=error)
-            CALL cp_assert (found, cp_fatal_level, cp_internal_error, &
-                 routineN, "No topmost heap element found.", error=error)
+            IF(heap_error)&
+               CPABORT("Error getting topmost heap element.")
+            IF(.NOT.found)&
+               CPABORT("No topmost heap element found.")
 
             ipe = bin
-            CALL cp_assert (bin_price==workload_count(ipe), cp_fatal_level, cp_internal_error, &
-                 routineN, "inconsistent heap", error=error)
+            IF(bin_price/=workload_count(ipe))&
+               CPABORT("inconsistent heap")
 
             workload_count(ipe) = workload_count(ipe) + nload
             IF (ipe == mype) THEN
@@ -263,8 +255,8 @@ CONTAINS
 
             bin_price = workload_count(ipe)
             CALL heap_reset_first (bin_heap_count, bin_price, heap_error)
-            CALL cp_assert (.NOT. heap_error, cp_warning_level, cp_internal_error, &
-                 routineN, "Error setting price of top heap element.", error=error)
+            IF(heap_error)&
+               CPWARN("Error setting price of top heap element.")
          END IF
       END DO
 
@@ -295,14 +287,14 @@ CONTAINS
             END DO
          ELSE
             CALL heap_get_first (bin_heap_fill, bin, bin_price, found, heap_error)
-            CALL cp_assert (.NOT. heap_error, cp_fatal_level, cp_internal_error, &
-                 routineN, "Error getting topmost heap element.", error=error)
-            CALL cp_assert (found, cp_fatal_level, cp_internal_error, &
-                 routineN, "No topmost heap element found.", error=error)
+            IF(heap_error)&
+               CPABORT("Error getting topmost heap element.")
+            IF(.NOT.found)&
+               CPABORT("No topmost heap element found.")
 
             ipe = bin
-            CALL cp_assert (bin_price==workload_fill(ipe), cp_fatal_level, cp_internal_error, &
-                 routineN, "inconsistent heap", error=error)
+            IF(bin_price/=workload_fill(ipe))&
+               CPABORT("inconsistent heap")
 
             workload_fill(ipe) = workload_fill(ipe) + nload
             is_local = (ipe == mype)
@@ -322,34 +314,30 @@ CONTAINS
          IF (.NOT. has_prev_subsys_info) THEN
             bin_price = workload_fill(ipe)
             CALL heap_reset_first (bin_heap_fill, bin_price, heap_error)
-            CALL cp_assert (.NOT. heap_error, cp_warning_level, cp_internal_error, &
-                 routineN, "Error setting price of top heap element.", error=error)
+            IF(heap_error)&
+               CPWARN("Error setting price of top heap element.")
          END IF
       END DO
 
     END DO
 
-    CALL cp_assert (ALL(workload_fill.EQ.workload_count), cp_fatal_level, cp_internal_error, &
-              routineN, "Inconsistent heaps encountered", error=error)
+    IF(ANY(workload_fill.NE.workload_count))&
+       CPABORT("Inconsistent heaps encountered")
 
-    CALL heap_release (bin_heap_count, heap_error)
-    CALL cp_assert (.NOT. heap_error, cp_warning_level, cp_internal_error, &
-         routineN, "Error releasing heap.", error=error)
-    CALL heap_release (bin_heap_fill, heap_error)
-    CALL cp_assert (.NOT. heap_error, cp_warning_level, cp_internal_error, &
-         routineN, "Error releasing heap.", error=error)
+    CALL heap_release (bin_heap_count)
+    CALL heap_release (bin_heap_fill)
 
 !   *** Create the local molecule structure ***
 
     CALL distribution_1d_create(local_molecules, &
                                 n_el=nmolecule_local, &
-                                para_env=logger%para_env, error=error)
+                                para_env=logger%para_env)
 
 !   *** Create the local particle structure ***
 
     CALL distribution_1d_create(local_particles, &
                                 n_el=nparticle_local, &
-                                para_env=logger%para_env, error=error)
+                                para_env=logger%para_env)
 
 !   *** Store the generated local molecule and particle distributions ***
 
@@ -383,10 +371,10 @@ CONTAINS
 !   *** Print distribution, if requested ***
 
     IF (BTEST(cp_print_key_should_output(logger%iter_info, &
-         force_env_section, "PRINT%DISTRIBUTION1D", error=error), cp_p_file)) THEN
+         force_env_section, "PRINT%DISTRIBUTION1D"), cp_p_file)) THEN
 
        output_unit = cp_print_key_unit_nr(logger, force_env_section, "PRINT%DISTRIBUTION1D", &
-            extension=".Log", error=error)
+            extension=".Log")
 
        iw = output_unit
        IF (output_unit<0) iw = cp_logger_get_default_unit_nr(logger, LOCAL=.TRUE.)
@@ -477,42 +465,27 @@ CONTAINS
          CALL m_flush(iw)
          CALL mp_sync(group)
       END DO
-      DEALLOCATE (work, STAT=istat)
-      IF (istat /= 0) CALL stop_memory(routineN, moduleN, __LINE__, "work")
+      DEALLOCATE (work)
 
       CALL cp_print_key_finished_output(output_unit, logger, force_env_section, &
-           "PRINT%DISTRIBUTION1D", error=error)
+           "PRINT%DISTRIBUTION1D")
    END IF
 !   *** Release work storage ***
 
-    DEALLOCATE (workload_count, STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN, moduleN, __LINE__, &
-                                     "workload")
+    DEALLOCATE (workload_count)
 
-    DEALLOCATE (workload_fill, STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN, moduleN, __LINE__, &
-                                     "workload_old")
+    DEALLOCATE (workload_fill)
 
-    DEALLOCATE (nmolecule_local, STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN, moduleN, __LINE__, &
-                                     "nmolecule_local")
+    DEALLOCATE (nmolecule_local)
 
-    DEALLOCATE (nparticle_local, STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN, moduleN, __LINE__, &
-                                     "nparticle_local")
+    DEALLOCATE (nparticle_local)
 
     DO imolecule_kind=1, nmolecule_kind
       IF (ASSOCIATED(local_molecule(imolecule_kind)%array)) THEN
-        DEALLOCATE (local_molecule(imolecule_kind)%array, STAT=istat)
-        IF (istat /= 0) THEN
-          CALL stop_memory(routineN, moduleN, __LINE__, &
-                           "local_molecule(imolecule_kind)%array")
-        END IF
+        DEALLOCATE (local_molecule(imolecule_kind)%array)
       END IF
     END DO
-    DEALLOCATE (local_molecule, STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN, moduleN, __LINE__, &
-                                     "local_molecule")
+    DEALLOCATE (local_molecule)
 
     CALL timestop(handle)
 
@@ -532,8 +505,6 @@ CONTAINS
 !> \param blacs_env the parallel environement at the basis of the
 !>                   distribution
 !> \param force_env_section ...
-!> \param error variable to control error logging, stopping, ...
-!>               see module cp_error_handling
 !> \par History
 !>      - local_rows & cols blocksize optimizations (Aug. 2003, MK)
 !>      - cleanup of distribution_2d (Sep. 2003, fawzi)
@@ -547,8 +518,7 @@ CONTAINS
 ! *****************************************************************************
   SUBROUTINE distribute_molecules_2d(cell, atomic_kind_set, particle_set, &
                                      qs_kind_set, molecule_kind_set, molecule_set, &
-                                     distribution_2d, blacs_env, force_env_section, &
-                                     error)
+                                     distribution_2d, blacs_env, force_env_section)
     TYPE(cell_type), POINTER                 :: cell
     TYPE(atomic_kind_type), DIMENSION(:), &
       POINTER                                :: atomic_kind_set
@@ -563,7 +533,6 @@ CONTAINS
     TYPE(distribution_2d_type), POINTER      :: distribution_2d
     TYPE(cp_blacs_env_type), POINTER         :: blacs_env
     TYPE(section_vals_type), POINTER         :: force_env_section
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'distribute_molecules_2d', &
       routineP = moduleN//':'//routineN
@@ -580,8 +549,7 @@ CONTAINS
     INTEGER, DIMENSION(:, :), POINTER :: cluster_col_distribution, &
       cluster_row_distribution, col_distribution, row_distribution
     LOGICAL :: basic_cluster_optimization, basic_optimization, &
-      basic_spatial_optimization, failure, molecular_distribution, &
-      skip_optimization
+      basic_spatial_optimization, molecular_distribution, skip_optimization
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :)                        :: coords, pbc_scaled_coords
     REAL(KIND=dp), DIMENSION(3)              :: center
@@ -595,21 +563,19 @@ CONTAINS
 
 !...
 
-    failure = .FALSE.
-
     CALL timeset(routineN, handle)
 
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
 
-    distribution_section => section_vals_get_subs_vals(force_env_section, "DFT%QS%DISTRIBUTION", error=error)
+    distribution_section => section_vals_get_subs_vals(force_env_section, "DFT%QS%DISTRIBUTION")
 
-    CALL section_vals_val_get(distribution_section, "2D_MOLECULAR_DISTRIBUTION", l_val=molecular_distribution, error=error)
-    CALL section_vals_val_get(distribution_section, "SKIP_OPTIMIZATION", l_val=skip_optimization, error=error)
-    CALL section_vals_val_get(distribution_section, "BASIC_OPTIMIZATION", l_val=basic_optimization, error=error)
-    CALL section_vals_val_get(distribution_section, "BASIC_SPATIAL_OPTIMIZATION", l_val=basic_spatial_optimization, error=error)
-    CALL section_vals_val_get(distribution_section, "BASIC_CLUSTER_OPTIMIZATION", l_val=basic_cluster_optimization, error=error)
+    CALL section_vals_val_get(distribution_section, "2D_MOLECULAR_DISTRIBUTION", l_val=molecular_distribution)
+    CALL section_vals_val_get(distribution_section, "SKIP_OPTIMIZATION", l_val=skip_optimization)
+    CALL section_vals_val_get(distribution_section, "BASIC_OPTIMIZATION", l_val=basic_optimization)
+    CALL section_vals_val_get(distribution_section, "BASIC_SPATIAL_OPTIMIZATION", l_val=basic_spatial_optimization)
+    CALL section_vals_val_get(distribution_section, "BASIC_CLUSTER_OPTIMIZATION", l_val=basic_cluster_optimization)
 
-    CALL section_vals_val_get(distribution_section, "COST_MODEL", i_val=cost_model, error=error)
+    CALL section_vals_val_get(distribution_section, "COST_MODEL", i_val=cost_model)
     !
 
     group = blacs_env%para_env%group
@@ -683,11 +649,11 @@ CONTAINS
 
 
        ! Fill in the clusters and their prices
-       CALL section_vals_val_get(distribution_section, "COST_MODEL", i_val=cost_model, error=error)
+       CALL section_vals_val_get(distribution_section, "COST_MODEL", i_val=cost_model)
        IF (.NOT.molecular_distribution) THEN
           DO iatom = 1, natom
-             CALL cp_assert (iatom .LE. nclusters, cp_fatal_level, &
-                  cp_internal_error, routineN, "Bounds error", error=error)
+             IF(iatom .GT. nclusters)&
+                CPABORT("Bounds error")
              CALL get_atomic_kind(particle_set(iatom)%atomic_kind, kind_number=ikind)
              cluster_list(iatom) = iatom
              SELECT CASE (cost_model)
@@ -695,11 +661,11 @@ CONTAINS
                 CALL get_qs_kind(qs_kind_set(ikind), nsgf=nsgf)
                 cluster_price = nsgf
              CASE (model_block_lmax)
-                CALL get_qs_kind(qs_kind_set(ikind), orb_basis_set=orb_basis_set)
+                CALL get_qs_kind(qs_kind_set(ikind), basis_set=orb_basis_set)
                 CALL get_gto_basis_set(orb_basis_set, lmax=lmax_basis)
                 cluster_price = MAXVAL (lmax_basis)
              CASE default
-                CALL get_qs_kind(qs_kind_set(ikind), orb_basis_set=orb_basis_set)
+                CALL get_qs_kind(qs_kind_set(ikind), basis_set=orb_basis_set)
                 CALL get_gto_basis_set(orb_basis_set, lmax=lmax_basis)
                 cluster_price = 8 + (MAXVAL (lmax_basis)**2)
              END SELECT
@@ -722,11 +688,11 @@ CONTAINS
                       CALL get_qs_kind(qs_kind_set(ikind), nsgf=nsgf)
                       cluster_price = cluster_price + nsgf
                    CASE (model_block_lmax)
-                      CALL get_qs_kind(qs_kind_set(ikind), orb_basis_set=orb_basis_set)
+                      CALL get_qs_kind(qs_kind_set(ikind), basis_set=orb_basis_set)
                       CALL get_gto_basis_set(orb_basis_set, lmax=lmax_basis)
                       cluster_price = cluster_price + MAXVAL (lmax_basis)
                    CASE default
-                      CALL get_qs_kind(qs_kind_set(ikind), orb_basis_set=orb_basis_set)
+                      CALL get_qs_kind(qs_kind_set(ikind), basis_set=orb_basis_set)
                       CALL get_gto_basis_set(orb_basis_set, lmax=lmax_basis)
                       cluster_price = cluster_price +  8 + (MAXVAL (lmax_basis)**2)
                    END SELECT
@@ -739,18 +705,18 @@ CONTAINS
        ! And distribute
        IF (basic_optimization) THEN
           CALL make_basic_distribution (cluster_list, cluster_prices, &
-               nprow, cluster_row_distribution(:,1), npcol, cluster_col_distribution(:,1), error=error)
+               nprow, cluster_row_distribution(:,1), npcol, cluster_col_distribution(:,1))
        ELSE
           IF(basic_cluster_optimization)THEN
-          CALL cp_assert(.NOT. molecular_distribution,cp_failure_level,cp_assertion_failed,&
-                         routineP,"clustering and molecular blocking NYI",error,failure)
+             IF(molecular_distribution)&
+               CPABORT("clustering and molecular blocking NYI")
              ALLOCATE(pbc_scaled_coords(3, natom),coords(3, natom))
              DO iatom=1, natom
                 CALL real_to_scaled(pbc_scaled_coords(:, iatom), pbc(particle_set(iatom)%r(:), cell), cell)
                 coords(:,iatom)=pbc(particle_set(iatom)%r(:),cell)
              ENDDO
              CALL make_cluster_distribution(coords, pbc_scaled_coords, cell, cluster_prices,&
-                    nprow, cluster_row_distribution, npcol, cluster_col_distribution, error)
+                    nprow, cluster_row_distribution, npcol, cluster_col_distribution)
           ELSE! basic_spatial_optimization
              ALLOCATE(pbc_scaled_coords(3, nclusters))
              IF (.NOT. molecular_distribution) THEN
@@ -780,7 +746,7 @@ CONTAINS
              ENDIF
    
              CALL make_basic_spatial_distribution (pbc_scaled_coords, cluster_prices, &
-                            nprow, cluster_row_distribution(:,1), npcol, cluster_col_distribution(:,1), error)
+                            nprow, cluster_row_distribution(:,1), npcol, cluster_col_distribution(:,1))
    
              DEALLOCATE(pbc_scaled_coords)
           END IF
@@ -807,22 +773,14 @@ CONTAINS
        ENDIF
 
        ! cleanup
-       DEALLOCATE (cluster_list, stat=istat)
-       IF (istat /= 0) CALL stop_memory(routineN, moduleN, __LINE__, &
-            "cluster_list", nclusters*int_size)
-       DEALLOCATE (cluster_prices, stat=istat)
-       IF (istat /= 0) CALL stop_memory(routineN, moduleN, __LINE__, &
-            "cluster_prices", nclusters*int_size)
-       DEALLOCATE (cluster_row_distribution, stat=istat)
-       IF (istat /= 0) CALL stop_memory(routineN, moduleN, __LINE__, &
-            "cluster_prices", nclusters*int_size)
-       DEALLOCATE (cluster_col_distribution, stat=istat)
-       IF (istat /= 0) CALL stop_memory(routineN, moduleN, __LINE__, &
-            "cluster_prices", nclusters*int_size)
+       DEALLOCATE (cluster_list)
+       DEALLOCATE (cluster_prices)
+       DEALLOCATE (cluster_row_distribution)
+       DEALLOCATE (cluster_col_distribution)
 
     ELSE
        ! expects nothing else
-       CPPostcondition(.FALSE., cp_failure_level, routineP, error, failure)
+       CPABORT("")
     ENDIF
 
 
@@ -873,8 +831,7 @@ CONTAINS
                                 col_distribution_ptr=col_distribution, &
                                 local_rows_ptr=local_particle_row, &
                                 local_cols_ptr=local_particle_col, &
-                                blacs_env=blacs_env, &
-                                error=error)
+                                blacs_env=blacs_env)
 
     NULLIFY (local_particle_row)
     NULLIFY (local_particle_col)
@@ -883,10 +840,10 @@ CONTAINS
 
 !   *** Print distribution, if requested ***
     IF (BTEST(cp_print_key_should_output(logger%iter_info, &
-         force_env_section, "PRINT%DISTRIBUTION", error=error), cp_p_file)) THEN
+         force_env_section, "PRINT%DISTRIBUTION"), cp_p_file)) THEN
 
        output_unit = cp_print_key_unit_nr(logger, force_env_section, "PRINT%DISTRIBUTION", &
-            extension=".Log", error=error)
+            extension=".Log")
 
 !     *** Print row distribution ***
 
@@ -912,10 +869,7 @@ CONTAINS
          CALL m_flush(output_unit)
       END IF
 
-      DEALLOCATE (work, STAT=istat)
-      IF (istat /= 0) THEN
-        CALL stop_memory(routineN, moduleN, __LINE__, "work")
-      END IF
+      DEALLOCATE (work)
 
 !     *** Print column distribution ***
 
@@ -941,36 +895,28 @@ CONTAINS
          CALL m_flush(output_unit)
       END IF
 
-      DEALLOCATE (work, STAT=istat)
-      IF (istat /= 0) THEN
-        CALL stop_memory(routineN, moduleN, __LINE__, "work")
-      END IF
+      DEALLOCATE (work)
 
       CALL cp_print_key_finished_output(output_unit, logger, force_env_section, &
-           "PRINT%DISTRIBUTION", error=error)
+           "PRINT%DISTRIBUTION")
     END IF
 
     IF (BTEST(cp_print_key_should_output(logger%iter_info, &
-         force_env_section, "PRINT%DISTRIBUTION2D", error=error), cp_p_file)) THEN
+         force_env_section, "PRINT%DISTRIBUTION2D"), cp_p_file)) THEN
 
          iw = cp_logger_get_default_unit_nr(logger, LOCAL=.TRUE.)
          CALL distribution_2d_write(distribution_2d, &
                                     unit_nr=iw, &
                                     local=.TRUE., &
-                                    long_description=.TRUE., &
-                                    error=error)
+                                    long_description=.TRUE.)
 
     ENDIF
 
 !   *** Release work storage ***
 
-    DEALLOCATE (nparticle_local_row, STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN, moduleN, __LINE__, &
-                                     "nparticle_local_row")
+    DEALLOCATE (nparticle_local_row)
 
-    DEALLOCATE (nparticle_local_col, STAT=istat)
-    IF (istat /= 0) CALL stop_memory(routineN, moduleN, __LINE__, &
-                                     "nparticle_local_col")
+    DEALLOCATE (nparticle_local_col)
 
     CALL timestop(handle)
 
@@ -984,25 +930,23 @@ CONTAINS
 !> \param row_distribution ...
 !> \param npcols ...
 !> \param col_distribution ...
-!> \param error ...
 !> \par History
 !> - Created 2010-08-06 UB
 ! *****************************************************************************
   SUBROUTINE make_basic_distribution (cluster_list, cluster_prices, &
-       nprows, row_distribution, npcols, col_distribution, error)
+       nprows, row_distribution, npcols, col_distribution)
     INTEGER, DIMENSION(:), INTENT(INOUT)     :: cluster_list, cluster_prices
     INTEGER, INTENT(IN)                      :: nprows
     INTEGER, DIMENSION(:), INTENT(OUT)       :: row_distribution
     INTEGER, INTENT(IN)                      :: npcols
     INTEGER, DIMENSION(:), INTENT(OUT)       :: col_distribution
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'make_basic_distribution', &
       routineP = moduleN//':'//routineN
 
     INTEGER :: bin, bin_price, cluster, cluster_index, cluster_price, nbins, &
       nclusters, pcol, pgrid_gcd, prow, timing_handle
-    LOGICAL                                  :: failure, found, heap_error
+    LOGICAL                                  :: found, heap_error
     TYPE(heap_t)                             :: bin_heap
 
 !   ---------------------------------------------------------------------------
@@ -1011,13 +955,11 @@ CONTAINS
     nbins = lcm (nprows, npcols)
     pgrid_gcd = gcd (nprows, npcols)
     CALL sort (cluster_prices, SIZE(cluster_list), cluster_list)
-    CALL heap_new (bin_heap, nbins, heap_error)
-    CALL cp_assert (.NOT. heap_error, cp_fatal_level, cp_internal_error, &
-         routineN, "Error creating heap.", error=error)
+    CALL heap_new (bin_heap, nbins)
     CALL heap_fill (bin_heap, &
          (/(bin, bin=0, nbins-1)/), (/(0, bin=1, nbins)/), heap_error)
-    CALL cp_assert (.NOT. heap_error, cp_fatal_level, cp_internal_error, &
-         routineN, "Error initially filling the heap.", error=error)
+    IF(heap_error)&
+       CPABORT("Error initially filling the heap.")
     !
     nclusters = SIZE (cluster_list)
     ! Put the most expensive cluster in the bin with the smallest
@@ -1025,31 +967,27 @@ CONTAINS
     DO cluster_index = nclusters, 1, -1
        cluster = cluster_list(cluster_index)
        CALL heap_get_first (bin_heap, bin, bin_price, found, heap_error)
-       CALL cp_assert (.NOT. heap_error, cp_fatal_level, cp_internal_error, &
-            routineN, "Error getting topmost heap element.", error=error)
-       CALL cp_assert (found, cp_fatal_level, cp_internal_error, &
-            routineN, "No topmost heap element found.", error=error)
+       IF(heap_error)&
+          CPABORT("Error getting topmost heap element.")
+       IF(.NOT.found)&
+          CPABORT("No topmost heap element found.")
        !
-       failure = .FALSE.
        prow = INT (bin*pgrid_gcd / npcols)
-       CALL cp_assert (prow .LT. nprows, cp_fatal_level, cp_internal_error, &
-            routineN, "Invalid process row.", failure=failure, error=error)
-       failure = .TRUE.
+       IF(prow .GE. nprows)&
+          CPABORT("Invalid process row.")
        pcol = INT (bin*pgrid_gcd / nprows)
-       CALL cp_assert (pcol .LT. npcols, cp_fatal_level, cp_internal_error, &
-            routineN, "Invalid process column.", failure=failure, error=error)
+       IF(pcol .GE. npcols)&
+          CPABORT("Invalid process column.")
        row_distribution (cluster) = prow + 1
        col_distribution (cluster) = pcol + 1
        !
        cluster_price = cluster_prices(cluster_index)
        bin_price = bin_price + cluster_price
        CALL heap_reset_first (bin_heap, bin_price, heap_error)
-       CALL cp_assert (.NOT. heap_error, cp_warning_level, cp_internal_error, &
-            routineN, "Error setting price of top heap element.", error=error)
+       IF(heap_error)&
+          CPWARN("Error setting price of top heap element.")
     ENDDO
-    CALL heap_release (bin_heap, heap_error)
-    CALL cp_assert (.NOT. heap_error, cp_warning_level, cp_internal_error, &
-         routineN, "Error releasing heap.", error=error)
+    CALL heap_release (bin_heap)
     CALL timestop (timing_handle)
   END SUBROUTINE make_basic_distribution
 
@@ -1062,12 +1000,11 @@ CONTAINS
 !> \param row_distribution ...
 !> \param npcols ...
 !> \param col_distribution ...
-!> \param error ...
 !> \par History
 !> - Created 2010-11-11 Joost VandeVondele
 ! *****************************************************************************
   SUBROUTINE make_basic_spatial_distribution (pbc_scaled_coords, costs, &
-       nprows, row_distribution, npcols, col_distribution, error)
+       nprows, row_distribution, npcols, col_distribution)
     REAL(KIND=dp), DIMENSION(:, :), &
       INTENT(IN)                             :: pbc_scaled_coords
     INTEGER, DIMENSION(:), INTENT(IN)        :: costs
@@ -1075,7 +1012,6 @@ CONTAINS
     INTEGER, DIMENSION(:), INTENT(OUT)       :: row_distribution
     INTEGER, INTENT(IN)                      :: npcols
     INTEGER, DIMENSION(:), INTENT(OUT)       :: col_distribution
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: &
       routineN = 'make_basic_spatial_distribution', &
@@ -1183,10 +1119,9 @@ CONTAINS
 !> \param row_distribution the resulting distribution over proc_rows of atomic blocks
 !> \param npcols number of precessors per col on the 2d grid
 !> \param col_distribution the resulting distribution over proc_cols of atomic blocks
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE make_cluster_distribution(coords, scaled_coords, cell, costs, &
-       nprows, row_distribution, npcols, col_distribution, error)
+       nprows, row_distribution, npcols, col_distribution)
     REAL(KIND=dp), DIMENSION(:, :), &
       INTENT(IN)                             :: coords, scaled_coords
     TYPE(cell_type), POINTER                 :: cell
@@ -1195,17 +1130,25 @@ CONTAINS
     INTEGER, DIMENSION(:, :), INTENT(OUT)    :: row_distribution
     INTEGER, INTENT(IN)                      :: npcols
     INTEGER, DIMENSION(:, :), INTENT(OUT)    :: col_distribution
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'make_cluster_distribution', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, i, icluster, level, &
-                                                natom, ncluster
+                                                natom, output_unit
+    INTEGER(KIND=int_8)                      :: ncluster
     INTEGER, ALLOCATABLE, DIMENSION(:) :: atom_to_cluster, cluster_cost, &
-      cluster_to_col, cluster_to_row, piv_cost, proc_cost, sorted_cost
+      cluster_count, cluster_to_col, cluster_to_row, piv_cost, proc_cost, &
+      sorted_cost
+    REAL(KIND=dp)                            :: fold(3)
+    REAL(KIND=dp), ALLOCATABLE, &
+      DIMENSION(:, :)                        :: cluster_center, cluster_high, &
+                                                cluster_low
 
     CALL timeset (routineN, handle)
+
+    output_unit=cp_logger_get_default_io_unit()
+
     natom=SIZE(costs)
     ncluster=cp_distribution_get_num_images(SUM(costs),natom,nprows,npcols)
     ALLOCATE(atom_to_cluster(natom))
@@ -1216,10 +1159,10 @@ CONTAINS
     ALLOCATE(piv_cost(ncluster))
 
     icluster=0
-    CALL cluster_recurse(coords, scaled_coords, cell, costs, atom_to_cluster, ncluster, icluster, cluster_cost, error)
+    CALL cluster_recurse(coords, scaled_coords, cell, costs, atom_to_cluster, ncluster, icluster, cluster_cost)
 
     sorted_cost(:)=cluster_cost(:)
-    CALL sort(sorted_cost,ncluster,piv_cost)
+    CALL sort(sorted_cost,INT(ncluster),piv_cost)
 
     ALLOCATE(proc_cost(nprows))
     proc_cost=0; level=1
@@ -1235,6 +1178,38 @@ CONTAINS
        col_distribution(i,1)=cluster_to_col(atom_to_cluster(i))
        col_distribution(i,2)=atom_to_cluster(i)
     END DO
+
+    ! generate some statistics on clusters
+    ALLOCATE(cluster_center(3,ncluster))
+    ALLOCATE(cluster_low(3,ncluster))
+    ALLOCATE(cluster_high(3,ncluster))
+    ALLOCATE(cluster_count(ncluster))
+    cluster_count=0
+    DO i=1,natom
+       cluster_count(atom_to_cluster(i))=cluster_count(atom_to_cluster(i))+1
+       cluster_center(:,atom_to_cluster(i))=coords(:,i)
+    ENDDO
+    cluster_low=HUGE(0.0_dp)
+    cluster_high=-HUGE(0.0_dp)
+    DO i=1,natom
+       fold=pbc(coords(:,i)-cluster_center(:,atom_to_cluster(i)), cell)+cluster_center(:,atom_to_cluster(i))
+       cluster_low(:,atom_to_cluster(i))=MIN(cluster_low(:,atom_to_cluster(i)),fold(:))
+       cluster_high(:,atom_to_cluster(i))=MAX(cluster_high(:,atom_to_cluster(i)),fold(:))
+    ENDDO
+    IF (output_unit>0) THEN
+       WRITE(output_unit,*) 
+       WRITE(output_unit,'(T2,A)') "Cluster distribution information"
+       WRITE(output_unit,'(T2,A,T48,I8)') "Number of atoms",natom
+       WRITE(output_unit,'(T2,A,T48,I8)') "Number of clusters",ncluster
+       WRITE(output_unit,'(T2,A,T48,I8)') "Largest cluster in atoms",MAXVAL(cluster_count)
+       WRITE(output_unit,'(T2,A,T48,I8)') "Smallest cluster in atoms",MINVAL(cluster_count)
+       WRITE(output_unit,'(T2,A,T48,F8.3,I8)') "Largest cartesian extend [a.u.]/cluster x=", &
+                   MAXVAL(cluster_high(1,:)-cluster_low(1,:)),MAXLOC(cluster_high(1,:)-cluster_low(1,:))
+       WRITE(output_unit,'(T2,A,T48,F8.3,I8)') "Largest cartesian extend [a.u.]/cluster y=", &
+                   MAXVAL(cluster_high(2,:)-cluster_low(2,:)),MAXLOC(cluster_high(2,:)-cluster_low(2,:))
+       WRITE(output_unit,'(T2,A,T48,F8.3,I8)') "Largest cartesian extend [a.u.]/cluster z=", &
+                   MAXVAL(cluster_high(3,:)-cluster_low(3,:)),MAXLOC(cluster_high(3,:)-cluster_low(3,:))
+    ENDIF
 
     DEALLOCATE(atom_to_cluster,cluster_cost,cluster_to_row,cluster_to_col,sorted_cost,piv_cost,proc_cost)
     CALL timestop(handle)
@@ -1288,17 +1263,16 @@ CONTAINS
 !> \param ncluster number of clusters still to be created on a given recursion level
 !> \param icluster the index of the current cluster to be created
 !> \param fin_cluster_cost total cost of the final clusters
-!> \param error ...
 ! *****************************************************************************
-  RECURSIVE SUBROUTINE cluster_recurse(coord, scaled_coord, cell, costs, cluster_inds, ncluster, icluster, fin_cluster_cost, error)
+  RECURSIVE SUBROUTINE cluster_recurse(coord, scaled_coord, cell, costs, cluster_inds, ncluster, icluster, fin_cluster_cost)
     REAL(KIND=dp), DIMENSION(:, :), &
       INTENT(IN)                             :: coord, scaled_coord
     TYPE(cell_type), POINTER                 :: cell
     INTEGER, DIMENSION(:), INTENT(IN)        :: costs
     INTEGER, DIMENSION(:), INTENT(INOUT)     :: cluster_inds
-    INTEGER, INTENT(INOUT)                   :: ncluster, icluster
+    INTEGER(KIND=int_8), INTENT(INOUT)       :: ncluster
+    INTEGER, INTENT(INOUT)                   :: icluster
     INTEGER, DIMENSION(:), INTENT(INOUT)     :: fin_cluster_cost
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cluster_recurse', &
       routineP = moduleN//':'//routineN
@@ -1306,8 +1280,10 @@ CONTAINS
     INTEGER                                  :: i, ibeg, iend, maxv(1), &
                                                 min_seed, natoms, nleft, &
                                                 nsplits, seed, tot_cost
+    INTEGER(KIND=int_8), ALLOCATABLE, &
+      DIMENSION(:)                           :: ncluster_new
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: cluster_cost, inds_tmp, &
-                                                nat_cluster, ncluster_new, piv
+                                                nat_cluster, piv
     LOGICAL                                  :: found
     REAL(KIND=dp)                            :: balance, balance_new, conv
 
@@ -1317,7 +1293,7 @@ CONTAINS
     IF (natoms.le.1) THEN
        nsplits=1
     ELSE
-       nsplits=MIN(MIN(MAX(6, INT(60.00/LOG(REAL(natoms)))), ncluster), natoms)
+       nsplits=MIN(INT(MIN(INT(MAX(6, INT(60.00/LOG(REAL(natoms)))),KIND=int_8), ncluster)), natoms)
     ENDIF
     IF (nsplits==1) THEN
        icluster=icluster+1
@@ -1327,7 +1303,7 @@ CONTAINS
        ALLOCATE(cluster_cost(nsplits), ncluster_new(nsplits), inds_tmp(natoms), piv(natoms), nat_cluster(nsplits))
        ! initialise some values
        cluster_cost=0; seed=300; found=.TRUE. ; min_seed=seed
-       CALL kmeans(nsplits, coord, scaled_coord, cell, cluster_inds, nat_cluster, seed, conv, error)
+       CALL kmeans(nsplits, coord, scaled_coord, cell, cluster_inds, nat_cluster, seed, conv)
        balance=MAXVAL(REAL(nat_cluster))/MINVAL(REAL(nat_cluster))
 
        ! If the system is small enough try to do better in terms of balancing number of atoms per cluster
@@ -1336,7 +1312,7 @@ CONTAINS
           found=.FALSE.
           DO i=1, 5
              IF(balance.gt.1.1)THEN
-                 CALL kmeans(nsplits, coord, scaled_coord, cell, cluster_inds, nat_cluster, seed+i*40, conv, error)
+                 CALL kmeans(nsplits, coord, scaled_coord, cell, cluster_inds, nat_cluster, seed+i*40, conv)
                  balance_new=MAXVAL(REAL(nat_cluster))/MINVAL(REAL(nat_cluster))
                  IF(balance_new.LT.balance)THEN
                     balance=balance_new
@@ -1349,7 +1325,7 @@ CONTAINS
           END DO
        END IF
        !If we do not match the convergence than recompute at least the best assignment
-       IF(.NOT.found)CALL kmeans(nsplits, coord, scaled_coord, cell, cluster_inds, nat_cluster, min_seed, conv, error)
+       IF(.NOT.found)CALL kmeans(nsplits, coord, scaled_coord, cell, cluster_inds, nat_cluster, min_seed, conv)
 
        ! compute the cost of each cluster to decide how many splits have to be performed on the next lower level
        DO i=1, natoms
@@ -1358,7 +1334,7 @@ CONTAINS
        tot_cost=SUM(cluster_cost)
        ! compute new splitting, can be done more elegant 
        ncluster_new(:)=ncluster*cluster_cost(:)/tot_cost
-       nleft=ncluster-SUM(ncluster_new)
+       nleft=INT(ncluster-SUM(ncluster_new))
        ! As we won't have empty clusters, we can not have 0 as new size, so we correct for this at first
        DO i=1, nsplits
            IF(ncluster_new(i)==0)THEN
@@ -1394,7 +1370,7 @@ CONTAINS
           IF(nat_cluster(i)==0)CYCLE
           iend=iend+nat_cluster(i)
           CALL cluster_recurse(coord(:, piv(ibeg:iend)), scaled_coord(:, piv(ibeg:iend)), cell, costs(piv(ibeg:iend)),&
-                               inds_tmp(ibeg:iend), ncluster_new(i), icluster, fin_cluster_cost, error)
+                               inds_tmp(ibeg:iend), ncluster_new(i), icluster, fin_cluster_cost)
           ibeg=ibeg+nat_cluster(i)
        END DO
        ! copy the sorted cluster IDs on the old layout, inds_tmp gets set at the lowest level of recursion
@@ -1419,16 +1395,14 @@ CONTAINS
 !> \param nat_cl atoms per cluster
 !> \param seed seed for the RNG. Algorithm might need multiple tries to deliver best results
 !> \param tot_var the total variance of the clusters around the centers
-!> \param error ...
 ! *****************************************************************************
- SUBROUTINE kmeans(ncent,coord,scaled_coord,cell,cluster,nat_cl,seed,tot_var,error)
+ SUBROUTINE kmeans(ncent,coord,scaled_coord,cell,cluster,nat_cl,seed,tot_var)
     INTEGER                                  :: ncent
     REAL(KIND=dp), DIMENSION(:, :)           :: coord, scaled_coord
     TYPE(cell_type), POINTER                 :: cell
     INTEGER, DIMENSION(:)                    :: cluster, nat_cl
     INTEGER                                  :: seed
     REAL(KIND=dp)                            :: tot_var
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     INTEGER                                  :: i, ind, itn, j, nat, oldc
     LOGICAL                                  :: changed
@@ -1447,15 +1421,15 @@ CONTAINS
 
    CALL create_rng_stream(rng_stream=rng_stream,&
         name="kmeans uniform distribution [0,1]",&
-        distribution_type=UNIFORM,seed=initial_seed,error=error)
+        distribution_type=UNIFORM,seed=initial_seed)
 
 ! try to find a clever initial guess with centers being somewhat distributed
-   rn=next_random_number(rng_stream,error=error)
+   rn=next_random_number(rng_stream)
    ind=CEILING(rn*nat)
    cent_coord(:,1)=coord(:,ind)
    DO i=2,ncent
       DO
-        rn=next_random_number(rng_stream,error=error)
+        rn=next_random_number(rng_stream)
         ind=CEILING(rn*nat)
         cent_coord(:,i)=coord(:,ind)
         devi=HUGE(1.0_dp)
@@ -1464,7 +1438,7 @@ CONTAINS
            dist=SQRT(DOT_PRODUCT(dvec,dvec))
            IF(dist.LT.devi)devi=dist
         END DO
-        rn=next_random_number(rng_stream,error=error)
+        rn=next_random_number(rng_stream)
         IF(rn.lt.devi**2/169.0)EXIT
       END DO
    END DO
@@ -1508,7 +1482,7 @@ CONTAINS
 
         DO i=1,ncent
            IF(nat_cl(i)==0)THEN
-             rn=next_random_number(rng_stream,error=error)
+             rn=next_random_number(rng_stream)
              scaled_cent(:,i)=scaled_coord(:,CEILING(rn*nat))
            ELSE
              average(:,i,1)=average(:,i,1)/REAL(nat_cl(i),dp)
@@ -1522,7 +1496,7 @@ CONTAINS
       END IF
    END DO
 
-   CALL delete_rng_stream(rng_stream,error=error)
+   CALL delete_rng_stream(rng_stream)
         
 END SUBROUTINE kmeans
 

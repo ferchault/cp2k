@@ -17,13 +17,13 @@ PROGRAM dbcsr_example_2
   USE dbcsr_api,                       ONLY: &
        dbcsr_col_block_sizes, dbcsr_create, dbcsr_distribution, &
        dbcsr_distribution_mp, dbcsr_distribution_new, dbcsr_distribution_obj, &
-       dbcsr_distribution_release, dbcsr_error_type, dbcsr_finalize, &
-       dbcsr_finalize_lib, dbcsr_get_stored_coordinates, dbcsr_init, &
-       dbcsr_init_lib, dbcsr_max_col_size, dbcsr_max_row_size, &
-       dbcsr_mp_mynode, dbcsr_mp_new, dbcsr_mp_obj, dbcsr_mp_release, &
-       dbcsr_nblkcols_total, dbcsr_nblkrows_total, dbcsr_obj, dbcsr_print, &
-       dbcsr_put_block, dbcsr_release, dbcsr_row_block_sizes, &
-       dbcsr_set_default_config, dbcsr_type_no_symmetry, dbcsr_type_real_8
+       dbcsr_distribution_release, dbcsr_finalize, dbcsr_finalize_lib, &
+       dbcsr_get_stored_coordinates, dbcsr_init, dbcsr_init_lib, &
+       dbcsr_max_col_size, dbcsr_max_row_size, dbcsr_mp_mynode, dbcsr_mp_new, &
+       dbcsr_mp_obj, dbcsr_mp_release, dbcsr_nblkcols_total, &
+       dbcsr_nblkrows_total, dbcsr_obj, dbcsr_print, dbcsr_put_block, &
+       dbcsr_release, dbcsr_row_block_sizes, dbcsr_set_default_config, &
+       dbcsr_type_no_symmetry, dbcsr_type_real_8
   USE kinds,                           ONLY: real_8
   USE machine,                         ONLY: default_output_unit
   USE message_passing,                 ONLY: mp_cart_create,&
@@ -33,12 +33,11 @@ PROGRAM dbcsr_example_2
                                              mp_world_finalize,&
                                              mp_world_init
 
-  !$ USE OMP_LIB
+  !$ USE OMP_LIB, ONLY: omp_get_max_threads, omp_get_thread_num, omp_get_num_threads
 
   IMPLICIT NONE
 
   TYPE(dbcsr_obj)                          :: matrix_a
-  TYPE(dbcsr_error_type)                   :: error
 
   INTEGER, DIMENSION(:), POINTER           :: col_blk_sizes, row_blk_sizes
   INTEGER, DIMENSION(:), POINTER           :: rbs, cbs
@@ -74,8 +73,8 @@ PROGRAM dbcsr_example_2
   !***************************************************************************************
   !
   ! initialize libdbcsr
-  CALL dbcsr_init_lib (group=mp_comm, error=error)
-  CALL dbcsr_set_default_config (error=error)
+  CALL dbcsr_init_lib ()
+  CALL dbcsr_set_default_config ()
 
   !
   ! set standard output parameters
@@ -118,8 +117,7 @@ PROGRAM dbcsr_example_2
        row_blk_size=row_blk_sizes,&
        col_blk_size=col_blk_sizes,&
        data_type=dbcsr_type_real_8,&
-       reuse_arrays=.TRUE.,&
-       error=error)
+       reuse_arrays=.TRUE.)
 
   !
   ! get the block sizes from the matrix
@@ -147,7 +145,7 @@ PROGRAM dbcsr_example_2
         ! get the node id that holds this (row, col) block
         tr = .FALSE.
         row_s=row ; col_s=col
-        CALL dbcsr_get_stored_coordinates (matrix_a, row_s, col_s, tr, node_holds_blk)
+        CALL dbcsr_get_stored_coordinates (matrix_a, row_s, col_s, node_holds_blk)
         !
         ! put the block on the right node
         IF(node_holds_blk .EQ. mynode) THEN
@@ -165,11 +163,11 @@ PROGRAM dbcsr_example_2
 
   !
   ! finalize the dbcsr matrix
-  CALL dbcsr_finalize(matrix_a, error=error)
+  CALL dbcsr_finalize(matrix_a)
 
   !
   ! print the matrix
-  CALL dbcsr_print(matrix_a, error=error)
+  CALL dbcsr_print(matrix_a)
 
   !
   ! release the matrix
@@ -181,7 +179,7 @@ PROGRAM dbcsr_example_2
   !***************************************************************************************
   !
   ! finalize libdbcsr
-  CALL dbcsr_finalize_lib (mp_comm, io_unit, error)
+  CALL dbcsr_finalize_lib (mp_comm, io_unit)
 
   !
   ! finalize mpi

@@ -12,9 +12,8 @@
 ! *****************************************************************************
  MODULE minimax
   USE kinds,                           ONLY: dp
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
    IMPLICIT NONE
 
@@ -94,27 +93,23 @@
 !> \param Rc ...
 !> \param aw ...
 !> \param ierr ...
-!> \param error ...
 !> \author Mauro Del Ben 
 ! *****************************************************************************
-   SUBROUTINE get_minimax_coeff(k,Rc,aw,ierr,error)
+   SUBROUTINE get_minimax_coeff(k,Rc,aw,ierr)
     INTEGER                                  :: k
     REAL(KIND=dp)                            :: Rc
-    REAL(KIND=dp), ALLOCATABLE, DIMENSION(:) :: aw
+    REAL(KIND=dp), DIMENSION(:)              :: aw
     INTEGER                                  :: ierr
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'get_minimax_coeff', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, icoef, kkk
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: L_b, R_max, R_min, R_transf, &
                                                 U_b
     REAL(KIND=dp), DIMENSION(0:12, 2*k)      :: fit_coef
 
      CALL timeset(routineN,handle)
-     failure=.FALSE.
      ierr=0
      R_min=0.0_dp
      R_max=0.0_dp

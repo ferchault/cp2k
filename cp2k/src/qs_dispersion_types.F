@@ -15,6 +15,7 @@ MODULE qs_dispersion_types
   USE qs_neighbor_list_types,          ONLY: deallocate_neighbor_list_set,&
                                              neighbor_list_set_p_type
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -115,81 +116,63 @@ MODULE qs_dispersion_types
 ! *****************************************************************************
 !> \brief ...
 !> \param dispersion_env ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE qs_dispersion_release (dispersion_env,error)
+  SUBROUTINE qs_dispersion_release (dispersion_env)
 
     TYPE(qs_dispersion_type), POINTER        :: dispersion_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'qs_dispersion_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, iab, stat
+    INTEGER                                  :: i, iab
 
     IF (ASSOCIATED(dispersion_env)) THEN
       IF (ASSOCIATED(dispersion_env%maxci)) THEN
         ! DFT-D3 arrays
-        DEALLOCATE(dispersion_env%maxci, stat=stat)
-        CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
-        DEALLOCATE(dispersion_env%c6ab, stat=stat)
-        CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
-        DEALLOCATE(dispersion_env%r0ab, stat=stat)
-        CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
-        DEALLOCATE(dispersion_env%rcov, stat=stat)
-        CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
-        DEALLOCATE(dispersion_env%r2r4, stat=stat)
-        CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
-        DEALLOCATE(dispersion_env%cn, stat=stat)
-        CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+        DEALLOCATE(dispersion_env%maxci)
+        DEALLOCATE(dispersion_env%c6ab)
+        DEALLOCATE(dispersion_env%r0ab)
+        DEALLOCATE(dispersion_env%rcov)
+        DEALLOCATE(dispersion_env%r2r4)
+        DEALLOCATE(dispersion_env%cn)
         IF (ASSOCIATED(dispersion_env%cnkind)) THEN
-          DEALLOCATE(dispersion_env%cnkind, stat=stat)
-          CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+          DEALLOCATE(dispersion_env%cnkind)
         END IF
         IF (ASSOCIATED(dispersion_env%cnlist)) THEN
           DO i=1,SIZE(dispersion_env%cnlist)
-            DEALLOCATE(dispersion_env%cnlist(i)%atom, stat=stat)
-            CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+            DEALLOCATE(dispersion_env%cnlist(i)%atom)
           END DO
-          DEALLOCATE(dispersion_env%cnlist, stat=stat)
-          CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+          DEALLOCATE(dispersion_env%cnlist)
         END IF
       END IF
       ! vdD-DF
       IF (ASSOCIATED(dispersion_env%q_mesh)) THEN
-         DEALLOCATE(dispersion_env%q_mesh, stat=stat)
-         CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+         DEALLOCATE(dispersion_env%q_mesh)
       END IF
       IF (ASSOCIATED(dispersion_env%kernel)) THEN
-         DEALLOCATE(dispersion_env%kernel, stat=stat)
-         CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+         DEALLOCATE(dispersion_env%kernel)
       END IF
       IF (ASSOCIATED(dispersion_env%d2phi_dk2)) THEN
-         DEALLOCATE(dispersion_env%d2phi_dk2, stat=stat)
-         CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+         DEALLOCATE(dispersion_env%d2phi_dk2)
       END IF
       IF (ASSOCIATED(dispersion_env%d2y_dx2)) THEN
-         DEALLOCATE(dispersion_env%d2y_dx2, stat=stat)
-         CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+         DEALLOCATE(dispersion_env%d2y_dx2)
       END IF
       ! neighborlists
       IF (ASSOCIATED(dispersion_env%sab_vdw)) THEN
          DO iab=1,SIZE(dispersion_env%sab_vdw)
            CALL deallocate_neighbor_list_set(dispersion_env%sab_vdw(iab)%neighbor_list_set)
          END DO
-         DEALLOCATE(dispersion_env%sab_vdw,stat=stat)
-         CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+         DEALLOCATE(dispersion_env%sab_vdw)
       END IF
       IF (ASSOCIATED(dispersion_env%sab_cn)) THEN
          DO iab=1,SIZE(dispersion_env%sab_cn)
            CALL deallocate_neighbor_list_set(dispersion_env%sab_cn(iab)%neighbor_list_set)
          END DO
-         DEALLOCATE(dispersion_env%sab_cn,stat=stat)
-         CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+         DEALLOCATE(dispersion_env%sab_cn)
       END IF
 
-      DEALLOCATE(dispersion_env, stat=stat)
-      CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+      DEALLOCATE(dispersion_env)
 
     END IF
 

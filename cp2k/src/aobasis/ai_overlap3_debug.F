@@ -16,6 +16,7 @@ MODULE ai_overlap3_debug
   USE kinds,                           ONLY: dp
   USE mathconstants,                   ONLY: pi
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -119,7 +120,7 @@ CONTAINS
           IACB =(G(3)-A(3))*os_overlap3(an-i3,cn,bn) + &
                  0.5_dp*(an(3)-1)/(xsi+xc)*os_overlap3(an-i3-i3,cn,bn)
         ELSE
-            STOP "I(0000)"
+            CPABORT("I(0000)")
         ENDIF
       ENDIF
     ENDIF

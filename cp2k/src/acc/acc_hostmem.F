@@ -10,7 +10,7 @@
 ! *****************************************************************************
 MODULE acc_hostmem
 #if defined (__ACC)
-  USE ISO_C_BINDING
+    USE ISO_C_BINDING, ONLY: C_INT, C_SIZE_T, C_PTR, C_LOC, C_NULL_PTR, C_F_POINTER
 #endif
   USE acc_kinds,                       ONLY: int_4,&
                                              int_4_size,&
@@ -23,6 +23,7 @@ MODULE acc_hostmem
   USE acc_stream,                      ONLY: acc_stream_associated,&
                                              acc_stream_cptr,&
                                              acc_stream_type
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -43,12 +44,6 @@ MODULE acc_hostmem
      MODULE PROCEDURE acc_hostmem_alloc_i_2D, acc_hostmem_alloc_l_2D
      MODULE PROCEDURE acc_hostmem_alloc_r_2D, acc_hostmem_alloc_d_2D
      MODULE PROCEDURE acc_hostmem_alloc_c_2D, acc_hostmem_alloc_z_2D
-     MODULE PROCEDURE acc_hostmem_alloc_i_3D, acc_hostmem_alloc_l_3D
-     MODULE PROCEDURE acc_hostmem_alloc_r_3D, acc_hostmem_alloc_d_3D
-     MODULE PROCEDURE acc_hostmem_alloc_c_3D, acc_hostmem_alloc_z_3D
-     MODULE PROCEDURE acc_hostmem_alloc_i_4D, acc_hostmem_alloc_l_4D
-     MODULE PROCEDURE acc_hostmem_alloc_r_4D, acc_hostmem_alloc_d_4D
-     MODULE PROCEDURE acc_hostmem_alloc_c_4D, acc_hostmem_alloc_z_4D
   END INTERFACE
 
   INTERFACE acc_hostmem_deallocate
@@ -58,12 +53,6 @@ MODULE acc_hostmem
      MODULE PROCEDURE acc_hostmem_dealloc_i_2D, acc_hostmem_dealloc_l_2D
      MODULE PROCEDURE acc_hostmem_dealloc_r_2D, acc_hostmem_dealloc_d_2D
      MODULE PROCEDURE acc_hostmem_dealloc_c_2D, acc_hostmem_dealloc_z_2D
-     MODULE PROCEDURE acc_hostmem_dealloc_i_3D, acc_hostmem_dealloc_l_3D
-     MODULE PROCEDURE acc_hostmem_dealloc_r_3D, acc_hostmem_dealloc_d_3D
-     MODULE PROCEDURE acc_hostmem_dealloc_c_3D, acc_hostmem_dealloc_z_3D
-     MODULE PROCEDURE acc_hostmem_dealloc_i_4D, acc_hostmem_dealloc_l_4D
-     MODULE PROCEDURE acc_hostmem_dealloc_r_4D, acc_hostmem_dealloc_d_4D
-     MODULE PROCEDURE acc_hostmem_dealloc_c_4D, acc_hostmem_dealloc_z_4D
   END INTERFACE
 
 
@@ -72,7 +61,7 @@ MODULE acc_hostmem
 
   INTERFACE
      FUNCTION cuda_host_mem_alloc_cu(mem, n, stream_ptr) RESULT (istat) BIND(C, name="acc_host_mem_allocate")
-       USE ISO_C_BINDING
+    IMPORT
     TYPE(C_PTR)                              :: mem
     INTEGER(KIND=C_SIZE_T), INTENT(IN), &
       VALUE                                  :: n
@@ -84,7 +73,7 @@ MODULE acc_hostmem
 
   INTERFACE
      FUNCTION cuda_host_mem_dealloc_cu(mem, stream_ptr) RESULT (istat) bind(C, name="acc_host_mem_deallocate")
-       USE ISO_C_BINDING
+    IMPORT
     TYPE(C_PTR), VALUE                       :: mem, stream_ptr
     INTEGER(KIND=C_INT)                      :: istat
 
@@ -123,13 +112,14 @@ CONTAINS
     TYPE(C_PTR)                              :: stream_cptr
 
     IF(.NOT. acc_stream_associated(stream)) &
-         STOP "acc_hostmem_alloc_raw: stream not associated"
+         CPABORT("acc_hostmem_alloc_raw: stream not associated")
 
     stream_cptr = acc_stream_cptr(stream)
 
     istat = cuda_host_mem_alloc_cu(host_mem_c_ptr, &
                INT(n_bytes, KIND=C_SIZE_T), stream_cptr)
-    IF (istat /= 0) STOP "acc_hostmem_alloc_raw: Could not allocate host pinned memory"
+    IF (istat /= 0)&
+       CPABORT("acc_hostmem_alloc_raw: Could not allocate host pinned memory")
   END SUBROUTINE acc_hostmem_alloc_raw
 #endif
 
@@ -150,12 +140,13 @@ CONTAINS
     TYPE(C_PTR)                              :: stream_cptr
 
     IF(.NOT. acc_stream_associated(stream)) &
-         STOP "acc_hostmem_dealloc_raw: stream not associated"
+         CPABORT("acc_hostmem_dealloc_raw: stream not associated")
 
     stream_cptr = acc_stream_cptr(stream)
 
     istat = cuda_host_mem_dealloc_cu(host_mem_c_ptr, stream_cptr)
-    IF (istat /= 0 ) STOP "acc_hostmem_dealloc_raw: Could not deallocate host pinned memory"
+    IF (istat /= 0 )&
+       CPABORT("acc_hostmem_dealloc_raw: Could not deallocate host pinned memory")
   END SUBROUTINE acc_hostmem_dealloc_raw
 #endif
 

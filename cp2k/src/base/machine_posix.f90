@@ -9,15 +9,17 @@
 ! *****************************************************************************
   USE kinds,                           ONLY: dp, int_8, default_path_length,&
                                              default_string_length
-  USE ISO_C_BINDING
+  USE ISO_C_BINDING, ONLY: C_INT, C_NULL_CHAR, C_CHAR, C_PTR, C_NULL_PTR, C_ASSOCIATED, C_F_POINTER
 
   IMPLICIT NONE
   PRIVATE
 
-  PUBLIC :: m_cputime, m_flush, m_memory, &
+  PUBLIC :: m_flush, m_memory, &
             m_hostnm, m_getcwd, m_getlog, m_getuid, m_getpid, m_getarg, &
             m_iargc, m_abort, m_chdir, m_mov, &
             m_memory_details, m_procrun
+
+  INTEGER(KIND=int_8), PUBLIC, SAVE :: m_memory_max=0
 
 CONTAINS
 
@@ -27,7 +29,6 @@ CONTAINS
   SUBROUTINE m_abort()
     INTERFACE
       SUBROUTINE abort() BIND(C,name="abort")
-        USE ISO_C_BINDING
       END SUBROUTINE
     END INTERFACE
 
@@ -43,16 +44,6 @@ CONTAINS
 
     ic = COMMAND_ARGUMENT_COUNT ()
   END FUNCTION m_iargc
-
-
-! *****************************************************************************
-!  cpu time in seconds
-! *****************************************************************************
-  FUNCTION m_cputime() RESULT (ct)
-    REAL(KIND=dp)                            :: ct
-
-    CALL CPU_TIME(ct)
-  END FUNCTION m_cputime
 
 
 ! *****************************************************************************
@@ -76,7 +67,7 @@ CONTAINS
 
     INTERFACE
       FUNCTION kill(pid, sig) BIND(C,name="kill") RESULT(errno)
-        USE ISO_C_BINDING
+        IMPORT
         INTEGER(KIND=C_INT),VALUE                :: pid, sig
         INTEGER(KIND=C_INT)                      :: errno
       END FUNCTION
@@ -101,15 +92,15 @@ CONTAINS
 ! *****************************************************************************
   SUBROUTINE m_memory(mem)
 
-      INTEGER(KIND=int_8), INTENT(OUT)         :: mem
-      INTEGER(KIND=int_8)                      :: m1,m2,m3
+      INTEGER(KIND=int_8), OPTIONAL, INTENT(OUT)         :: mem
+      INTEGER(KIND=int_8)                      :: m1,m2,m3,mem_local
 
       !
       ! __NO_STATM_ACCESS can be used to disable the stuff, if getpagesize
       ! lead to linking errors or /proc/self/statm can not be opened
       !
 #if defined(__NO_STATM_ACCESS)
-      mem=0
+      mem_local=0
 #else
       CHARACTER(LEN=80) :: DATA
       INTEGER :: iostat,i
@@ -117,7 +108,7 @@ CONTAINS
       ! the size of a page, might not be available everywhere
       INTERFACE
        FUNCTION getpagesize() BIND(C,name="getpagesize") RESULT(RES)
-         USE ISO_C_BINDING
+         IMPORT
          INTEGER(C_INT) :: RES
        END FUNCTION
       END INTERFACE
@@ -125,7 +116,7 @@ CONTAINS
       !
       ! reading from statm
       !
-      mem=-1
+      mem_local=-1
       DATA=""
       OPEN(121245,FILE="/proc/self/statm",ACTION="READ",STATUS="OLD",ACCESS="STREAM")
       DO I=1,80
@@ -138,18 +129,21 @@ CONTAINS
       ! m3 = shared
       READ(DATA,*,IOSTAT=iostat) m1,m2,m3
       IF (iostat.NE.0) THEN
-         mem=0
+         mem_local=0
       ELSE
-         mem=m2
+         mem_local=m2
 #if defined(__STATM_TOTAL)
-         mem=m1
+         mem_local=m1
 #endif
 #if defined(__STATM_RESIDENT)
-         mem=m2
+         mem_local=m2
 #endif
-         mem=mem*getpagesize()
+         mem_local=mem_local*getpagesize()
       ENDIF
 #endif
+
+      m_memory_max=MAX(mem_local,m_memory_max)
+      IF (PRESENT(mem)) mem=mem_local
 
   END SUBROUTINE m_memory
 
@@ -231,7 +225,7 @@ CONTAINS
 
     INTERFACE
       FUNCTION unlink(path) BIND(C,name="unlink") RESULT(errno)
-        USE ISO_C_BINDING
+        IMPORT
         CHARACTER(KIND=C_CHAR), DIMENSION(*)     :: path
         INTEGER(KIND=C_INT)                      :: errno
       END FUNCTION
@@ -239,7 +233,7 @@ CONTAINS
 
     INTERFACE
       FUNCTION rename(src, dest) BIND(C,name="rename") RESULT(errno)
-        USE ISO_C_BINDING
+        IMPORT
         CHARACTER(KIND=C_CHAR), DIMENSION(*)     :: src, dest
         INTEGER(KIND=C_INT)                      :: errno
       END FUNCTION
@@ -259,7 +253,8 @@ CONTAINS
     IF (istat .NE. 0) THEN
       WRITE(*,*) "Trying to move "//TRIM(source)//" to "//TRIM(TARGET)//"."
       WRITE(*,*) "rename returned status: ",istat
-      STOP "Problem moving file"
+      WRITE(*,*) "Problem moving file"
+      CALL m_abort()
     ENDIF
   END SUBROUTINE m_mov
 
@@ -274,7 +269,7 @@ CONTAINS
 
     INTERFACE
       FUNCTION  gethostname(buf, buflen) BIND(C,name="gethostname") RESULT(errno)
-        USE ISO_C_BINDING
+        IMPORT
         CHARACTER(KIND=C_CHAR), DIMENSION(*)     :: buf
         INTEGER(KIND=C_INT), VALUE               :: buflen
         INTEGER(KIND=C_INT)                      :: errno
@@ -282,7 +277,10 @@ CONTAINS
     END INTERFACE
 
     istat = gethostname(buf, LEN(buf))
-    IF(istat /= 0) STOP "m_hostnm failed"
+    IF(istat /= 0) THEN
+       WRITE (*,*) "m_hostnm failed"
+       CALL m_abort()
+    ENDIF
     i = INDEX(buf, c_null_char) -1
     hname = buf(1:i)
   END SUBROUTINE m_hostnm
@@ -298,7 +296,7 @@ CONTAINS
 
     INTERFACE
       FUNCTION  getcwd(buf, buflen) BIND(C,name="getcwd") RESULT(stat)
-        USE ISO_C_BINDING
+        IMPORT
         CHARACTER(KIND=C_CHAR), DIMENSION(*)     :: buf
         INTEGER(KIND=C_INT), VALUE               :: buflen
         TYPE(C_PTR)                              :: stat
@@ -306,7 +304,10 @@ CONTAINS
     END INTERFACE
 
     stat = getcwd(tmp, LEN(tmp))
-    IF(.NOT. C_ASSOCIATED(stat)) STOP "m_getcwd failed"
+    IF(.NOT. C_ASSOCIATED(stat)) THEN
+       WRITE (*,*) "m_getcwd failed"
+       CALL m_abort()
+    ENDIF
     i = INDEX(tmp, c_null_char) -1
     curdir = tmp(1:i)
   END SUBROUTINE m_getcwd
@@ -320,7 +321,7 @@ CONTAINS
 
     INTERFACE
       FUNCTION chdir(path) BIND(C,name="chdir") RESULT(errno)
-        USE ISO_C_BINDING
+        IMPORT
         CHARACTER(KIND=C_CHAR), DIMENSION(*)     :: path
         INTEGER(KIND=C_INT)                      :: errno
       END FUNCTION
@@ -352,7 +353,7 @@ CONTAINS
 
     INTERFACE
      FUNCTION getpwuid(uid) BIND(C,name="getpwuid") RESULT(result)
-       USE ISO_C_BINDING
+       IMPORT
        INTEGER(KIND=C_INT), VALUE               :: uid
        TYPE(C_PTR)                              :: result
      END FUNCTION
@@ -389,7 +390,7 @@ CONTAINS
 
    INTERFACE
      FUNCTION getuid() BIND(C,name="getuid") RESULT(uid)
-       USE ISO_C_BINDING
+       IMPORT
        INTEGER(KIND=C_INT)              :: uid
      END FUNCTION
    END INTERFACE
@@ -405,7 +406,7 @@ CONTAINS
 
    INTERFACE
      FUNCTION getpid() BIND(C,name="getpid") RESULT(pid)
-       USE ISO_C_BINDING
+       IMPORT
        INTEGER(KIND=C_INT)              :: pid
      END FUNCTION
    END INTERFACE
@@ -423,7 +424,10 @@ CONTAINS
     INTEGER                                  :: istat
 
     CALL GET_COMMAND_ARGUMENT(i, tmp, status=istat)
-    IF(istat /= 0) STOP "m_getarg failed"
+    IF(istat /= 0) THEN
+       WRITE (*,*) "m_getarg failed"
+       CALL m_abort()
+    ENDIF
     arg = TRIM(tmp)
   END SUBROUTINE m_getarg
 

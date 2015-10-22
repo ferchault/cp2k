@@ -14,6 +14,7 @@ MODULE tmc_move_types
   USE kinds,                           ONLY: default_string_length,&
                                              dp
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -77,20 +78,17 @@ CONTAINS
 !> \brief allocating the module variables
 !> \param move_types pointer to the structure which should be deallocated
 !> \param nr_temp ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 11.2012
 !> \note deallocating the module variables
 ! *****************************************************************************
-  SUBROUTINE move_types_create(move_types, nr_temp, error)
+  SUBROUTINE move_types_create(move_types, nr_temp)
     TYPE(tmc_move_type), POINTER             :: move_types
     INTEGER                                  :: nr_temp
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'move_types_create', &
       routineP = moduleN//':'//routineN
 
-    CPPreconditionNoFail(.NOT.ASSOCIATED(move_types),cp_failure_level,routineP,error)
+    CPASSERT(.NOT.ASSOCIATED(move_types))
 
     ALLOCATE(move_types)
     ALLOCATE(move_types%mv_weight(nr_mv_types))
@@ -113,19 +111,16 @@ CONTAINS
 ! *****************************************************************************
 !> \brief deallocating the module variables
 !> \param move_types pointer to the structure which should be deallocated
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Mandes 11.2012
 !> \note deallocating the module variables
 ! *****************************************************************************
-  SUBROUTINE move_types_release(move_types, error)
+  SUBROUTINE move_types_release(move_types)
     TYPE(tmc_move_type), POINTER             :: move_types
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'move_types_release', &
       routineP = moduleN//':'//routineN
 
-    CPPreconditionNoFail(ASSOCIATED(move_types),cp_failure_level,routineP,error)
+    CPASSERT(ASSOCIATED(move_types))
 
     IF(ASSOCIATED(move_types%atom_lists)) DEALLOCATE(move_types%atom_lists)
     DEALLOCATE(move_types%mv_weight)

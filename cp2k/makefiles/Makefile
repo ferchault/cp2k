@@ -12,7 +12,7 @@ SHELL = /bin/sh
 # also works fine
 #
 CP2KHOME     := $(abspath $(PWD)/..)
-ARCH         := $(shell $(CP2KHOME)/tools/build_utils/get_arch_code)
+ARCH         := local
 export VERSION=sopt
 
 MAKEFILE     := $(CP2KHOME)/makefiles/Makefile
@@ -59,8 +59,8 @@ endif
 .PHONY : $(VERSION) $(EXE_NAMES) \
          dirs makedep default_target all \
          toolversions libcp2k \
-         doxifydir doxify doxifyclean \
-         prettydir pretty prettyclean doxygen/clean doxygen \
+         doxify doxifyclean \
+         pretty prettyclean doxygen/clean doxygen \
          install clean realclean distclean mrproper help templates \
          instantiationdir templatesclean \
          test testbg testclean testrealclean
@@ -222,7 +222,7 @@ OTHER_HELP += "install : Print installation help"
 clean:
 	rm -rf  $(LIBCUSMM_DIR)/libcusmm.cu
 	rm -rf $(foreach v, $(VERSION), $(MAINOBJDIR)/$(ARCH)/$(v)/*.o)
-	rm -rf $(foreach v, $(VERSION), $(MAINOBJDIR)/$(ARCH)/$(v)/*.mod $(MAINOBJDIR)/$(ARCH)/$(v)/*.MOD) 
+	rm -rf $(foreach v, $(VERSION), $(MAINOBJDIR)/$(ARCH)/$(v)/*.mod $(MAINOBJDIR)/$(ARCH)/$(v)/*.MOD $(MAINOBJDIR)/$(ARCH)/$(v)/*.smod) 
 	rm -rf $(foreach v, $(VERSION), $(MAINOBJDIR)/$(ARCH)/$(v)/*.dep) 
 OTHER_HELP += "clean : Remove intermediate object and mod files, but not the libraries and executables, for given ARCH and VERSION"
 
@@ -278,41 +278,38 @@ templates: instantiateddir $(addprefix $(INSTANTIATEDDIR), $(ALL_INST_FILES:.ins
 TOOL_HELP += "templates : instantiate all templates"
 
 $(addprefix $(INSTANTIATEDDIR), %.instantiated): %.instantiation instantiateddir
-	@cd $(dir $<); $(TOOLSRC)/instantiateTemplates.py $(notdir $<)
+	@cd $(dir $<); $(TOOLSRC)/instantiateTemplates.py --backup-dir=$(PRETTYOBJDIR) $(notdir $<)
 	@touch $@
 
 # Prettyfier stuff ==========================================================
 vpath %.pretty $(PRETTYOBJDIR)
 
-prettydir:
-	@mkdir -p $(PRETTYOBJDIR)
-
-pretty: doxify prettydir $(addprefix $(PRETTYOBJDIR)/, $(ALL_OBJECTS:.o=.pretty))
+pretty: $(addprefix $(PRETTYOBJDIR)/, $(ALL_OBJECTS:.o=.pretty))
 TOOL_HELP += "pretty : Reformat all source files in a pretty way."
 
 prettyclean:
 	-rm -rf $(PRETTYOBJDIR) $(ALL_PREPRETTY_DIRS)
 TOOL_HELP += "prettyclean : Remove prettify marker files and preprettify directories"
 
-$(PRETTYOBJDIR)/%.pretty: %.F
-	cd $(dir $<); $(TOOLSRC)/prettify.py $(notdir $<)
+$(PRETTYOBJDIR)/%.pretty: %.F $(DOXIFYOBJDIR)/%.doxified
+	@mkdir -p $(PRETTYOBJDIR)
+	cd $(dir $<); $(TOOLSRC)/prettify.py --backup-dir=$(PRETTYOBJDIR) $(notdir $<)
 	@touch $@
 
-$(PRETTYOBJDIR)/%.pretty: %.c
+$(PRETTYOBJDIR)/%.pretty: %.c $(DOXIFYOBJDIR)/%.doxified
 #   TODO: call indent here?
+	@mkdir -p $(PRETTYOBJDIR)
 	@touch $@
 
-$(PRETTYOBJDIR)/%.pretty: %.cpp
+$(PRETTYOBJDIR)/%.pretty: %.cpp $(DOXIFYOBJDIR)/%.doxified
 #   TODO: call indent here?
+	@mkdir -p $(PRETTYOBJDIR)
 	@touch $@
 
 # Doxyifier stuff ===========================================================
 vpath %.doxified $(DOXIFYOBJDIR)
 
-doxifydir:
-	@mkdir -p $(DOXIFYOBJDIR)
-
-doxify: doxifydir $(addprefix $(DOXIFYOBJDIR)/, $(ALL_OBJECTS:.o=.doxified))
+doxify: $(addprefix $(DOXIFYOBJDIR)/, $(ALL_OBJECTS:.o=.doxified))
 TOOL_HELP += "doxify : Autogenerate doxygen headers for subroutines"
 
 doxifyclean:
@@ -321,12 +318,15 @@ TOOL_HELP += "doxifyclean : Remove doxify marker files"
 
 $(DOXIFYOBJDIR)/%.doxified: %.F
 	$(TOOLSRC)/doxify/doxify.sh $<
+	@mkdir -p $(DOXIFYOBJDIR)
 	@touch $@
 
 $(DOXIFYOBJDIR)/%.doxified: %.c
+	@mkdir -p $(DOXIFYOBJDIR)
 	@touch $@
 
 $(DOXIFYOBJDIR)/%.doxified: %.cpp
+	@mkdir -p $(DOXIFYOBJDIR)
 	@touch $@
 
 # doxygen stuff =============================================================
@@ -367,7 +367,7 @@ else
 endif
 
 # this happens on stage 3
-makedep: $(ALL_SRC_FILES) $(ALL_PKG_FILES)
+makedep: $(ALL_SRC_FILES) $(ALL_PKG_FILES) dirs
 ifeq ($(LD_SHARED),)
 	@echo "Removing stale archives for $(ONEVERSION) ... "
 	@$(TOOLSRC)/build_utils/check_archives.py $(firstword $(AR)) $(SRCDIR) $(LIBDIR)
@@ -429,27 +429,22 @@ endif
 # the rule how to generate the .o from the .F
 # only if CPP is different from null we do a step over the C preprocessor (which is slower)
 # in the other case the fortran compiler takes care of this directly
+#
+# $(FCLOGPIPE) can be used to store compiler output, e.g. warnings, for each F-file separately.
+# This is used e.g. by the convention checker.
 %.o: %.F
 ifneq ($(CPP),)
-	$(CPP) $(CPPFLAGS) -D__SHORT_FILE__="\"$(notdir $<)\"" $< > $*.f90
+	$(CPP) $(CPPFLAGS) -D__SHORT_FILE__="\"$(subst $(SRCDIR)/,,$<)\"" $< > $*.f90
 	$(FC) -c $(FCFLAGS) $*.f90 $(FCLOGPIPE)
 else
-	$(FC) -c $(FCFLAGS) -D__SHORT_FILE__="\"$(notdir $<)\"" $< $(FCLOGPIPE) 
+	$(FC) -c $(FCFLAGS) -D__SHORT_FILE__="\"$(subst $(SRCDIR)/,,$<)\"" $< $(FCLOGPIPE)
 endif
 
 %.o: %.c
 	$(CC) -c $(CFLAGS) $<
 
-%.o: %.cpp %.cxx %.cc
-ifneq ($(CXX),)
-ifneq ($(CXXFLAGS),)
+%.o: %.cpp
 	$(CXX) -c $(CXXFLAGS) $<
-else
-	$(CXX) -c $(CFLAGS) $<
-endif
-else
-	$(CC) -c $(CFLAGS) $<
-endif
 
 ifneq ($(LIBDIR),)
 $(LIBDIR)/%:
@@ -486,7 +481,7 @@ else
 # it is useful in a two-stage compile.
 #
 %.mod: %.F
-	$(MC) -c $(FCFLAGS) -D__SHORT_FILE__="\"$(notdir $<)\"" $<
+	$(MC) -c $(FCFLAGS) -D__SHORT_FILE__="\"$(subst $(SRCDIR)/,,$<)\"" $<
 endif
 
 #EOF

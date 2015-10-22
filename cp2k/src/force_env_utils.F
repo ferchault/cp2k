@@ -32,9 +32,8 @@ MODULE force_env_utils
   USE particle_list_types,             ONLY: particle_list_type
   USE particle_types,                  ONLY: update_particle_set
   USE physcon,                         ONLY: pascal
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -64,12 +63,10 @@ CONTAINS
 !> \param vel ...
 !> \param compold ...
 !> \param reset ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author fawzi
 ! *****************************************************************************
   SUBROUTINE force_env_shake(force_env,dt,shake_tol,log_unit,lagrange_mult,dump_lm,&
-       pos,vel,compold,reset,error)
+       pos,vel,compold,reset)
 
     TYPE(force_env_type), POINTER            :: force_env
     REAL(kind=dp), INTENT(IN), OPTIONAL      :: dt
@@ -79,15 +76,13 @@ CONTAINS
     REAL(KIND=dp), DIMENSION(:, :), &
       INTENT(INOUT), OPTIONAL, TARGET        :: pos, vel
     LOGICAL, INTENT(IN), OPTIONAL            :: compold, reset
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'force_env_shake', &
       routineP = moduleN//':'//routineN
 
     INTEGER :: handle, i, iparticle, iparticle_kind, iparticle_local, j, &
-      my_lagrange_mult, my_log_unit, nparticle_kind, nparticle_local, stat
-    LOGICAL                                  :: failure, has_pos, has_vel, &
-                                                my_dump_lm
+      my_lagrange_mult, my_log_unit, nparticle_kind, nparticle_local
+    LOGICAL                                  :: has_pos, has_vel, my_dump_lm
     REAL(KIND=dp)                            :: mydt
     REAL(KIND=dp), DIMENSION(:, :), POINTER  :: my_pos, my_vel
     TYPE(atomic_kind_list_type), POINTER     :: atomic_kinds
@@ -100,136 +95,126 @@ CONTAINS
     TYPE(mol_new_list_type), POINTER         :: molecules
     TYPE(particle_list_type), POINTER        :: particles
 
-    failure=.FALSE.
     CALL timeset(routineN,handle)
-    CPPrecondition(ASSOCIATED(force_env),cp_failure_level,routineP,error,failure)
-    CPPrecondition(force_env%ref_count>0,cp_failure_level,routineP,error,failure)
-    IF (.NOT.failure) THEN
-       my_log_unit=-1
-       IF (PRESENT(log_unit)) my_log_unit=log_unit
-       my_lagrange_mult=-1
-       IF (PRESENT(lagrange_mult)) my_lagrange_mult=lagrange_mult
-       my_dump_lm = .FALSE.
-       IF (PRESENT(dump_lm)) my_dump_lm = dump_lm
-       NULLIFY(subsys,cell,molecules,molecule_kinds,local_molecules,particles,&
-            my_pos,my_vel,gci)
-       IF (PRESENT(pos)) my_pos => pos
-       IF (PRESENT(vel)) my_vel => vel
-       mydt = 0.1_dp
-       IF (PRESENT(dt)) mydt = dt
-       CALL force_env_get(force_env,subsys=subsys,cell=cell,error=error)
-       CALL cp_subsys_get(subsys, &
-            atomic_kinds=atomic_kinds,&
-            local_molecules_new=local_molecules,&
-            local_particles=local_particles,&
-            molecules_new=molecules,&
-            molecule_kinds_new=molecule_kinds,&
-            particles=particles,&
-            gci=gci,&
-            error=error)
-       nparticle_kind = atomic_kinds%n_els
-       IF (PRESENT(compold)) THEN
-          IF (compold) THEN
-             CALL getold( gci, local_molecules, molecules%els, molecule_kinds%els,&
-                  particles%els, cell, error)
-          END IF
+    CPASSERT(ASSOCIATED(force_env))
+    CPASSERT(force_env%ref_count>0)
+    my_log_unit=-1
+    IF (PRESENT(log_unit)) my_log_unit=log_unit
+    my_lagrange_mult=-1
+    IF (PRESENT(lagrange_mult)) my_lagrange_mult=lagrange_mult
+    my_dump_lm = .FALSE.
+    IF (PRESENT(dump_lm)) my_dump_lm = dump_lm
+    NULLIFY(subsys,cell,molecules,molecule_kinds,local_molecules,particles,&
+         my_pos,my_vel,gci)
+    IF (PRESENT(pos)) my_pos => pos
+    IF (PRESENT(vel)) my_vel => vel
+    mydt = 0.1_dp
+    IF (PRESENT(dt)) mydt = dt
+    CALL force_env_get(force_env,subsys=subsys,cell=cell)
+    CALL cp_subsys_get(subsys, &
+         atomic_kinds=atomic_kinds,&
+         local_molecules_new=local_molecules,&
+         local_particles=local_particles,&
+         molecules_new=molecules,&
+         molecule_kinds_new=molecule_kinds,&
+         particles=particles,&
+         gci=gci)
+    nparticle_kind = atomic_kinds%n_els
+    IF (PRESENT(compold)) THEN
+       IF (compold) THEN
+          CALL getold( gci, local_molecules, molecules%els, molecule_kinds%els,&
+               particles%els, cell)
        END IF
-       has_pos=.FALSE.
-       IF (.NOT.ASSOCIATED(my_pos)) THEN
-          has_pos=.TRUE.
-          ALLOCATE(my_pos(3,particles%n_els),stat=stat)
-          CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
-          my_pos = 0.0_dp
-          DO iparticle_kind=1,nparticle_kind
-             nparticle_local = local_particles%n_el(iparticle_kind)
-             DO iparticle_local=1,nparticle_local
-                iparticle = local_particles%list(iparticle_kind)%array(iparticle_local)
-                my_pos (:,iparticle) = particles%els(iparticle)%r(:)
-             END DO
+    END IF
+    has_pos=.FALSE.
+    IF (.NOT.ASSOCIATED(my_pos)) THEN
+       has_pos=.TRUE.
+       ALLOCATE(my_pos(3,particles%n_els))
+       my_pos = 0.0_dp
+       DO iparticle_kind=1,nparticle_kind
+          nparticle_local = local_particles%n_el(iparticle_kind)
+          DO iparticle_local=1,nparticle_local
+             iparticle = local_particles%list(iparticle_kind)%array(iparticle_local)
+             my_pos (:,iparticle) = particles%els(iparticle)%r(:)
           END DO
-       END IF
-       has_vel=.FALSE.
-       IF (.NOT.ASSOCIATED(my_vel)) THEN
-          has_vel=.TRUE.
-          ALLOCATE(my_vel(3,particles%n_els),stat=stat)
-          CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
-          my_vel = 0.0_dp
-          DO iparticle_kind=1,nparticle_kind
-             nparticle_local = local_particles%n_el(iparticle_kind)
-             DO iparticle_local=1,nparticle_local
-                iparticle = local_particles%list(iparticle_kind)%array(iparticle_local)
-                my_vel (:,iparticle) = particles%els(iparticle)%v(:)
-             END DO
+       END DO
+    END IF
+    has_vel=.FALSE.
+    IF (.NOT.ASSOCIATED(my_vel)) THEN
+       has_vel=.TRUE.
+       ALLOCATE(my_vel(3,particles%n_els))
+       my_vel = 0.0_dp
+       DO iparticle_kind=1,nparticle_kind
+          nparticle_local = local_particles%n_el(iparticle_kind)
+          DO iparticle_local=1,nparticle_local
+             iparticle = local_particles%list(iparticle_kind)%array(iparticle_local)
+             my_vel (:,iparticle) = particles%els(iparticle)%v(:)
           END DO
-       END IF
+       END DO
+    END IF
 
-       CALL shake_control( gci=gci, local_molecules=local_molecules,&
-            molecule_set=molecules%els, molecule_kind_set=molecule_kinds%els, &
-            particle_set=particles%els, pos=my_pos, vel=my_vel, dt=mydt,&
-            shake_tol=shake_tol, log_unit=my_log_unit, lagrange_mult=my_lagrange_mult,&
-            dump_lm= my_dump_lm, cell=cell,group=force_env%para_env%group,&
-            local_particles=local_particles, error=error )
+    CALL shake_control( gci=gci, local_molecules=local_molecules,&
+         molecule_set=molecules%els, molecule_kind_set=molecule_kinds%els, &
+         particle_set=particles%els, pos=my_pos, vel=my_vel, dt=mydt,&
+         shake_tol=shake_tol, log_unit=my_log_unit, lagrange_mult=my_lagrange_mult,&
+         dump_lm= my_dump_lm, cell=cell,group=force_env%para_env%group,&
+         local_particles=local_particles)
 
-       ! Possibly reset the lagrange multipliers
-       IF (PRESENT(reset)) THEN
-          IF (reset) THEN
-             ! Reset Intramolecular constraints
-             DO i = 1,SIZE(molecules%els)
-                IF (ASSOCIATED(molecules%els(i)%lci%lcolv)) THEN
-                   DO j = 1, SIZE(molecules%els(i)%lci%lcolv)
-                      ! Reset langrange multiplier
-                      molecules%els(i)%lci%lcolv(j)%lambda = 0.0_dp
-                   END DO
-                END IF
-                IF (ASSOCIATED(molecules%els(i)%lci%lg3x3)) THEN
-                   DO j = 1, SIZE(molecules%els(i)%lci%lg3x3)
-                      ! Reset langrange multiplier
-                      molecules%els(i)%lci%lg3x3(j)%lambda = 0.0_dp
-                   END DO
-                END IF
-                IF (ASSOCIATED(molecules%els(i)%lci%lg4x6)) THEN
-                   DO j = 1, SIZE(molecules%els(i)%lci%lg4x6)
-                      ! Reset langrange multiplier
-                      molecules%els(i)%lci%lg4x6(j)%lambda = 0.0_dp
-                   END DO
-                END IF
-             END DO
-             ! Reset Intermolecular constraints
-             IF (ASSOCIATED(gci)) THEN
-                IF (ASSOCIATED(gci%lcolv)) THEN
-                   DO j = 1, SIZE(gci%lcolv)
-                      ! Reset langrange multiplier
-                      gci%lcolv(j)%lambda = 0.0_dp
-                   END DO
-                END IF
-                IF (ASSOCIATED(gci%lg3x3)) THEN
-                   DO j = 1, SIZE(gci%lg3x3)
-                      ! Reset langrange multiplier
-                      gci%lg3x3(j)%lambda = 0.0_dp
-                   END DO
-                END IF
-                IF (ASSOCIATED(gci%lg4x6)) THEN
-                   DO j = 1, SIZE(gci%lg4x6)
-                      ! Reset langrange multiplier
-                      gci%lg4x6(j)%lambda = 0.0_dp
-                   END DO
-                END IF
+    ! Possibly reset the lagrange multipliers
+    IF (PRESENT(reset)) THEN
+       IF (reset) THEN
+          ! Reset Intramolecular constraints
+          DO i = 1,SIZE(molecules%els)
+             IF (ASSOCIATED(molecules%els(i)%lci%lcolv)) THEN
+                DO j = 1, SIZE(molecules%els(i)%lci%lcolv)
+                   ! Reset langrange multiplier
+                   molecules%els(i)%lci%lcolv(j)%lambda = 0.0_dp
+                END DO
+             END IF
+             IF (ASSOCIATED(molecules%els(i)%lci%lg3x3)) THEN
+                DO j = 1, SIZE(molecules%els(i)%lci%lg3x3)
+                   ! Reset langrange multiplier
+                   molecules%els(i)%lci%lg3x3(j)%lambda = 0.0_dp
+                END DO
+             END IF
+             IF (ASSOCIATED(molecules%els(i)%lci%lg4x6)) THEN
+                DO j = 1, SIZE(molecules%els(i)%lci%lg4x6)
+                   ! Reset langrange multiplier
+                   molecules%els(i)%lci%lg4x6(j)%lambda = 0.0_dp
+                END DO
+             END IF
+          END DO
+          ! Reset Intermolecular constraints
+          IF (ASSOCIATED(gci)) THEN
+             IF (ASSOCIATED(gci%lcolv)) THEN
+                DO j = 1, SIZE(gci%lcolv)
+                   ! Reset langrange multiplier
+                   gci%lcolv(j)%lambda = 0.0_dp
+                END DO
+             END IF
+             IF (ASSOCIATED(gci%lg3x3)) THEN
+                DO j = 1, SIZE(gci%lg3x3)
+                   ! Reset langrange multiplier
+                   gci%lg3x3(j)%lambda = 0.0_dp
+                END DO
+             END IF
+             IF (ASSOCIATED(gci%lg4x6)) THEN
+                DO j = 1, SIZE(gci%lg4x6)
+                   ! Reset langrange multiplier
+                   gci%lg4x6(j)%lambda = 0.0_dp
+                END DO
              END IF
           END IF
        END IF
+    END IF
 
-       IF (has_pos) THEN
-          CALL update_particle_set ( particles%els, force_env%para_env%group, pos=my_pos,&
-               error=error)
-          DEALLOCATE(my_pos,stat=stat)
-          CPPostcondition(stat==0,cp_warning_level,routineP,error,failure)
-       END IF
-       IF (has_vel) THEN
-          CALL update_particle_set ( particles%els, force_env%para_env%group, vel=my_vel,&
-               error=error)
-          DEALLOCATE(my_vel,stat=stat)
-          CPPostcondition(stat==0,cp_warning_level,routineP,error,failure)
-       END IF
+    IF (has_pos) THEN
+       CALL update_particle_set ( particles%els, force_env%para_env%group, pos=my_pos)
+       DEALLOCATE(my_pos)
+    END IF
+    IF (has_vel) THEN
+       CALL update_particle_set ( particles%els, force_env%para_env%group, vel=my_vel)
+       DEALLOCATE(my_vel)
     END IF
     CALL timestop(handle)
   END SUBROUTINE force_env_shake
@@ -248,12 +233,10 @@ CONTAINS
 !> \param dump_lm ...
 !> \param vel ...
 !> \param reset ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author tlaino
 ! *****************************************************************************
   SUBROUTINE force_env_rattle(force_env,dt,shake_tol,log_unit,lagrange_mult,dump_lm,&
-       vel,reset,error)
+       vel,reset)
 
     TYPE(force_env_type), POINTER            :: force_env
     REAL(kind=dp), INTENT(in), OPTIONAL      :: dt
@@ -263,14 +246,13 @@ CONTAINS
     REAL(KIND=dp), DIMENSION(:, :), &
       INTENT(INOUT), OPTIONAL, TARGET        :: vel
     LOGICAL, INTENT(IN), OPTIONAL            :: reset
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'force_env_rattle', &
       routineP = moduleN//':'//routineN
 
     INTEGER :: handle, i, iparticle, iparticle_kind, iparticle_local, j, &
-      my_lagrange_mult, my_log_unit, nparticle_kind, nparticle_local, stat
-    LOGICAL                                  :: failure, has_vel, my_dump_lm
+      my_lagrange_mult, my_log_unit, nparticle_kind, nparticle_local
+    LOGICAL                                  :: has_vel, my_dump_lm
     REAL(KIND=dp)                            :: mydt
     REAL(KIND=dp), DIMENSION(:, :), POINTER  :: my_vel
     TYPE(atomic_kind_list_type), POINTER     :: atomic_kinds
@@ -283,145 +265,133 @@ CONTAINS
     TYPE(mol_new_list_type), POINTER         :: molecules
     TYPE(particle_list_type), POINTER        :: particles
 
-    failure=.FALSE.
-
     CALL timeset(routineN,handle)
-    CPPrecondition(ASSOCIATED(force_env),cp_failure_level,routineP,error,failure)
-    CPPrecondition(force_env%ref_count>0,cp_failure_level,routineP,error,failure)
-    IF (.NOT.failure) THEN
-       my_log_unit=-1
-       IF (PRESENT(log_unit)) my_log_unit=log_unit
-       my_lagrange_mult=-1
-       IF (PRESENT(lagrange_mult)) my_lagrange_mult=lagrange_mult
-       my_dump_lm = .FALSE.
-       IF (PRESENT(dump_lm)) my_dump_lm = dump_lm
-       NULLIFY(subsys,cell,molecules,molecule_kinds,local_molecules,particles,&
-            my_vel)
-       IF (PRESENT(vel)) my_vel => vel
-       mydt = 0.1_dp
-       IF (PRESENT(dt)) mydt = dt
-       CALL force_env_get(force_env,subsys=subsys,cell=cell,error=error)
-       CALL cp_subsys_get(subsys, &
-            atomic_kinds=atomic_kinds,&
-            local_molecules_new=local_molecules,&
-            local_particles=local_particles,&
-            molecules_new=molecules,&
-            molecule_kinds_new=molecule_kinds,&
-            particles=particles,&
-            gci=gci,&
-            error=error)
-       nparticle_kind = atomic_kinds%n_els
-       has_vel=.FALSE.
-       IF (.NOT.ASSOCIATED(my_vel)) THEN
-          has_vel=.TRUE.
-          ALLOCATE(my_vel(3,particles%n_els),stat=stat)
-          CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
-          my_vel = 0.0_dp
-          DO iparticle_kind=1,nparticle_kind
-             nparticle_local = local_particles%n_el(iparticle_kind)
-             DO iparticle_local=1,nparticle_local
-                iparticle = local_particles%list(iparticle_kind)%array(iparticle_local)
-                my_vel (:,iparticle) = particles%els(iparticle)%v(:)
-             END DO
+    CPASSERT(ASSOCIATED(force_env))
+    CPASSERT(force_env%ref_count>0)
+    my_log_unit=-1
+    IF (PRESENT(log_unit)) my_log_unit=log_unit
+    my_lagrange_mult=-1
+    IF (PRESENT(lagrange_mult)) my_lagrange_mult=lagrange_mult
+    my_dump_lm = .FALSE.
+    IF (PRESENT(dump_lm)) my_dump_lm = dump_lm
+    NULLIFY(subsys,cell,molecules,molecule_kinds,local_molecules,particles,&
+         my_vel)
+    IF (PRESENT(vel)) my_vel => vel
+    mydt = 0.1_dp
+    IF (PRESENT(dt)) mydt = dt
+    CALL force_env_get(force_env,subsys=subsys,cell=cell)
+    CALL cp_subsys_get(subsys, &
+         atomic_kinds=atomic_kinds,&
+         local_molecules_new=local_molecules,&
+         local_particles=local_particles,&
+         molecules_new=molecules,&
+         molecule_kinds_new=molecule_kinds,&
+         particles=particles,&
+         gci=gci)
+    nparticle_kind = atomic_kinds%n_els
+    has_vel=.FALSE.
+    IF (.NOT.ASSOCIATED(my_vel)) THEN
+       has_vel=.TRUE.
+       ALLOCATE(my_vel(3,particles%n_els))
+       my_vel = 0.0_dp
+       DO iparticle_kind=1,nparticle_kind
+          nparticle_local = local_particles%n_el(iparticle_kind)
+          DO iparticle_local=1,nparticle_local
+             iparticle = local_particles%list(iparticle_kind)%array(iparticle_local)
+             my_vel (:,iparticle) = particles%els(iparticle)%v(:)
           END DO
-       END IF
+       END DO
+    END IF
 
-       CALL rattle_control( gci=gci, local_molecules=local_molecules,&
-            molecule_set=molecules%els, molecule_kind_set=molecule_kinds%els, &
-            particle_set=particles%els, vel=my_vel, dt=mydt,&
-            rattle_tol=shake_tol, log_unit=my_log_unit, lagrange_mult=my_lagrange_mult,&
-            dump_lm=my_dump_lm, cell=cell, group=force_env%para_env%group,&
-            local_particles=local_particles, error=error )
+    CALL rattle_control( gci=gci, local_molecules=local_molecules,&
+         molecule_set=molecules%els, molecule_kind_set=molecule_kinds%els, &
+         particle_set=particles%els, vel=my_vel, dt=mydt,&
+         rattle_tol=shake_tol, log_unit=my_log_unit, lagrange_mult=my_lagrange_mult,&
+         dump_lm=my_dump_lm, cell=cell, group=force_env%para_env%group,&
+         local_particles=local_particles)
 
-       ! Possibly reset the lagrange multipliers
-       IF (PRESENT(reset)) THEN
-          IF (reset) THEN
-             ! Reset Intramolecular constraints
-             DO i = 1,SIZE(molecules%els)
-                IF (ASSOCIATED(molecules%els(i)%lci%lcolv)) THEN
-                   DO j = 1, SIZE(molecules%els(i)%lci%lcolv)
-                      ! Reset langrange multiplier
-                      molecules%els(i)%lci%lcolv(j)%lambda = 0.0_dp
-                   END DO
-                END IF
-                IF (ASSOCIATED(molecules%els(i)%lci%lg3x3)) THEN
-                   DO j = 1, SIZE(molecules%els(i)%lci%lg3x3)
-                      ! Reset langrange multiplier
-                      molecules%els(i)%lci%lg3x3(j)%lambda = 0.0_dp
-                   END DO
-                END IF
-                IF (ASSOCIATED(molecules%els(i)%lci%lg4x6)) THEN
-                   DO j = 1, SIZE(molecules%els(i)%lci%lg4x6)
-                      ! Reset langrange multiplier
-                      molecules%els(i)%lci%lg4x6(j)%lambda = 0.0_dp
-                   END DO
-                END IF
-             END DO
-             ! Reset Intermolecular constraints
-             IF (ASSOCIATED(gci)) THEN
-                IF (ASSOCIATED(gci%lcolv)) THEN
-                   DO j = 1, SIZE(gci%lcolv)
-                      ! Reset langrange multiplier
-                      gci%lcolv(j)%lambda = 0.0_dp
-                   END DO
-                END IF
-                IF (ASSOCIATED(gci%lg3x3)) THEN
-                   DO j = 1, SIZE(gci%lg3x3)
-                      ! Reset langrange multiplier
-                      gci%lg3x3(j)%lambda = 0.0_dp
-                   END DO
-                END IF
-                IF (ASSOCIATED(gci%lg4x6)) THEN
-                   DO j = 1, SIZE(gci%lg4x6)
-                      ! Reset langrange multiplier
-                      gci%lg4x6(j)%lambda = 0.0_dp
-                   END DO
-                END IF
+    ! Possibly reset the lagrange multipliers
+    IF (PRESENT(reset)) THEN
+       IF (reset) THEN
+          ! Reset Intramolecular constraints
+          DO i = 1,SIZE(molecules%els)
+             IF (ASSOCIATED(molecules%els(i)%lci%lcolv)) THEN
+                DO j = 1, SIZE(molecules%els(i)%lci%lcolv)
+                   ! Reset langrange multiplier
+                   molecules%els(i)%lci%lcolv(j)%lambda = 0.0_dp
+                END DO
+             END IF
+             IF (ASSOCIATED(molecules%els(i)%lci%lg3x3)) THEN
+                DO j = 1, SIZE(molecules%els(i)%lci%lg3x3)
+                   ! Reset langrange multiplier
+                   molecules%els(i)%lci%lg3x3(j)%lambda = 0.0_dp
+                END DO
+             END IF
+             IF (ASSOCIATED(molecules%els(i)%lci%lg4x6)) THEN
+                DO j = 1, SIZE(molecules%els(i)%lci%lg4x6)
+                   ! Reset langrange multiplier
+                   molecules%els(i)%lci%lg4x6(j)%lambda = 0.0_dp
+                END DO
+             END IF
+          END DO
+          ! Reset Intermolecular constraints
+          IF (ASSOCIATED(gci)) THEN
+             IF (ASSOCIATED(gci%lcolv)) THEN
+                DO j = 1, SIZE(gci%lcolv)
+                   ! Reset langrange multiplier
+                   gci%lcolv(j)%lambda = 0.0_dp
+                END DO
+             END IF
+             IF (ASSOCIATED(gci%lg3x3)) THEN
+                DO j = 1, SIZE(gci%lg3x3)
+                   ! Reset langrange multiplier
+                   gci%lg3x3(j)%lambda = 0.0_dp
+                END DO
+             END IF
+             IF (ASSOCIATED(gci%lg4x6)) THEN
+                DO j = 1, SIZE(gci%lg4x6)
+                   ! Reset langrange multiplier
+                   gci%lg4x6(j)%lambda = 0.0_dp
+                END DO
              END IF
           END IF
        END IF
-
-       IF (has_vel) THEN
-          CALL update_particle_set ( particles%els, force_env%para_env%group, vel=my_vel,&
-               error=error)
-       END IF
-       DEALLOCATE(my_vel,stat=stat)
-       CPPostcondition(stat==0,cp_warning_level,routineP,error,failure)
     END IF
+
+    IF (has_vel) THEN
+       CALL update_particle_set ( particles%els, force_env%para_env%group, vel=my_vel)
+    END IF
+    DEALLOCATE(my_vel)
     CALL timestop(handle)
   END SUBROUTINE force_env_rattle
 
 ! *****************************************************************************
 !> \brief Rescale forces if requested
 !> \param force_env the force env to shake
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author tlaino
 ! *****************************************************************************
-  SUBROUTINE rescale_forces (force_env, error)
+  SUBROUTINE rescale_forces (force_env)
     TYPE(force_env_type), POINTER            :: force_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'rescale_forces', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, iparticle
-    LOGICAL                                  :: explicit, failure
+    LOGICAL                                  :: explicit
     REAL(KIND=dp)                            :: force(3), max_value, mod_force
     TYPE(cp_subsys_type), POINTER            :: subsys
     TYPE(particle_list_type), POINTER        :: particles
     TYPE(section_vals_type), POINTER         :: rescale_force_section
 
-    failure=.FALSE.
     CALL timeset(routineN,handle)
-    CPPrecondition(ASSOCIATED(force_env),cp_failure_level,routineP,error,failure)
-    CPPrecondition(force_env%ref_count>0,cp_failure_level,routineP,error,failure)
-    rescale_force_section => section_vals_get_subs_vals(force_env%force_env_section,"RESCALE_FORCES",error=error)
-    CALL section_vals_get(rescale_force_section, explicit=explicit, error=error)
-    IF (.NOT.failure.AND.explicit) THEN
-       CALL section_vals_val_get(rescale_force_section,"MAX_FORCE",r_val=max_value,error=error)
-       CALL force_env_get(force_env,subsys=subsys,error=error)
-       CALL cp_subsys_get(subsys,particles=particles,error=error)
+    CPASSERT(ASSOCIATED(force_env))
+    CPASSERT(force_env%ref_count>0)
+    rescale_force_section => section_vals_get_subs_vals(force_env%force_env_section,"RESCALE_FORCES")
+    CALL section_vals_get(rescale_force_section, explicit=explicit)
+    IF (explicit) THEN
+       CALL section_vals_val_get(rescale_force_section,"MAX_FORCE",r_val=max_value)
+       CALL force_env_get(force_env,subsys=subsys)
+       CALL cp_subsys_get(subsys,particles=particles)
        DO iparticle = 1, SIZE(particles%els)
           force = particles%els(iparticle)%f(:)
           mod_force = SQRT(DOT_PRODUCT(force,force))
@@ -442,11 +412,9 @@ CONTAINS
 !> \param cell ...
 !> \param ndigits ...
 !> \param numerical ...
-!> \param error ...
 !> \author MK (26.08.2010)
 ! *****************************************************************************
-  SUBROUTINE write_stress_tensor(pv_virial,output_unit,cell,ndigits,numerical,&
-                                 error)
+  SUBROUTINE write_stress_tensor(pv_virial,output_unit,cell,ndigits,numerical)
 
     REAL(KIND=dp), DIMENSION(3, 3), &
       INTENT(IN)                             :: pv_virial
@@ -454,7 +422,6 @@ CONTAINS
     TYPE(cell_type), POINTER                 :: cell
     INTEGER, INTENT(IN)                      :: ndigits
     LOGICAL, INTENT(IN)                      :: numerical
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'write_stress_tensor', &
       routineP = moduleN//':'//routineN
@@ -465,14 +432,11 @@ CONTAINS
     CHARACTER(LEN=27)                        :: fmtstr5
     CHARACTER(LEN=31)                        :: fmtstr1
     INTEGER                                  :: n
-    LOGICAL                                  :: failure
     REAL(KIND=dp), DIMENSION(3)              :: eigval
     REAL(KIND=dp), DIMENSION(3, 3)           :: eigvec, stress_tensor
 
-    failure = .FALSE.
-
     IF (output_unit > 0) THEN
-      CPPrecondition(ASSOCIATED(cell),cp_failure_level,routineP,error,failure)
+      CPASSERT(ASSOCIATED(cell))
       stress_tensor(:,:) = pv_virial(:,:)/cell%deth*pascal*1.0E-9_dp
       n = MIN(MAX(1,ndigits),20)
       fmtstr1 = "(/,T2,A,/,/,T13,A1,2(  X,A1))"
@@ -528,11 +492,10 @@ CONTAINS
 !> \param ndigits ...
 !> \param total_force ...
 !> \param grand_total_force ...
-!> \param error ...
 !> \author MK (06.09.2010)
 ! *****************************************************************************
   SUBROUTINE write_forces(particles,output_unit,label,ndigits,total_force,&
-                          grand_total_force,error)
+                          grand_total_force)
 
     TYPE(particle_list_type), POINTER        :: particles
     INTEGER, INTENT(IN)                      :: output_unit
@@ -541,7 +504,6 @@ CONTAINS
     REAL(KIND=dp), DIMENSION(3), INTENT(OUT) :: total_force
     REAL(KIND=dp), DIMENSION(3), &
       INTENT(INOUT), OPTIONAL                :: grand_total_force
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'write_forces', &
       routineP = moduleN//':'//routineN
@@ -550,12 +512,9 @@ CONTAINS
     CHARACTER(LEN=36)                        :: fmtstr2
     CHARACTER(LEN=46)                        :: fmtstr1
     INTEGER                                  :: i, ikind, iparticle, n
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
 
     IF (output_unit > 0) THEN
-      CPPrecondition(ASSOCIATED(particles),cp_failure_level,routineP,error,failure)
+      CPASSERT(ASSOCIATED(particles))
       n = MIN(MAX(1,ndigits),20)
       fmtstr1 = "(/,T2,A,/,/,T2,A,T11,A,T18,A,T35,A1,2(  X,A1))"
       WRITE (UNIT=fmtstr1(39:40),FMT="(I2)") n + 6

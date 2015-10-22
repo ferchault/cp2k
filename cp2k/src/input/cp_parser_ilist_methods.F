@@ -15,6 +15,7 @@
 MODULE cp_parser_ilist_methods
   USE cp_parser_ilist_types,           ONLY: ilist_type
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -28,31 +29,27 @@ CONTAINS
 !> \brief setup the integer listing type
 !> \param ilist ...
 !> \param token ...
-!> \param error ...
 !> \date  08.2008
 !> \author Teodoro Laino [tlaino] - University of Zurich
 ! *****************************************************************************
-  SUBROUTINE ilist_setup(ilist, token, error)
+  SUBROUTINE ilist_setup(ilist, token)
     TYPE(ilist_type), POINTER                :: ilist
     CHARACTER(LEN=*)                         :: token
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'ilist_setup', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: ind
-    LOGICAL                                  :: failure
 
-    failure = .FALSE.
-    CPPostcondition(ASSOCIATED(ilist),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(ilist))
     ind = INDEX(token,"..")
     READ (UNIT=token(:ind-1),FMT=*) ilist%istart
     READ (UNIT=token(ind+2:),FMT=*) ilist%iend
-    CALL cp_assert((ilist%istart <= ilist%iend),cp_failure_level,cp_assertion_failed,routineP,&
-                   "Invalid list range specified: "//&
-                   TRIM(ADJUSTL(cp_to_string(ilist%istart)))//".."//&
-                   TRIM(ADJUSTL(cp_to_string(ilist%iend))),&
-                   only_ionode=.TRUE.)
+    IF(ilist%istart > ilist%iend)&
+       CALL cp_abort(__LOCATION__,&
+            "Invalid list range specified: "//&
+            TRIM(ADJUSTL(cp_to_string(ilist%istart)))//".."//&
+            TRIM(ADJUSTL(cp_to_string(ilist%iend))))
     ilist%nel_list = ilist%iend - ilist%istart + 1
     ilist%ipresent = ilist%istart
     ilist%in_use   = .TRUE.
@@ -62,45 +59,35 @@ CONTAINS
 ! ****************************************************************************
 !> \brief updates the integer listing type
 !> \param ilist ...
-!> \param error ...
 !> \date  08.2008
 !> \author Teodoro Laino [tlaino] - University of Zurich
 ! *****************************************************************************
-  SUBROUTINE ilist_update(ilist, error)
+  SUBROUTINE ilist_update(ilist)
     TYPE(ilist_type), POINTER                :: ilist
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'ilist_update', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    CPPostcondition(ASSOCIATED(ilist),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(ilist))
     ilist%ipresent = ilist%ipresent + 1
     IF (ilist%ipresent>ilist%iend) THEN
-       CALL ilist_reset(ilist, error)
+       CALL ilist_reset(ilist)
     END IF
   END SUBROUTINE ilist_update
 
 ! ****************************************************************************
 !> \brief updates the integer listing type
 !> \param ilist ...
-!> \param error ...
 !> \date  08.2008
 !> \author Teodoro Laino [tlaino] - University of Zurich
 ! *****************************************************************************
-  SUBROUTINE ilist_reset(ilist, error)
+  SUBROUTINE ilist_reset(ilist)
     TYPE(ilist_type), POINTER                :: ilist
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'ilist_reset', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    CPPostcondition(ASSOCIATED(ilist),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(ilist))
     IF (ilist%ipresent==ilist%iend) THEN
        ilist%istart   = HUGE(0)
        ilist%iend     = HUGE(0)

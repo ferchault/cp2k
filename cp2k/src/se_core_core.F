@@ -57,11 +57,10 @@ MODULE se_core_core
   USE semi_empirical_utils,            ONLY: finalize_se_taper,&
                                              get_se_type,&
                                              initialize_se_taper
-  USE timings,                         ONLY: timeset,&
-                                             timestop
   USE virial_methods,                  ONLY: virial_pair_force
   USE virial_types,                    ONLY: virial_type
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -78,25 +77,23 @@ CONTAINS
 !> \param qs_env ...
 !> \param para_env ...
 !> \param calculate_forces ...
-!> \param error ...
 !> \date 04.2008 [tlaino]
 !> \author Teodoro Laino [tlaino] - University of Zurich
 ! *****************************************************************************
-  SUBROUTINE se_core_core_interaction(qs_env, para_env, calculate_forces, error)
+  SUBROUTINE se_core_core_interaction(qs_env, para_env, calculate_forces)
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(cp_para_env_type), POINTER          :: para_env
     LOGICAL, INTENT(in)                      :: calculate_forces
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'se_core_core_interaction', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: atom_a, atom_b, handle, iab, &
                                                 iatom, ikind, itype, jatom, &
-                                                jkind, natom, nkind, stat
+                                                jkind, natom, nkind
     INTEGER, DIMENSION(:), POINTER           :: atom_of_kind
     LOGICAL                                  :: anag, atener, defined, &
-                                                failure, use_virial
+                                                use_virial
     LOGICAL, ALLOCATABLE, DIMENSION(:)       :: se_defined
     REAL(KIND=dp)                            :: delta, dr1, dr3inv(3), enuc, &
                                                 enucij, enuclear, r2inv, &
@@ -129,17 +126,16 @@ CONTAINS
     TYPE(semi_empirical_type), POINTER       :: se_kind_a, se_kind_b
     TYPE(virial_type), POINTER               :: virial
 
-    failure  = .FALSE.
     enuclear = 0.0_dp
     NULLIFY(dft_control,cell,force,particle_set,se_control,se_taper,atomic_kind_set,&
             virial, atprop)
 
     CALL timeset(routineN,handle)
-    CPPrecondition(ASSOCIATED(qs_env),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(qs_env))
     CALL get_qs_env(qs_env=qs_env, dft_control=dft_control, cell=cell, se_taper=se_taper,&
-         virial=virial,atprop=atprop, energy=energy, error=error)
+         virial=virial,atprop=atprop, energy=energy)
 
-    CALL initialize_se_taper(se_taper,coulomb=.TRUE.,error=error)
+    CALL initialize_se_taper(se_taper,coulomb=.TRUE.)
     ! Parameters
     se_control => dft_control%qs_control%se_control
     anag       =  se_control%analytical_gradients
@@ -152,135 +148,129 @@ CONTAINS
     ! atomic energy decomposition
     atener = atprop%energy
     IF (atener) THEN
-      CALL get_qs_env(qs_env=qs_env,particle_set=particle_set,error=error)
+      CALL get_qs_env(qs_env=qs_env,particle_set=particle_set)
       natom = SIZE (particle_set)
-      CALL atprop_array_init(atprop%atecc,natom,error)
+      CALL atprop_array_init(atprop%atecc,natom)
     END IF
 
     ! Retrieve some information if GKS ewald scheme is used
     IF(se_control%do_ewald_gks) THEN
-       CALL get_qs_env(qs_env=qs_env,ewald_env=ewald_env,ewald_pw=ewald_pw,error=error)
-       CALL ewald_env_get (ewald_env, alpha=se_int_control%ewald_gks%alpha, error=error)
+       CALL get_qs_env(qs_env=qs_env,ewald_env=ewald_env,ewald_pw=ewald_pw)
+       CALL ewald_env_get (ewald_env, alpha=se_int_control%ewald_gks%alpha)
        CALL ewald_pw_get (ewald_pw, pw_big_pool=se_int_control%ewald_gks%pw_pool, &
             dg=se_int_control%ewald_gks%dg)
        ! Virial not implemented
-       CPPrecondition(.NOT.use_virial,cp_failure_level,routineP,error,failure)
+       CPASSERT(.NOT.use_virial)
     END IF
 
-    IF (.NOT. failure) THEN
-       CALL get_qs_env(qs_env=qs_env,sab_se=sab_se,atomic_kind_set=atomic_kind_set,&
-            qs_kind_set=qs_kind_set, error=error)
+    CALL get_qs_env(qs_env=qs_env,sab_se=sab_se,atomic_kind_set=atomic_kind_set,&
+         qs_kind_set=qs_kind_set)
 
-       nkind = SIZE(atomic_kind_set)
-       ! Possibly compute forces
-       IF(calculate_forces) THEN
-          CALL get_qs_env(qs_env=qs_env,particle_set=particle_set,force=force,error=error)
-          natom = SIZE (particle_set)
-          ALLOCATE (atom_of_kind(natom),STAT=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-          delta = se_control%delta
-          CALL get_atomic_kind_set(atomic_kind_set=atomic_kind_set,atom_of_kind=atom_of_kind)
-       END IF
+    nkind = SIZE(atomic_kind_set)
+    ! Possibly compute forces
+    IF(calculate_forces) THEN
+       CALL get_qs_env(qs_env=qs_env,particle_set=particle_set,force=force)
+       natom = SIZE (particle_set)
+       ALLOCATE (atom_of_kind(natom))
+       delta = se_control%delta
+       CALL get_atomic_kind_set(atomic_kind_set=atomic_kind_set,atom_of_kind=atom_of_kind)
+    END IF
 
-       itype    = get_se_type(dft_control%qs_control%method_id)
+    itype    = get_se_type(dft_control%qs_control%method_id)
 
-       ALLOCATE (se_kind_param(nkind),se_defined(nkind),STAT=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       DO ikind=1,nkind
-          CALL get_qs_kind(qs_kind_set(ikind), se_parameter=se_kind_a)
-          se_kind_param(ikind)%se_param => se_kind_a
-          CALL get_se_param(se_kind_a,defined=defined)
-          se_defined(ikind)=defined
-       END DO
-       CALL neighbor_list_iterator_create(nl_iterator,sab_se)
-       DO WHILE (neighbor_list_iterate(nl_iterator)==0)
-          CALL get_iterator_info(nl_iterator,ikind=ikind,jkind=jkind,iatom=iatom,jatom=jatom,r=rij)
-          IF (.NOT.se_defined(ikind)) CYCLE
-          IF (.NOT.se_defined(jkind)) CYCLE
-          se_kind_a => se_kind_param(ikind)%se_param
-          se_kind_b => se_kind_param(jkind)%se_param
-          iab = ikind + nkind*(jkind - 1)
-          dr1 = DOT_PRODUCT(rij,rij)
-          enucij = 0._dp
-          IF ( dr1 > rij_threshold ) THEN
-             SELECT CASE (dft_control%qs_control%method_id)
-             CASE (do_method_mndo,do_method_am1,do_method_pm3,do_method_pm6,do_method_pdg,&
-                  do_method_rm1,do_method_mndod, do_method_pnnl)
+    ALLOCATE (se_kind_param(nkind),se_defined(nkind))
+    DO ikind=1,nkind
+       CALL get_qs_kind(qs_kind_set(ikind), se_parameter=se_kind_a)
+       se_kind_param(ikind)%se_param => se_kind_a
+       CALL get_se_param(se_kind_a,defined=defined)
+       se_defined(ikind)=defined
+    END DO
+    CALL neighbor_list_iterator_create(nl_iterator,sab_se)
+    DO WHILE (neighbor_list_iterate(nl_iterator)==0)
+       CALL get_iterator_info(nl_iterator,ikind=ikind,jkind=jkind,iatom=iatom,jatom=jatom,r=rij)
+       IF (.NOT.se_defined(ikind)) CYCLE
+       IF (.NOT.se_defined(jkind)) CYCLE
+       se_kind_a => se_kind_param(ikind)%se_param
+       se_kind_b => se_kind_param(jkind)%se_param
+       iab = ikind + nkind*(jkind - 1)
+       dr1 = DOT_PRODUCT(rij,rij)
+       enucij = 0._dp
+       IF ( dr1 > rij_threshold ) THEN
+          SELECT CASE (dft_control%qs_control%method_id)
+          CASE (do_method_mndo,do_method_am1,do_method_pm3,do_method_pm6,do_method_pdg,&
+               do_method_rm1,do_method_mndod, do_method_pnnl)
 
-                ! Core-Core energy term
-                CALL corecore (se_kind_a,se_kind_b,rij,enuc=enuc,itype=itype,anag=anag,&
-                     se_int_control=se_int_control, se_taper=se_taper, error=error)
-                enucij = enucij + enuc
+             ! Core-Core energy term
+             CALL corecore (se_kind_a,se_kind_b,rij,enuc=enuc,itype=itype,anag=anag,&
+                  se_int_control=se_int_control, se_taper=se_taper)
+             enucij = enucij + enuc
+             ! Residual integral (1/R^3) correction
+             IF (se_int_control%do_ewald_r3) THEN
+                r2inv = 1.0_dp/dr1
+                rinv  = SQRT(r2inv)
+                r3inv = rinv**3
+                ! Core-Core term
+                enucij = enucij + se_kind_a%expns3_int(jkind)%expns3%core_core*r3inv
+             END IF
+
+             ! Core-Core Derivatives
+             IF(calculate_forces) THEN
+                atom_a = atom_of_kind(iatom)
+                atom_b = atom_of_kind(jatom)
+
+                CALL dcorecore (se_kind_a,se_kind_b,rij,denuc=force_ab,itype=itype,delta=delta,&
+                     anag=anag,se_int_control=se_int_control,se_taper=se_taper)
+
                 ! Residual integral (1/R^3) correction
                 IF (se_int_control%do_ewald_r3) THEN
-                   r2inv = 1.0_dp/dr1
-                   rinv  = SQRT(r2inv)
-                   r3inv = rinv**3
-                   ! Core-Core term
-                   enucij = enucij + se_kind_a%expns3_int(jkind)%expns3%core_core*r3inv
+                   dr3inv   = -3.0_dp*rij*r3inv*r2inv
+                   ! Derivatives of core-core terms
+                   force_ab = force_ab + se_kind_a%expns3_int(jkind)%expns3%core_core*dr3inv
+                END IF
+                IF (use_virial) THEN
+                   CALL virial_pair_force ( virial%pv_virial, -1.0_dp, force_ab, rij)
                 END IF
 
-                ! Core-Core Derivatives
-                IF(calculate_forces) THEN
-                   atom_a = atom_of_kind(iatom)
-                   atom_b = atom_of_kind(jatom)
+                ! Sum up force components
+                force(ikind)%all_potential(1,atom_a) = force(ikind)%all_potential(1,atom_a) - force_ab(1)
+                force(jkind)%all_potential(1,atom_b) = force(jkind)%all_potential(1,atom_b) + force_ab(1)
 
-                   CALL dcorecore (se_kind_a,se_kind_b,rij,denuc=force_ab,itype=itype,delta=delta,&
-                        anag=anag,se_int_control=se_int_control,se_taper=se_taper,error=error)
+                force(ikind)%all_potential(2,atom_a) = force(ikind)%all_potential(2,atom_a) - force_ab(2)
+                force(jkind)%all_potential(2,atom_b) = force(jkind)%all_potential(2,atom_b) + force_ab(2)
 
-                   ! Residual integral (1/R^3) correction
-                   IF (se_int_control%do_ewald_r3) THEN
-                      dr3inv   = -3.0_dp*rij*r3inv*r2inv
-                      ! Derivatives of core-core terms
-                      force_ab = force_ab + se_kind_a%expns3_int(jkind)%expns3%core_core*dr3inv
-                   END IF
-                   IF (use_virial) THEN
-                      CALL virial_pair_force ( virial%pv_virial, -1.0_dp, force_ab, rij, error)
-                   END IF
-
-                   ! Sum up force components
-                   force(ikind)%all_potential(1,atom_a) = force(ikind)%all_potential(1,atom_a) - force_ab(1)
-                   force(jkind)%all_potential(1,atom_b) = force(jkind)%all_potential(1,atom_b) + force_ab(1)
-
-                   force(ikind)%all_potential(2,atom_a) = force(ikind)%all_potential(2,atom_a) - force_ab(2)
-                   force(jkind)%all_potential(2,atom_b) = force(jkind)%all_potential(2,atom_b) + force_ab(2)
-
-                   force(ikind)%all_potential(3,atom_a) = force(ikind)%all_potential(3,atom_a) - force_ab(3)
-                   force(jkind)%all_potential(3,atom_b) = force(jkind)%all_potential(3,atom_b) + force_ab(3)
-                END IF
-             CASE DEFAULT
-                CPPrecondition(.FALSE.,cp_failure_level,routineP,error,failure)
-             END SELECT
-          ELSE
-             IF ( se_int_control%do_ewald_gks ) THEN
-                ! Core-Core energy term (self term in periodic systems)
-                CALL corecore (se_kind_a,se_kind_b,rij,enuc=enuc,itype=itype,anag=anag,&
-                     se_int_control=se_int_control, se_taper=se_taper, error=error)
-                enucij = enucij + 0.5_dp*enuc
+                force(ikind)%all_potential(3,atom_a) = force(ikind)%all_potential(3,atom_a) - force_ab(3)
+                force(jkind)%all_potential(3,atom_b) = force(jkind)%all_potential(3,atom_b) + force_ab(3)
              END IF
+          CASE DEFAULT
+             CPABORT("")
+          END SELECT
+       ELSE
+          IF ( se_int_control%do_ewald_gks ) THEN
+             ! Core-Core energy term (self term in periodic systems)
+             CALL corecore (se_kind_a,se_kind_b,rij,enuc=enuc,itype=itype,anag=anag,&
+                  se_int_control=se_int_control, se_taper=se_taper)
+             enucij = enucij + 0.5_dp*enuc
           END IF
-          IF (atener) THEN
-            atprop%atecc(iatom) = atprop%atecc(iatom) + 0.5_dp*enucij
-            atprop%atecc(jatom) = atprop%atecc(jatom) + 0.5_dp*enucij
-          END IF
-          enuclear = enuclear + enucij
-       END DO
-       CALL neighbor_list_iterator_release(nl_iterator)
-
-       DEALLOCATE (se_kind_param,se_defined,STAT=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-
-       IF (calculate_forces) THEN
-          DEALLOCATE(atom_of_kind,stat=stat)
-          CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
        END IF
+       IF (atener) THEN
+         atprop%atecc(iatom) = atprop%atecc(iatom) + 0.5_dp*enucij
+         atprop%atecc(jatom) = atprop%atecc(jatom) + 0.5_dp*enucij
+       END IF
+       enuclear = enuclear + enucij
+    END DO
+    CALL neighbor_list_iterator_release(nl_iterator)
 
-       CALL mp_sum(enuclear,para_env%group)
-       energy%core_overlap  = enuclear
-       energy%core_overlap0 = enuclear
+    DEALLOCATE (se_kind_param,se_defined)
+
+    IF (calculate_forces) THEN
+       DEALLOCATE(atom_of_kind)
     END IF
 
-    CALL finalize_se_taper(se_taper,error=error)
+    CALL mp_sum(enuclear,para_env%group)
+    energy%core_overlap  = enuclear
+    energy%core_overlap0 = enuclear
+
+    CALL finalize_se_taper(se_taper)
     CALL timestop(handle)
   END SUBROUTINE se_core_core_interaction
 

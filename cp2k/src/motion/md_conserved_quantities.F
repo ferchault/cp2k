@@ -39,14 +39,15 @@ MODULE md_conserved_quantities
   USE particle_list_types,             ONLY: particle_list_type
   USE particle_types,                  ONLY: particle_type
   USE physcon,                         ONLY: kelvin
-  USE qmmm_types,                      ONLY: force_mixing_label_QM_dynamics,&
-                                             qmmm_env_qm_type
+  USE qmmm_types,                      ONLY: qmmm_env_type
+  USE qmmm_types_low,                  ONLY: force_mixing_label_QM_dynamics
+  USE qmmmx_types,                     ONLY: qmmmx_env_type
   USE shell_potential_types,           ONLY: shell_kind_type
   USE simpar_types,                    ONLY: simpar_type
-  USE termination,                     ONLY: stop_program
   USE thermostat_types,                ONLY: thermostat_type
   USE thermostat_utils,                ONLY: get_thermostat_energies
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -64,7 +65,6 @@ CONTAINS
 !> \param tkind ...
 !> \param tshell ...
 !> \param natom ...
-!> \param error ...
 !> \par Input Arguments
 !>     md_env is the md_environment
 !>     epot is the total potential energy
@@ -80,45 +80,41 @@ CONTAINS
 !> \author gloria
 ! *****************************************************************************
   SUBROUTINE compute_conserved_quantity (md_env, md_ener, tkind, tshell,&
-       natom, error)
+       natom)
     TYPE(md_environment_type), POINTER       :: md_env
     TYPE(md_ener_type), POINTER              :: md_ener
     LOGICAL, INTENT(IN)                      :: tkind, tshell
     INTEGER, INTENT(IN)                      :: natom
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'compute_conserved_quantity', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: ikind, nfree_qm, nkind
     INTEGER, POINTER                         :: itimes
-    LOGICAL                                  :: failure, init
+    LOGICAL                                  :: init
     REAL(KIND=dp), POINTER                   :: constant
     TYPE(cp_para_env_type), POINTER          :: para_env
     TYPE(simpar_type), POINTER               :: simpar
 
-    failure = .FALSE.
-
     NULLIFY(itimes, para_env, simpar)
 
-    CALL zero_md_ener(md_ener, tkind, tshell, error=error)
+    CALL zero_md_ener(md_ener, tkind, tshell)
 
     CALL get_md_env (md_env=md_env,&
                      constant=constant,&
                      itimes=itimes,&
                      init=init,&
                      simpar=simpar,&
-                     para_env = para_env, &
-                     error=error)
+                     para_env = para_env)
 
-    CALL get_part_ke ( md_env, md_ener, tkind, tshell, para_env%group,  error=error)
+    CALL get_part_ke ( md_env, md_ener, tkind, tshell, para_env%group)
 
     IF (md_ener%nfree /= 0) THEN
          md_ener%temp_part = 2.0_dp * md_ener%ekin / REAL ( simpar%nfree,KIND=dp)
          md_ener%temp_part = md_ener%temp_part*kelvin
     END IF
 
-    nfree_qm = calc_nfree_qm(md_env, md_ener, error)
+    nfree_qm = calc_nfree_qm(md_env, md_ener)
     IF (nfree_qm > 0) THEN
        md_ener%temp_qm   = 2.0_dp * md_ener%ekin_qm / REAL (nfree_qm,KIND=dp)
        md_ener%temp_qm = md_ener%temp_qm*kelvin
@@ -147,41 +143,41 @@ CONTAINS
 
     SELECT CASE ( simpar%ensemble  )
     CASE DEFAULT
-       CALL stop_program(routineN,moduleN,__LINE__,'Unknown ensemble')
+       CPABORT('Unknown ensemble')
     CASE ( isokin_ensemble )
        md_ener%constant = md_ener%ekin
     CASE ( reftraj_ensemble ) ! no constant of motion available
        md_ener%constant = md_ener%epot
     CASE ( nve_ensemble)
-       CALL get_econs_nve (md_env, md_ener,  para_env,error=error)
+       CALL get_econs_nve (md_env, md_ener,  para_env)
     CASE ( nvt_ensemble)
-       CALL get_econs_nvt (md_env, md_ener,  para_env,error=error)
+       CALL get_econs_nvt (md_env, md_ener,  para_env)
     CASE (  npt_i_ensemble,  npt_f_ensemble )
-       CALL get_econs_npt (md_env, md_ener,  para_env, error=error)
+       CALL get_econs_npt (md_env, md_ener,  para_env)
        md_ener%temp_baro = md_ener%temp_baro*kelvin
     CASE (  nph_uniaxial_ensemble )
-       CALL get_econs_nph_uniaxial (md_env, md_ener,  error=error)
+       CALL get_econs_nph_uniaxial (md_env, md_ener)
        md_ener%temp_baro = md_ener%temp_baro*kelvin
     CASE ( nph_uniaxial_damped_ensemble )
-       CALL get_econs_nph_uniaxial (md_env, md_ener,  error=error)
+       CALL get_econs_nph_uniaxial (md_env, md_ener)
        md_ener%temp_baro = md_ener%temp_baro*kelvin
     CASE ( langevin_ensemble )
        md_ener%constant = md_ener%ekin + md_ener%epot
     CASE ( npe_f_ensemble, npe_i_ensemble )
-       CALL get_econs_npe (md_env, md_ener,  para_env, error=error)
+       CALL get_econs_npe (md_env, md_ener,  para_env)
        md_ener%temp_baro = md_ener%temp_baro*kelvin
     CASE ( nvt_adiabatic_ensemble )
-       CALL get_econs_nvt_adiabatic (md_env, md_ener,  para_env, error=error)
+       CALL get_econs_nvt_adiabatic (md_env, md_ener,  para_env)
     END SELECT
 
     IF (init) THEN
        ! If the value was not read from input let's set it at the begin of the MD
        IF (constant == 0.0_dp) THEN
           constant = md_ener%constant
-          CALL set_md_env(md_env=md_env, constant=constant, error=error)
+          CALL set_md_env(md_env=md_env, constant=constant)
        END IF
     ELSE
-       CALL get_md_env(md_env=md_env, constant=constant, error=error)
+       CALL get_md_env(md_env=md_env, constant=constant)
        md_ener%delta_cons = (md_ener%constant - constant)/REAL(natom,KIND=dp)*kelvin
     END IF
 
@@ -191,13 +187,11 @@ CONTAINS
 !> \brief Calculates the number of QM degress of freedom
 !> \param md_env ...
 !> \param md_ener ...
-!> \param error ...
 !> \retval nfree_qm ...
 ! *****************************************************************************
-  FUNCTION calc_nfree_qm(md_env, md_ener, error) RESULT(nfree_qm)
+  FUNCTION calc_nfree_qm(md_env, md_ener) RESULT(nfree_qm)
     TYPE(md_environment_type), POINTER       :: md_env
     TYPE(md_ener_type), POINTER              :: md_ener
-    TYPE(cp_error_type), INTENT(inout)       :: error
     INTEGER                                  :: nfree_qm
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'calc_nfree_qm', &
@@ -208,40 +202,43 @@ CONTAINS
     TYPE(cp_subsys_type), POINTER            :: subsys
     TYPE(force_env_type), POINTER            :: force_env
     TYPE(particle_list_type), POINTER        :: particles
-    TYPE(qmmm_env_qm_type), POINTER          :: qmmm_env
+    TYPE(qmmm_env_type), POINTER             :: qmmm_env
+    TYPE(qmmmx_env_type), POINTER            :: qmmmx_env
     TYPE(section_vals_type), POINTER         :: force_env_section
 
-    NULLIFY(qmmm_env,subsys,particles,force_env,force_env_section)
+    NULLIFY(qmmm_env,qmmmx_env,subsys,particles,force_env,force_env_section)
     nfree_qm = 0
 
-    CALL get_md_env (md_env, force_env=force_env, error=error)
-    CALL force_env_get(force_env, subsys=subsys, qmmm_env=qmmm_env, force_env_section=force_env_section, error=error)
-    IF(ASSOCIATED(qmmm_env)) THEN
-      IF (SIZE(force_env%sub_force_env) == 1) THEN ! conventional QM/MM
-        CALL cp_subsys_get(subsys, particles=particles, error=error)
-        ! The degrees of freedom for the quantum part of the system
-        ! are set to 3*Number of QM atoms and to simpar%nfree in case all the MM
-        ! system is treated at QM level (not really QM/MM, just for consistency).
-        ! The degree of freedom will not be correct if 1-3 atoms are treated only
-        ! MM. In this case we should take care of rotations
-        nfree_qm = 3*SIZE(qmmm_env%qm_atom_index)
-        IF (nfree_qm == 3*(particles%n_els)) nfree_qm = md_ener%nfree
-      ELSE IF (qmmm_env%do_force_mixing .AND. SIZE(force_env%sub_force_env) == 2) THEN ! doing force mixing
-        CALL section_vals_val_get(force_env_section,"QMMM%FORCE_MIXING%RESTART_INFO%INDICES",i_vals=cur_indices,error=error)
-        CALL section_vals_val_get(force_env_section,"QMMM%FORCE_MIXING%RESTART_INFO%LABELS",i_vals=cur_labels,error=error)
-        nfree_qm = 0
-        DO ip=1, SIZE(cur_indices)
-          IF (cur_labels(ip) >= force_mixing_label_QM_dynamics) THEN ! this is a QM atom
-            nfree_qm = nfree_qm + 3
-          END IF
-        END DO
-      ELSE
-        CALL cp_assert(.FALSE.,cp_failure_level,cp_assertion_failed,&
-             routineP,"bad number of sub_force_envs (or do_force_mixing setting) updating nfree_qm "//&
-CPSourceFileRef, error)
-      ENDIF
+    CALL get_md_env (md_env, force_env=force_env)
+    CALL force_env_get(force_env,&
+                       subsys=subsys,&
+                       qmmm_env=qmmm_env,&
+                       qmmmx_env=qmmmx_env,&
+                       force_env_section=force_env_section)
+
+    IF(ASSOCIATED(qmmm_env)) THEN ! conventional QM/MM
+       CALL cp_subsys_get(subsys, particles=particles)
+       ! The degrees of freedom for the quantum part of the system
+       ! are set to 3*Number of QM atoms and to simpar%nfree in case all the MM
+       ! system is treated at QM level (not really QM/MM, just for consistency).
+       ! The degree of freedom will not be correct if 1-3 atoms are treated only
+       ! MM. In this case we should take care of rotations
+       nfree_qm = 3*SIZE(qmmm_env%qm%qm_atom_index)
+       IF (nfree_qm == 3*(particles%n_els)) nfree_qm = md_ener%nfree
     END IF
 
+    IF(ASSOCIATED(qmmmx_env)) THEN ! doing force mixing
+       CALL section_vals_val_get(force_env_section,"QMMM%FORCE_MIXING%RESTART_INFO%INDICES",i_vals=cur_indices)
+       CALL section_vals_val_get(force_env_section,"QMMM%FORCE_MIXING%RESTART_INFO%LABELS",i_vals=cur_labels)
+       nfree_qm = 0
+       DO ip=1, SIZE(cur_indices)
+         IF (cur_labels(ip) >= force_mixing_label_QM_dynamics) THEN ! this is a QM atom
+           nfree_qm = nfree_qm + 3
+         END IF
+       END DO
+    END IF
+
+    CPASSERT(.NOT.(ASSOCIATED(qmmm_env) .AND. ASSOCIATED(qmmmx_env)))
   END FUNCTION calc_nfree_qm
 
 
@@ -250,16 +247,14 @@ CPSourceFileRef, error)
 !> \param md_env ...
 !> \param md_ener ...
 !> \param para_env ...
-!> \param error ...
 !> \par History
 !>      none
 !> \author gloria
 ! *****************************************************************************
-  SUBROUTINE get_econs_nve ( md_env, md_ener, para_env, error )
+  SUBROUTINE get_econs_nve ( md_env, md_ener, para_env)
     TYPE(md_environment_type), POINTER       :: md_env
     TYPE(md_ener_type), INTENT(inout)        :: md_ener
     TYPE(cp_para_env_type), POINTER          :: para_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'get_econs_nve', &
       routineP = moduleN//':'//routineN
@@ -271,11 +266,11 @@ CPSourceFileRef, error)
     NULLIFY(force_env, thermostat_coeff,thermostat_shell)
 
     CALL get_md_env (md_env, force_env=force_env, thermostat_coeff=thermostat_coeff,&
-                     thermostat_shell=thermostat_shell, error=error)
+                     thermostat_shell=thermostat_shell)
     md_ener%constant = md_ener%ekin + md_ener%epot + md_ener%ekin_shell
 
     CALL get_thermostat_energies ( thermostat_shell, md_ener%thermostat_shell_pot,&
-         md_ener%thermostat_shell_kin, para_env, error=error )
+         md_ener%thermostat_shell_kin, para_env)
     md_ener%constant = md_ener%constant + md_ener%thermostat_shell_kin + md_ener%thermostat_shell_pot
 
   END SUBROUTINE get_econs_nve
@@ -285,16 +280,14 @@ CPSourceFileRef, error)
 !> \param md_env ...
 !> \param md_ener ...
 !> \param para_env ...
-!> \param error ...
 !> \par History
 !>      none
 !> \author gloria
 ! *****************************************************************************
-  SUBROUTINE get_econs_nvt_adiabatic ( md_env, md_ener,  para_env, error)
+  SUBROUTINE get_econs_nvt_adiabatic ( md_env, md_ener,  para_env)
     TYPE(md_environment_type), POINTER       :: md_env
     TYPE(md_ener_type), INTENT(inout)        :: md_ener
     TYPE(cp_para_env_type), POINTER          :: para_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'get_econs_nvt_adiabatic', &
       routineP = moduleN//':'//routineN
@@ -305,13 +298,13 @@ CPSourceFileRef, error)
 
     NULLIFY(force_env, thermostat_fast, thermostat_slow )
     CALL get_md_env (md_env, force_env=force_env, thermostat_fast=thermostat_fast,&
-         thermostat_slow=thermostat_slow, error=error )
+         thermostat_slow=thermostat_slow)
     CALL get_thermostat_energies ( thermostat_fast, md_ener%thermostat_fast_pot, &
-         md_ener%thermostat_fast_kin, para_env, error=error )
+         md_ener%thermostat_fast_kin, para_env)
     md_ener%constant = md_ener% ekin + md_ener%epot + &
                       md_ener%thermostat_fast_kin + md_ener%thermostat_fast_pot
     CALL get_thermostat_energies ( thermostat_slow, md_ener%thermostat_slow_pot, &
-         md_ener%thermostat_slow_kin, para_env, error=error )
+         md_ener%thermostat_slow_kin, para_env)
     md_ener%constant = md_ener%constant + &
                        md_ener%thermostat_slow_kin + md_ener%thermostat_slow_pot
 
@@ -323,16 +316,14 @@ CPSourceFileRef, error)
 !> \param md_env ...
 !> \param md_ener ...
 !> \param para_env ...
-!> \param error ...
 !> \par History
 !>      none
 !> \author gloria
 ! *****************************************************************************
-  SUBROUTINE get_econs_nvt ( md_env, md_ener,  para_env, error)
+  SUBROUTINE get_econs_nvt ( md_env, md_ener,  para_env)
     TYPE(md_environment_type), POINTER       :: md_env
     TYPE(md_ener_type), INTENT(inout)        :: md_ener
     TYPE(cp_para_env_type), POINTER          :: para_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'get_econs_nvt', &
       routineP = moduleN//':'//routineN
@@ -344,14 +335,14 @@ CPSourceFileRef, error)
 
     NULLIFY(force_env, thermostat_part, thermostat_coeff, thermostat_shell)
     CALL get_md_env (md_env, force_env=force_env, thermostat_part=thermostat_part,&
-         thermostat_coeff=thermostat_coeff, thermostat_shell=thermostat_shell, error=error )
+         thermostat_coeff=thermostat_coeff, thermostat_shell=thermostat_shell)
     CALL get_thermostat_energies ( thermostat_part, md_ener%thermostat_part_pot, &
-         md_ener%thermostat_part_kin, para_env, error=error )
+         md_ener%thermostat_part_kin, para_env)
     md_ener%constant = md_ener% ekin + md_ener%epot +  md_ener%ekin_shell +&
                        md_ener%thermostat_part_kin + md_ener%thermostat_part_pot
 
     CALL get_thermostat_energies ( thermostat_shell, md_ener%thermostat_shell_pot,&
-         md_ener%thermostat_shell_kin, para_env, error=error )
+         md_ener%thermostat_shell_kin, para_env)
     md_ener%constant = md_ener%constant + md_ener%thermostat_shell_kin + md_ener%thermostat_shell_pot
 
   END SUBROUTINE get_econs_nvt
@@ -361,16 +352,14 @@ CPSourceFileRef, error)
 !> \param md_env ...
 !> \param md_ener ...
 !> \param para_env ...
-!> \param error ...
 !> \par History
 !>      none
 !> \author  marcella (02-2008)
 ! *****************************************************************************
-  SUBROUTINE get_econs_npe ( md_env, md_ener, para_env, error)
+  SUBROUTINE get_econs_npe ( md_env, md_ener, para_env)
     TYPE(md_environment_type), POINTER       :: md_env
     TYPE(md_ener_type), INTENT(inout)        :: md_ener
     TYPE(cp_para_env_type), POINTER          :: para_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'get_econs_npe', &
       routineP = moduleN//':'//routineN
@@ -385,9 +374,9 @@ CPSourceFileRef, error)
     NULLIFY(thermostat_baro, thermostat_shell, npt)
     CALL get_md_env ( md_env,  thermostat_baro=thermostat_baro, &
          simpar = simpar, npt = npt, cell = box,  &
-         thermostat_shell=thermostat_shell, error=error)
+         thermostat_shell=thermostat_shell)
     CALL get_baro_energies ( box, simpar, npt, md_ener%baro_kin, &
-         md_ener%baro_pot, error=error )
+         md_ener%baro_pot)
     nfree = SIZE ( npt, 1 ) * SIZE ( npt, 2 )
     md_ener%temp_baro = 2.0_dp * md_ener%baro_kin / nfree
 
@@ -395,7 +384,7 @@ CPSourceFileRef, error)
          + md_ener%baro_kin + md_ener%baro_pot
 
     CALL get_thermostat_energies ( thermostat_shell, md_ener%thermostat_shell_pot, &
-         md_ener%thermostat_shell_kin, para_env, error=error)
+         md_ener%thermostat_shell_kin, para_env)
     md_ener%constant = md_ener%constant + md_ener%thermostat_shell_kin + &
            md_ener%thermostat_shell_pot
 
@@ -407,16 +396,14 @@ CPSourceFileRef, error)
 !> \param md_env ...
 !> \param md_ener ...
 !> \param para_env ...
-!> \param error ...
 !> \par History
 !>      none
 !> \author gloria
 ! *****************************************************************************
-  SUBROUTINE get_econs_npt ( md_env, md_ener, para_env, error)
+  SUBROUTINE get_econs_npt ( md_env, md_ener, para_env)
     TYPE(md_environment_type), POINTER       :: md_env
     TYPE(md_ener_type), INTENT(inout)        :: md_ener
     TYPE(cp_para_env_type), POINTER          :: para_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'get_econs_npt', &
       routineP = moduleN//':'//routineN
@@ -431,12 +418,12 @@ CPSourceFileRef, error)
 
     NULLIFY(thermostat_baro, thermostat_part, thermostat_shell, npt, simpar, box)
     CALL get_md_env ( md_env, thermostat_part=thermostat_part, thermostat_baro=thermostat_baro, &
-         simpar = simpar, npt = npt, cell = box,  thermostat_shell=thermostat_shell, error=error)
+         simpar = simpar, npt = npt, cell = box,  thermostat_shell=thermostat_shell)
     CALL get_thermostat_energies(thermostat_part, md_ener%thermostat_part_pot, &
-         md_ener%thermostat_part_kin, para_env, error=error )
+         md_ener%thermostat_part_kin, para_env)
     CALL get_thermostat_energies(thermostat_baro, md_ener%thermostat_baro_pot,&
-         md_ener%thermostat_baro_kin, para_env, error=error)
-    CALL get_baro_energies ( box, simpar, npt, md_ener%baro_kin, md_ener%baro_pot, error=error )
+         md_ener%thermostat_baro_kin, para_env)
+    CALL get_baro_energies ( box, simpar, npt, md_ener%baro_kin, md_ener%baro_pot)
     nfree = SIZE ( npt, 1 ) * SIZE ( npt, 2 )
     md_ener%temp_baro = 2.0_dp * md_ener%baro_kin / nfree
 
@@ -446,7 +433,7 @@ CPSourceFileRef, error)
          + md_ener%baro_kin + md_ener%baro_pot
 
     CALL get_thermostat_energies ( thermostat_shell, md_ener%thermostat_shell_pot, &
-         md_ener%thermostat_shell_kin, para_env, error=error )
+         md_ener%thermostat_shell_kin, para_env)
     md_ener%constant = md_ener%constant + md_ener%thermostat_shell_kin + md_ener%thermostat_shell_pot
 
   END SUBROUTINE get_econs_npt
@@ -455,15 +442,13 @@ CPSourceFileRef, error)
 !> \brief calculates conserved quantity for nph_uniaxial
 !> \param md_env ...
 !> \param md_ener ...
-!> \param error ...
 !> \par History
 !>      none
 !> \author cjm
 ! *****************************************************************************
-  SUBROUTINE get_econs_nph_uniaxial ( md_env, md_ener,  error)
+  SUBROUTINE get_econs_nph_uniaxial ( md_env, md_ener)
     TYPE(md_environment_type), POINTER       :: md_env
     TYPE(md_ener_type), INTENT(inout)        :: md_ener
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'get_econs_nph_uniaxial', &
       routineP = moduleN//':'//routineN
@@ -472,9 +457,9 @@ CPSourceFileRef, error)
     TYPE(npt_info_type), POINTER             :: npt( :, : )
     TYPE(simpar_type), POINTER               :: simpar
 
-    CALL get_md_env ( md_env, simpar = simpar, npt = npt, cell = box, error=error )
+    CALL get_md_env ( md_env, simpar = simpar, npt = npt, cell = box)
 
-    CALL get_baro_energies ( box, simpar, npt, md_ener%baro_kin, md_ener%baro_pot, error=error )
+    CALL get_baro_energies ( box, simpar, npt, md_ener%baro_kin, md_ener%baro_pot)
     md_ener%temp_baro = 2.0_dp * md_ener%baro_kin
     md_ener%constant = md_ener%ekin + md_ener%epot + md_ener%baro_kin + md_ener%baro_pot
   END SUBROUTINE get_econs_nph_uniaxial
@@ -486,17 +471,15 @@ CPSourceFileRef, error)
 !> \param tkind ...
 !> \param tshell ...
 !> \param group ...
-!> \param error ...
 !> \par History
 !>      none
 !> \author CJM
 ! *****************************************************************************
-  SUBROUTINE get_part_ke ( md_env, md_ener, tkind, tshell, group, error)
+  SUBROUTINE get_part_ke ( md_env, md_ener, tkind, tshell, group)
     TYPE(md_environment_type), POINTER       :: md_env
     TYPE(md_ener_type), POINTER              :: md_ener
     LOGICAL, INTENT(IN)                      :: tkind, tshell
     INTEGER, INTENT(IN)                      :: group
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'get_part_ke', &
       routineP = moduleN//':'//routineN
@@ -504,7 +487,7 @@ CPSourceFileRef, error)
     INTEGER :: i, iparticle, iparticle_kind, iparticle_local, nparticle_kind, &
       nparticle_local, shell_index
     INTEGER, POINTER                         :: cur_indices(:), cur_labels(:)
-    LOGICAL                                  :: failure, is_shell
+    LOGICAL                                  :: is_shell
     REAL(KIND=dp)                            :: ekin_c, ekin_com, ekin_s, mass
     TYPE(atomic_kind_list_type), POINTER     :: atomic_kinds
     TYPE(atomic_kind_type), DIMENSION(:), &
@@ -519,20 +502,24 @@ CPSourceFileRef, error)
       POINTER                                :: core_particle_set, &
                                                 particle_set, &
                                                 shell_particle_set
-    TYPE(qmmm_env_qm_type), POINTER          :: qmmm_env
+    TYPE(qmmm_env_type), POINTER             :: qmmm_env
+    TYPE(qmmmx_env_type), POINTER            :: qmmmx_env
     TYPE(section_vals_type), POINTER         :: force_env_section
     TYPE(shell_kind_type), POINTER           :: shell
 
-    failure = .FALSE.
+    NULLIFY(force_env, qmmm_env, qmmmx_env, subsys, force_env_section)
+    CALL get_md_env ( md_env, force_env = force_env)
+    CALL force_env_get(force_env,&
+                       subsys=subsys,&
+                       qmmm_env=qmmm_env,&
+                       qmmmx_env=qmmmx_env,&
+                       force_env_section=force_env_section)
 
-    NULLIFY(force_env, qmmm_env, subsys, force_env_section)
-    CALL get_md_env ( md_env, force_env = force_env, error=error )
-    CALL force_env_get (force_env, subsys = subsys, qmmm_env=qmmm_env, force_env_section=force_env_section, error=error)
     CALL cp_subsys_get(subsys=subsys,&
          atomic_kinds=atomic_kinds,&
          local_particles=local_particles,&
          particles=particles,shell_particles=shell_particles,&
-         core_particles=core_particles,error=error)
+         core_particles=core_particles)
 
     nparticle_kind = atomic_kinds%n_els
     atomic_kind_set => atomic_kinds%els
@@ -659,36 +646,34 @@ CPSourceFileRef, error)
     md_ener%vcom = md_ener%vcom / md_ener%total_mass
     !
     ! Compute the QM/MM kinetic energy
-    IF (ASSOCIATED(qmmm_env)) THEN
-       IF (SIZE(force_env%sub_force_env) == 1) THEN ! conventional QM/MM
-          DO i = 1, SIZE(qmmm_env%qm_atom_index)
-             iparticle = qmmm_env%qm_atom_index(i)
-             mass = particle_set(iparticle)%atomic_kind%mass
-             md_ener%ekin_qm = md_ener%ekin_qm +  0.5_dp * mass *  &
-                  ( particle_set(iparticle)%v(1)* particle_set(iparticle)%v(1) &
-                  + particle_set(iparticle)%v(2)* particle_set(iparticle)%v(2) &
-                  + particle_set(iparticle)%v(3)* particle_set(iparticle)%v(3) )
-          END DO
-       ELSE IF (qmmm_env%do_force_mixing .AND. SIZE(force_env%sub_force_env) == 2) THEN ! doing force mixing
-          CALL section_vals_val_get(force_env_section,"QMMM%FORCE_MIXING%RESTART_INFO%INDICES",i_vals=cur_indices,error=error)
-          CALL section_vals_val_get(force_env_section,"QMMM%FORCE_MIXING%RESTART_INFO%LABELS",i_vals=cur_labels,error=error)
-          DO i=1, SIZE(cur_indices)
-            IF (cur_labels(i) >= force_mixing_label_QM_dynamics) THEN ! this is a QM atom
-              iparticle = cur_indices(i)
-              mass = particle_set(iparticle)%atomic_kind%mass
-              md_ener%ekin_qm = md_ener%ekin_qm + 0.5_dp * mass * &
-                  ( particle_set(iparticle)%v(1)* particle_set(iparticle)%v(1) &
-                  + particle_set(iparticle)%v(2)* particle_set(iparticle)%v(2) &
-                  + particle_set(iparticle)%v(3)* particle_set(iparticle)%v(3) )
-            END IF
-          END DO
-       ELSE
-          CALL cp_assert(.FALSE.,cp_failure_level,cp_assertion_failed,&
-               routineP,"bad number of sub_force_envs (or do_force_mixing setting) getting ke for qmmm"//&
-               CPSourceFileRef,&
-               error,failure)
-       END IF
+
+    IF (ASSOCIATED(qmmm_env)) THEN ! conventional QM/MM
+       DO i = 1, SIZE(qmmm_env%qm%qm_atom_index)
+          iparticle = qmmm_env%qm%qm_atom_index(i)
+          mass = particle_set(iparticle)%atomic_kind%mass
+          md_ener%ekin_qm = md_ener%ekin_qm +  0.5_dp * mass *  &
+               ( particle_set(iparticle)%v(1)* particle_set(iparticle)%v(1) &
+               + particle_set(iparticle)%v(2)* particle_set(iparticle)%v(2) &
+               + particle_set(iparticle)%v(3)* particle_set(iparticle)%v(3) )
+       END DO
     END IF
+
+    IF(ASSOCIATED(qmmmx_env)) THEN  ! doing force mixing
+       CALL section_vals_val_get(force_env_section,"QMMM%FORCE_MIXING%RESTART_INFO%INDICES",i_vals=cur_indices)
+       CALL section_vals_val_get(force_env_section,"QMMM%FORCE_MIXING%RESTART_INFO%LABELS",i_vals=cur_labels)
+       DO i=1, SIZE(cur_indices)
+         IF (cur_labels(i) >= force_mixing_label_QM_dynamics) THEN ! this is a QM atom
+           iparticle = cur_indices(i)
+           mass = particle_set(iparticle)%atomic_kind%mass
+           md_ener%ekin_qm = md_ener%ekin_qm + 0.5_dp * mass * &
+               ( particle_set(iparticle)%v(1)* particle_set(iparticle)%v(1) &
+               + particle_set(iparticle)%v(2)* particle_set(iparticle)%v(2) &
+               + particle_set(iparticle)%v(3)* particle_set(iparticle)%v(3) )
+         END IF
+       END DO
+    END IF
+
+    IF(ASSOCIATED(qmmm_env) .AND. ASSOCIATED(qmmmx_env)) CPABORT("get_part_ke: qmmm bug")
   END SUBROUTINE get_part_ke
 
 ! *****************************************************************************

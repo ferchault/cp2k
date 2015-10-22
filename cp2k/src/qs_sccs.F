@@ -83,7 +83,6 @@ MODULE qs_sccs
   USE qs_rho_types,                    ONLY: qs_rho_get,&
                                              qs_rho_type
   USE qs_scf_types,                    ONLY: qs_scf_env_type
-  USE realspace_grid_cube
   USE realspace_grid_types,            ONLY: realspace_grid_desc_type,&
                                              realspace_grid_input_type,&
                                              realspace_grid_type,&
@@ -94,11 +93,8 @@ MODULE qs_sccs
   USE rs_methods,                      ONLY: derive_fdm_cd3,&
                                              derive_fdm_cd5,&
                                              derive_fdm_cd7
-  USE termination,                     ONLY: print_warning,&
-                                             stop_program
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -117,21 +113,19 @@ CONTAINS
 !> \param v_hartree_gspace ...
 !> \param v_sccs ...
 !> \param h_stress ...
-!> \param error ...
 !> \par History:
 !>      - Creation (10.10.2013,MK)
 !> \author  Matthias Krack (MK)
 !> \version 1.0
 ! *****************************************************************************
 
-  SUBROUTINE sccs(qs_env,rho_tot_gspace,v_hartree_gspace,v_sccs,h_stress,error)
+  SUBROUTINE sccs(qs_env,rho_tot_gspace,v_hartree_gspace,v_sccs,h_stress)
 
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(pw_type), POINTER                   :: rho_tot_gspace, &
                                                 v_hartree_gspace, v_sccs
     REAL(KIND=dp), DIMENSION(3, 3), &
       INTENT(OUT), OPTIONAL                  :: h_stress
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'sccs', &
       routineP = moduleN//':'//routineN
@@ -147,7 +141,7 @@ CONTAINS
     INTEGER, DIMENSION(3)                    :: lb, ub
     LOGICAL                                  :: append_cube, &
                                                 calculate_stress_tensor, &
-                                                failure, should_output
+                                                should_output
     REAL(KIND=dp) :: cavity_surface, cavity_volume, cell_volume, dphi2, dvol, &
       eps0, f, norm_drho2, polarisation_charge, rho_delta, rho_delta_avg, &
       rho_delta_max, rho_iter_new, tot_rho_elec, tot_rho_solute
@@ -176,8 +170,6 @@ CONTAINS
     TYPE(qs_scf_env_type), POINTER           :: scf_env
     TYPE(sccs_control_type), POINTER         :: sccs_control
     TYPE(section_vals_type), POINTER         :: input
-
-    failure = .FALSE.
 
     CALL timeset(routineN,handle)
 
@@ -217,22 +209,20 @@ CONTAINS
                     para_env=para_env,&
                     pw_env=pw_env,&
                     rho=rho,&
-                    scf_env=scf_env,&
-                    error=error)
-    CALL cp_subsys_get(cp_subsys,particles=particles,error=error)
+                    scf_env=scf_env)
+    CALL cp_subsys_get(cp_subsys,particles=particles)
 
     sccs_control => dft_control%sccs_control
 
-    CPPrecondition(ASSOCIATED(qs_env),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(rho_tot_gspace),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(v_hartree_gspace),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(v_sccs),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(qs_env))
+    CPASSERT(ASSOCIATED(rho_tot_gspace))
+    CPASSERT(ASSOCIATED(v_hartree_gspace))
+    CPASSERT(ASSOCIATED(v_sccs))
 
     IF (PRESENT(h_stress)) THEN
       calculate_stress_tensor = .TRUE.
       h_stress(:,:) = 0.0_dp
-      CALL stop_program(routineN,moduleN,__LINE__,&
-                        "No stress tensor is implemented for SCCS models yet",para_env)
+      CPABORT("No stress tensor is implemented for SCCS models yet")
     ELSE
        calculate_stress_tensor = .FALSE.
     END IF
@@ -241,10 +231,9 @@ CONTAINS
     CALL pw_env_get(pw_env,&
                     auxbas_pw_pool=auxbas_pw_pool,&
                     pw_pools=pw_pools,&
-                    poisson_env=poisson_env,&
-                    error=error)
+                    poisson_env=poisson_env)
 
-    CALL pw_zero(v_sccs,error=error)
+    CALL pw_zero(v_sccs)
 
     ! Calculate no SCCS contribution, if the requested SCF convergence threshold is not reached yet
     IF (.NOT.sccs_control%sccs_activated) THEN
@@ -255,8 +244,7 @@ CONTAINS
           CALL pw_poisson_solve(poisson_env=poisson_env,&
                                 density=rho_tot_gspace,&
                                 ehartree=energy%hartree,&
-                                vhartree=v_hartree_gspace,&
-                                error=error)
+                                vhartree=v_hartree_gspace)
           energy%sccs_pol = 0.0_dp
           energy%sccs_cav = 0.0_dp
           energy%sccs_dis = 0.0_dp
@@ -271,16 +259,15 @@ CONTAINS
     nspin = dft_control%nspins
 
     ! Manage print output control
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
     print_level = logger%iter_info%print_level
     print_path = "DFT%PRINT%SCCS"
     should_output = (BTEST(cp_print_key_should_output(logger%iter_info,input,&
-                           TRIM(print_path),error=error),cp_p_file))
+                           TRIM(print_path)),cp_p_file))
     output_unit = cp_print_key_unit_nr(logger,input,TRIM(print_path),&
                                        extension=".sccs",&
                                        ignore_should_output=should_output,&
-                                       log_filename=.FALSE.,&
-                                       error=error)
+                                       log_filename=.FALSE.)
 
     ! Get work storage for the 3d grids in r-space
     DO i=1,SIZE(work_r3d)
@@ -288,8 +275,7 @@ CONTAINS
       CALL pw_pool_create_pw(auxbas_pw_pool,&
                              work_r3d(i)%pw,&
                              use_data=REALDATA3D,&
-                             in_space=REALSPACE,&
-                             error=error)
+                             in_space=REALSPACE)
     END DO
 
     ! Assign total electronic density in r-space
@@ -306,17 +292,16 @@ CONTAINS
     ! Get rho
     CALL qs_rho_get(rho_struct=rho,&
                     rho_r=rho_r,&
-                    rho_r_sccs=rho_r_sccs,&
-                    error=error)
+                    rho_r_sccs=rho_r_sccs)
 
     ! Retrieve the last rho_iter from the previous SCCS cycle if available
-    CPPrecondition(ASSOCIATED(rho_r_sccs),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(rho_r_sccs))
     rho_iter_old => rho_r_sccs%pw
 
     ! Retrieve the total electronic density in r-space
-    CALL pw_copy(rho_r(1)%pw,rho_elec,error=error)
+    CALL pw_copy(rho_r(1)%pw,rho_elec)
     DO ispin=2,nspin
-      CALL pw_axpy(rho_r(ispin)%pw,rho_elec,error=error)
+      CALL pw_axpy(rho_r(ispin)%pw,rho_elec)
     END DO
     tot_rho_elec = accurate_sum(rho_elec%cr3d)*dvol
     CALL mp_sum(tot_rho_elec,para_env%group)
@@ -333,32 +318,28 @@ CONTAINS
       CALL fattebert_gygi(rho_elec,eps_elec,deps_elec,eps0,sccs_control%beta,&
                           sccs_control%rho_zero)
     CASE DEFAULT
-      CALL stop_program(routineN,moduleN,__LINE__,&
-                        "Invalid method specified for SCCS model",&
-                        para_env)
+      CPABORT("Invalid method specified for SCCS model")
     END SELECT
 
     ! Optional output of the dielectric function in cube file format
     filename = "DIELECTRIC_FUNCTION"
     cube_path = TRIM(print_path)//"%"//TRIM(filename)
-    IF (BTEST(cp_print_key_should_output(logger%iter_info,input,TRIM(cube_path),error=error),&
+    IF (BTEST(cp_print_key_should_output(logger%iter_info,input,TRIM(cube_path)),&
               cp_p_file)) THEN
-      append_cube = section_get_lval(input,TRIM(cube_path)//"%APPEND",error=error)
+      append_cube = section_get_lval(input,TRIM(cube_path)//"%APPEND")
       my_pos_cube="REWIND"
       IF (append_cube) my_pos_cube="APPEND"
       cube_unit = cp_print_key_unit_nr(logger,input,TRIM(cube_path),&
                                        extension=".cube",middle_name=TRIM(filename),&
-                                       file_position=my_pos_cube,log_filename=.FALSE.,&
-                                       error=error)
+                                       file_position=my_pos_cube,log_filename=.FALSE.)
       IF (output_unit > 0) THEN
         INQUIRE (UNIT=cube_unit,NAME=filename)
         WRITE (UNIT=output_unit,FMT="(/,T2,A,/,/,T2,A)")&
          "The dielectric function is written in cube file format to the file:",TRIM(filename)
       END IF
       CALL cp_pw_to_cube(eps_elec,cube_unit,TRIM(filename),particles=particles,&
-                         stride=section_get_ivals(input,TRIM(cube_path)//"%STRIDE",error=error),&
-                         error=error)
-      CALL cp_print_key_finished_output(cube_unit,logger,input,TRIM(cube_path),error=error)
+                         stride=section_get_ivals(input,TRIM(cube_path)//"%STRIDE"))
+      CALL cp_print_key_finished_output(cube_unit,logger,input,TRIM(cube_path))
     END IF
 
     ! Calculate the (quantum) volume and surface of the solute cavity
@@ -369,7 +350,7 @@ CONTAINS
 
       ! Initialise the switching function theta
       theta => work_r3d(4)%pw
-      CALL pw_zero(theta,error=error)
+      CALL pw_zero(theta)
 
       ! Calculate the (quantum) volume of the solute cavity
       f = 1.0_dp/(eps0 - 1.0_dp)
@@ -394,10 +375,9 @@ CONTAINS
         CALL pw_pool_create_pw(auxbas_pw_pool,&
                                drho_elec(i)%pw,&
                                use_data=REALDATA3D,&
-                               in_space=REALSPACE,&
-                               error=error)
+                               in_space=REALSPACE)
       END DO
-      CALL derive(rho_elec,drho_elec,sccs_derivative_fft,pw_env,input,para_env,error)
+      CALL derive(rho_elec,drho_elec,sccs_derivative_fft,pw_env,input,para_env)
 
       ! Calculate the norm of the gradient of the electronic density in r-space
       norm_drho_elec => work_r3d(5)%pw
@@ -421,24 +401,22 @@ CONTAINS
       ! Optional output of the norm of the density gradient in cube file format
       filename = "DENSITY_GRADIENT"
       cube_path = TRIM(print_path)//"%"//TRIM(filename)
-      IF (BTEST(cp_print_key_should_output(logger%iter_info,input,TRIM(cube_path),error=error),&
+      IF (BTEST(cp_print_key_should_output(logger%iter_info,input,TRIM(cube_path)),&
                 cp_p_file)) THEN
-        append_cube = section_get_lval(input,TRIM(cube_path)//"%APPEND",error=error)
+        append_cube = section_get_lval(input,TRIM(cube_path)//"%APPEND")
         my_pos_cube="REWIND"
         IF (append_cube) my_pos_cube="APPEND"
         cube_unit = cp_print_key_unit_nr(logger,input,TRIM(cube_path),&
                                          extension=".cube",middle_name=TRIM(filename),&
-                                         file_position=my_pos_cube,log_filename=.FALSE.,&
-                                         error=error)
+                                         file_position=my_pos_cube,log_filename=.FALSE.)
         IF (output_unit > 0) THEN
           INQUIRE (UNIT=cube_unit,NAME=filename)
           WRITE (UNIT=output_unit,FMT="(/,T2,A,/,/,T2,A)")&
            "The norm of the density gradient is written in cube file format to the file:",TRIM(filename)
         END IF
         CALL cp_pw_to_cube(norm_drho_elec,cube_unit,TRIM(filename),particles=particles,&
-                           stride=section_get_ivals(input,TRIM(cube_path)//"%STRIDE",error=error),&
-                           error=error)
-        CALL cp_print_key_finished_output(cube_unit,logger,input,TRIM(cube_path),error=error)
+                           stride=section_get_ivals(input,TRIM(cube_path)//"%STRIDE"))
+        CALL cp_print_key_finished_output(cube_unit,logger,input,TRIM(cube_path))
       END IF
 
       ! Calculate the (quantum) surface of the solute cavity
@@ -452,19 +430,17 @@ CONTAINS
                                     sccs_control%beta,sccs_control%rho_zero,&
                                     sccs_control%delta_rho)
       CASE DEFAULT
-        CALL stop_program(routineN,moduleN,__LINE__,&
-                          "Invalid method specified for SCCS model",&
-                          para_env)
+        CPABORT("Invalid method specified for SCCS model")
       END SELECT
       cavity_surface = accurate_sum(theta%cr3d)*dvol
       CALL mp_sum(cavity_surface,para_env%group)
 
       IF (sccs_control%gamma_solvent > 0.0_dp) THEN
 
-        CALL print_warning(routineN,moduleN,__LINE__,&
-                           "Experimental feature requested: The contribution from the "//&
-                           "cavitation energy is added as an extra potential term to the "//&
-                           "Kohn-Sham potential",para_env)
+        CALL cp_warn(__LOCATION__,&
+                     "Experimental feature requested: The contribution from the "//&
+                     "cavitation energy is added as an extra potential term to the "//&
+                     "Kohn-Sham potential")
 
         ! Calculate the second derivatives of the electronic density in r-space
         DO di=1,3
@@ -473,11 +449,10 @@ CONTAINS
             CALL pw_pool_create_pw(auxbas_pw_pool,&
                                    d2rho_elec(dj,di)%pw,&
                                    use_data=REALDATA3D,&
-                                   in_space=REALSPACE,&
-                                   error=error)
+                                   in_space=REALSPACE)
           END DO
           CALL derive(drho_elec(di)%pw,d2rho_elec(:,di),sccs_derivative_fft,pw_env,&
-                      input,para_env,error)
+                      input,para_env)
         END DO
 
         ! Calculate the contribution of the cavitation energy to the Kohn-Sham potential
@@ -502,22 +477,22 @@ CONTAINS
           END DO
         END DO
         !$omp end parallel do
-        CALL pw_scale(v_sccs,dvol,error=error)
+        CALL pw_scale(v_sccs,dvol)
 
       END IF
 
       ! Release storage
       NULLIFY (theta)
       DO i=1,3
-        CALL pw_pool_give_back_pw(auxbas_pw_pool,drho_elec(i)%pw,error=error)
+        CALL pw_pool_give_back_pw(auxbas_pw_pool,drho_elec(i)%pw)
       END DO
 
     END IF
 
     ! Retrieve the total charge density (core + elec) of the solute in r-space
     rho_solute => work_r3d(4)%pw
-    CALL pw_zero(rho_solute,error=error)
-    CALL pw_transfer(rho_tot_gspace,rho_solute,error=error)
+    CALL pw_zero(rho_solute)
+    CALL pw_transfer(rho_tot_gspace,rho_solute)
     tot_rho_solute = accurate_sum(rho_solute%cr3d)*dvol
     CALL mp_sum(tot_rho_solute,para_env%group)
 
@@ -538,7 +513,7 @@ CONTAINS
             WRITE (UNIT=message,FMT="(A,ES12.3,A,3(I0,A))")&
              "SCCS| Invalid dielectric function value ",eps_elec%cr3d(i,j,k),&
              " encountered at grid point (",i,",",j,",",k,")"
-            CALL stop_program(routineN,moduleN,__LINE__,message,para_env)
+            CPABORT(message)
           END IF
           rho_tot_zero%cr3d(i,j,k) = rho_solute%cr3d(i,j,k)/eps_elec%cr3d(i,j,k)
           eps_elec%cr3d(i,j,k) = LOG(eps_elec%cr3d(i,j,k))
@@ -557,11 +532,10 @@ CONTAINS
       CALL pw_pool_create_pw(auxbas_pw_pool,&
                              dln_eps_elec(i)%pw,&
                              use_data=REALDATA3D,&
-                             in_space=REALSPACE,&
-                             error=error)
-      CALL pw_zero(dln_eps_elec(i)%pw,error=error)
+                             in_space=REALSPACE)
+      CALL pw_zero(dln_eps_elec(i)%pw)
     END DO
-    CALL derive(ln_eps_elec,dln_eps_elec,sccs_control%derivative_method,pw_env,input,para_env,error)
+    CALL derive(ln_eps_elec,dln_eps_elec,sccs_control%derivative_method,pw_env,input,para_env)
 
     ! Print header for the SCCS cycle
     IF (should_output.AND.(output_unit > 0)) THEN
@@ -572,13 +546,13 @@ CONTAINS
         WRITE (UNIT=output_unit,FMT="(T3,A,T56,F25.3)")&
          "SCCS| Surface of the solute cavity [bohr^2]",cavity_surface,&
          "SCCS|                              [angstrom^2]",&
-         cp_unit_from_cp2k(cavity_surface,"angstrom^2",error=error),&
+         cp_unit_from_cp2k(cavity_surface,"angstrom^2"),&
          "SCCS| Volume of the solute cavity  [bohr^3]",cavity_volume,&
          "SCCS|                              [angstrom^3]",&
-         cp_unit_from_cp2k(cavity_volume,"angstrom^3",error=error),&
+         cp_unit_from_cp2k(cavity_volume,"angstrom^3"),&
          "SCCS| Volume of the cell           [bohr^3]",cell_volume,&
          "SCCS|                              [angstrom^3]",&
-         cp_unit_from_cp2k(cell_volume,"angstrom^3",error=error)
+         cp_unit_from_cp2k(cell_volume,"angstrom^3")
         WRITE (UNIT=output_unit,FMT="(T3,A)")&
          "SCCS|",&
          "SCCS|   Step    Average residual    Maximum residual"
@@ -591,8 +565,7 @@ CONTAINS
       CALL pw_pool_create_pw(auxbas_pw_pool,&
                              dphi_tot(i)%pw,&
                              use_data=REALDATA3D,&
-                             in_space=REALSPACE,&
-                             error=error)
+                             in_space=REALSPACE)
     END DO
 
     ! Reassign work storage to rho_tot, because ln_eps_elec is no longer needed
@@ -600,8 +573,8 @@ CONTAINS
     NULLIFY (ln_eps_elec)
 
     ! Initialise the total electronic density in r-space rho_tot with rho_tot_zero + rho_iter_zero
-    CALL pw_copy(rho_tot_zero,rho_tot,error=error)
-    CALL pw_axpy(rho_iter_old,rho_tot,error=error)
+    CALL pw_copy(rho_tot_zero,rho_tot)
+    CALL pw_axpy(rho_iter_old,rho_tot)
 
     ! Main SCCS iteration loop
     iter = 0
@@ -624,8 +597,7 @@ CONTAINS
       ! Calculate derivative of the current total potential in r-space
       CALL pw_poisson_solve(poisson_env=poisson_env,&
                             density=rho_tot,&
-                            dvhartree=dphi_tot,&
-                            error=error)
+                            dvhartree=dphi_tot)
 
       ! Update total charge density (solute plus polarisation) in r-space
       ! based on the iterated polarisation charge density
@@ -686,70 +658,65 @@ CONTAINS
 
     ! Calculate the total Hartree energy, potential, and its derivatives of
     ! the solute and the implicit solvent
-    CALL pw_transfer(rho_tot,rho_tot_gspace,error=error)
+    CALL pw_transfer(rho_tot,rho_tot_gspace)
     IF (calculate_stress_tensor) THEN
       CALL pw_poisson_solve(poisson_env=poisson_env,&
                             density=rho_tot_gspace,&
                             ehartree=energy%sccs_hartree,&
                             vhartree=v_hartree_gspace,&
                             dvhartree=dphi_tot,&
-                            h_stress=h_stress,&
-                            error=error)
+                            h_stress=h_stress)
     ELSE
       CALL pw_poisson_solve(poisson_env=poisson_env,&
                             density=rho_tot_gspace,&
                             ehartree=energy%sccs_hartree,&
                             vhartree=v_hartree_gspace,&
-                            dvhartree=dphi_tot,&
-                            error=error)
+                            dvhartree=dphi_tot)
     END IF
     phi_pol => work_r3d(5)%pw
-    CALL pw_transfer(v_hartree_gspace,phi_pol,error=error)
+    CALL pw_transfer(v_hartree_gspace,phi_pol)
 
     ! Calculate the Hartree energy and potential of the solute only
     phi_solute => rho_tot_zero
-    CALL pw_zero(phi_solute,error=error)
+    CALL pw_zero(phi_solute)
     NULLIFY (rho_tot_zero)
     CALL pw_poisson_solve(poisson_env=poisson_env,&
                           density=rho_solute,&
                           ehartree=energy%hartree,&
-                          vhartree=phi_solute,&
-                          error=error)
+                          vhartree=phi_solute)
 
     ! Calculate the polarisation potential
     ! phi_pol = phi_tot - phi_solute
-    CALL pw_axpy(phi_solute,phi_pol,alpha=-1.0_dp,error=error)
+    CALL pw_axpy(phi_solute,phi_pol,alpha=-1.0_dp)
 
     ! Calculate the polarisation charge
     ! rho_pol = rho_tot - rho_solute
-    CALL pw_axpy(rho_solute,rho_tot,alpha=-1.0_dp,error=error)
+    CALL pw_axpy(rho_solute,rho_tot,alpha=-1.0_dp)
     polarisation_charge = accurate_sum(rho_tot%cr3d)*dvol
     CALL mp_sum(polarisation_charge,para_env%group)
 
     filename = "POLARISATION_POTENTIAL"
     cube_path = TRIM(print_path)//"%"//TRIM(filename)
-    IF (BTEST(cp_print_key_should_output(logger%iter_info,input,TRIM(cube_path),error=error),&
+    IF (BTEST(cp_print_key_should_output(logger%iter_info,input,TRIM(cube_path)),&
               cp_p_file)) THEN
-      append_cube = section_get_lval(input,TRIM(cube_path)//"%APPEND",error=error)
+      append_cube = section_get_lval(input,TRIM(cube_path)//"%APPEND")
       my_pos_cube="REWIND"
       IF (append_cube) my_pos_cube="APPEND"
       cube_unit = cp_print_key_unit_nr(logger,input,TRIM(cube_path),&
                                        extension=".cube",middle_name=TRIM(filename),&
-                                       file_position=my_pos_cube,log_filename=.FALSE.,&
-                                       error=error)
+                                       file_position=my_pos_cube,log_filename=.FALSE.)
       IF (output_unit > 0) THEN
         INQUIRE (UNIT=cube_unit,NAME=filename)
         WRITE (UNIT=output_unit,FMT="(/,T2,A,/,/,T2,A)")&
          "The SCCS polarisation potential is written in cube file format to the file:",TRIM(filename)
       END IF
       CALL cp_pw_to_cube(phi_pol,cube_unit,TRIM(filename),particles=particles,&
-                         stride=section_get_ivals(input,TRIM(cube_path)//"%STRIDE",error=error),&
-                         error=error)
-      CALL cp_print_key_finished_output(cube_unit,logger,input,TRIM(cube_path),error=error)
+                         stride=section_get_ivals(input,TRIM(cube_path)//"%STRIDE"))
+      CALL cp_print_key_finished_output(cube_unit,logger,input,TRIM(cube_path))
     END IF
 
     ! Calculate SCCS polarisation energy
-    energy%sccs_pol = 0.5_dp*pw_integral_ab(rho_solute,phi_pol,error=error)
+    energy%sccs_pol = 0.5_dp*pw_integral_ab(rho_solute,phi_pol)
 
     ! Calculate the Makov-Payne energy correction for charged systems with PBC
     ! Madelung energy of a simple cubic lattice of point charges immersed in neutralising jellium
@@ -771,19 +738,19 @@ CONTAINS
       WRITE (UNIT=output_unit,FMT="(T3,A,T56,F25.12,/,T3,A,T61,F20.3)")&
        "SCCS| Polarisation energy    [Hartree]",energy%sccs_pol,&
        "SCCS|                        [kcal/mol]",&
-       cp_unit_from_cp2k(energy%sccs_pol,"kcalmol",error=error),&
+       cp_unit_from_cp2k(energy%sccs_pol,"kcalmol"),&
        "SCCS| Makov-Payne correction [Hartree]",energy%sccs_mpc,&
        "SCCS|                        [kcal/mol]",&
-       cp_unit_from_cp2k(energy%sccs_mpc,"kcalmol",error=error),&
+       cp_unit_from_cp2k(energy%sccs_mpc,"kcalmol"),&
        "SCCS| Cavitation energy      [Hartree]",energy%sccs_cav,&
        "SCCS|                        [kcal/mol]",&
-       cp_unit_from_cp2k(energy%sccs_cav,"kcalmol",error=error),&
+       cp_unit_from_cp2k(energy%sccs_cav,"kcalmol"),&
        "SCCS| Dispersion free energy [Hartree]",energy%sccs_dis,&
        "SCCS|                        [kcal/mol]",&
-       cp_unit_from_cp2k(energy%sccs_dis,"kcalmol",error=error),&
+       cp_unit_from_cp2k(energy%sccs_dis,"kcalmol"),&
        "SCCS| Repulsion free energy  [Hartree]",energy%sccs_rep,&
        "SCCS|                        [kcal/mol]",&
-       cp_unit_from_cp2k(energy%sccs_rep,"kcalmol",error=error)
+       cp_unit_from_cp2k(energy%sccs_rep,"kcalmol")
     END IF
 
     ! Calculate SCCS contribution to the Kohn-Sham potential
@@ -810,17 +777,16 @@ CONTAINS
     NULLIFY (deps_elec)
     NULLIFY (rho_solute)
     DO i=1,SIZE(work_r3d)
-      CALL pw_pool_give_back_pw(auxbas_pw_pool,work_r3d(i)%pw,error=error)
+      CALL pw_pool_give_back_pw(auxbas_pw_pool,work_r3d(i)%pw)
     END DO
     DO i=1,3
-      CALL pw_pool_give_back_pw(auxbas_pw_pool,dln_eps_elec(i)%pw,error=error)
-      CALL pw_pool_give_back_pw(auxbas_pw_pool,dphi_tot(i)%pw,error=error)
+      CALL pw_pool_give_back_pw(auxbas_pw_pool,dln_eps_elec(i)%pw)
+      CALL pw_pool_give_back_pw(auxbas_pw_pool,dphi_tot(i)%pw)
     END DO
 
     ! Release the SCCS printout environment
     CALL cp_print_key_finished_output(output_unit,logger,input,TRIM(print_path),&
-                                      ignore_should_output=should_output,&
-                                      error=error)
+                                      ignore_should_output=should_output)
 
     CALL timestop(handle)
 
@@ -982,13 +948,12 @@ CONTAINS
 !> \param pw_env ...
 !> \param input ...
 !> \param para_env ...
-!> \param error ...
 !> \par History:
 !>      - Creation (15.11.2013,MK)
 !> \author     Matthias Krack (MK)
 !> \version    1.0
 ! *****************************************************************************
-  SUBROUTINE derive(f,df,method,pw_env,input,para_env,error)
+  SUBROUTINE derive(f,df,method,pw_env,input,para_env)
 
     TYPE(pw_type), POINTER                   :: f
     TYPE(pw_p_type), DIMENSION(3), &
@@ -997,14 +962,12 @@ CONTAINS
     TYPE(pw_env_type), POINTER               :: pw_env
     TYPE(section_vals_type), POINTER         :: input
     TYPE(cp_para_env_type), POINTER          :: para_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'derive', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: border_points, handle, i
     INTEGER, DIMENSION(3)                    :: lb, n, ub
-    LOGICAL                                  :: failure
     TYPE(pw_p_type), DIMENSION(2)            :: work_g1d
     TYPE(pw_pool_type), POINTER              :: auxbas_pw_pool
     TYPE(realspace_grid_desc_type), POINTER  :: rs_desc
@@ -1014,18 +977,17 @@ CONTAINS
 
     CALL timeset(routineN,handle)
 
-    failure = .FALSE.
 
-    CPPrecondition(ASSOCIATED(f),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(pw_env),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(para_env),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(f))
+    CPASSERT(ASSOCIATED(pw_env))
+    CPASSERT(ASSOCIATED(para_env))
 
     ! Perform method specific setup
     SELECT CASE (method)
     CASE (sccs_derivative_cd3,sccs_derivative_cd5,sccs_derivative_cd7)
       NULLIFY (rs_desc)
       NULLIFY (rs_grid)
-      rs_grid_section => section_vals_get_subs_vals(input,"DFT%MGRID%RS_GRID",error=error)
+      rs_grid_section => section_vals_get_subs_vals(input,"DFT%MGRID%RS_GRID")
       SELECT CASE (method)
       CASE (sccs_derivative_cd3)
         border_points = 1
@@ -1035,59 +997,56 @@ CONTAINS
         border_points = 3
       END SELECT
       CALL init_input_type(input_settings,2*border_points+1,rs_grid_section,&
-                           1,(/-1,-1,-1/),error)
+                           1,(/-1,-1,-1/))
       CALL rs_grid_create_descriptor(rs_desc,f%pw_grid,input_settings,&
-                                     border_points=border_points,error=error)
-      CALL rs_grid_create(rs_grid,rs_desc,error=error)
-!MK    CALL rs_grid_print(rs_grid,6,error=error)
+                                     border_points=border_points)
+      CALL rs_grid_create(rs_grid,rs_desc)
+!MK    CALL rs_grid_print(rs_grid,6)
     CASE (sccs_derivative_fft)
       lb(1:3) = f%pw_grid%bounds_local(1,1:3)
       ub(1:3) = f%pw_grid%bounds_local(2,1:3)
       NULLIFY (auxbas_pw_pool)
-      CALL pw_env_get(pw_env,auxbas_pw_pool=auxbas_pw_pool,error=error)
+      CALL pw_env_get(pw_env,auxbas_pw_pool=auxbas_pw_pool)
       ! Get work storage for the 1d grids in g-space (derivative calculation)
       DO i=1,SIZE(work_g1d)
         NULLIFY (work_g1d(i)%pw)
         CALL pw_pool_create_pw(auxbas_pw_pool,&
                                work_g1d(i)%pw,&
                                use_data=COMPLEXDATA1D,&
-                               in_space=RECIPROCALSPACE,&
-                               error=error)
+                               in_space=RECIPROCALSPACE)
       END DO
     END SELECT
 
     ! Calculate the derivatives
     SELECT CASE (method)
     CASE (sccs_derivative_cd3)
-      CALL derive_fdm_cd3(f,df,rs_grid,error)
+      CALL derive_fdm_cd3(f,df,rs_grid)
     CASE (sccs_derivative_cd5)
-      CALL derive_fdm_cd5(f,df,rs_grid,error)
+      CALL derive_fdm_cd5(f,df,rs_grid)
     CASE (sccs_derivative_cd7)     
-      CALL derive_fdm_cd7(f,df,rs_grid,error)
+      CALL derive_fdm_cd7(f,df,rs_grid)
     CASE (sccs_derivative_fft)
       ! FFT
-      CALL pw_transfer(f,work_g1d(1)%pw,error=error)
+      CALL pw_transfer(f,work_g1d(1)%pw)
       DO i=1,3
         n(:) = 0
         n(i) = 1
-        CALL pw_copy(work_g1d(1)%pw,work_g1d(2)%pw,error=error)
-        CALL pw_derive(work_g1d(2)%pw,n(:),error=error)
-        CALL pw_transfer(work_g1d(2)%pw,df(i)%pw,error=error)
+        CALL pw_copy(work_g1d(1)%pw,work_g1d(2)%pw)
+        CALL pw_derive(work_g1d(2)%pw,n(:))
+        CALL pw_transfer(work_g1d(2)%pw,df(i)%pw)
       END DO
     CASE DEFAULT
-      CALL stop_program(routineN,moduleN,__LINE__,&
-                        "Invalid derivative method for SCCS specified",&
-                        para_env)
+      CPABORT("Invalid derivative method for SCCS specified")
     END SELECT
 
     ! Perform method specific cleanup
     SELECT CASE (method)
     CASE (sccs_derivative_cd3,sccs_derivative_cd5,sccs_derivative_cd7)
-      CALL rs_grid_release(rs_grid,error=error)
-      CALL rs_grid_release_descriptor(rs_desc,error=error)
+      CALL rs_grid_release(rs_grid)
+      CALL rs_grid_release_descriptor(rs_desc)
     CASE (sccs_derivative_fft)
       DO i=1,SIZE(work_g1d)
-        CALL pw_pool_give_back_pw(auxbas_pw_pool,work_g1d(i)%pw,error=error)
+        CALL pw_pool_give_back_pw(auxbas_pw_pool,work_g1d(i)%pw)
       END DO
     END SELECT
 

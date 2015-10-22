@@ -56,9 +56,8 @@ MODULE constraint
                                              molecule_type
   USE particle_types,                  ONLY: particle_type
   USE simpar_types,                    ONLY: simpar_type
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -91,13 +90,12 @@ CONTAINS
 !> \param cell ...
 !> \param group ...
 !> \param local_particles ...
-!> \param error ...
 !> \par History
 !>      Teodoro Laino [tlaino] 2007 - Extension to Intermolecular constraints
 ! *****************************************************************************
   SUBROUTINE shake_control( gci, local_molecules, molecule_set, molecule_kind_set, &
        particle_set, pos, vel, dt, shake_tol, log_unit, lagrange_mult, dump_lm, &
-       cell, group, local_particles,error )
+       cell, group, local_particles)
 
     TYPE(global_constraint_type), POINTER    :: gci
     TYPE(distribution_1d_type), POINTER      :: local_molecules
@@ -111,7 +109,6 @@ CONTAINS
     TYPE(cell_type), POINTER                 :: cell
     INTEGER, INTENT(in)                      :: group
     TYPE(distribution_1d_type), POINTER      :: local_particles
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'shake_control', &
       routineP = moduleN//':'//routineN
@@ -158,21 +155,21 @@ CONTAINS
                 ! 3x3
                 IF ( n3x3con /= 0 ) &
                      CALL shake_3x3_int( molecule, particle_set, pos, vel, dt, ishake_int,&
-                     int_max_sigma, error)
+                     int_max_sigma)
                 ! 4x6
                 IF ( n4x6con /= 0 ) &
                      CALL shake_4x6_int( molecule, particle_set, pos, vel, dt, ishake_int,&
-                     int_max_sigma, error)
+                     int_max_sigma)
                 ! Collective Variables
                 IF ( ncolv%ntot /= 0 ) &
                      CALL shake_colv_int(molecule, particle_set, pos, vel, dt, ishake_int,&
-                     cell, imass, int_max_sigma, error )
+                     cell, imass, int_max_sigma)
              END DO Shake_Intra_Loop
              max_sigma = MAX(max_sigma, int_max_sigma)
-             CALL shake_int_info(log_unit,i,ishake_int,max_sigma,error)
+             CALL shake_int_info(log_unit,i,ishake_int,max_sigma)
              ! Virtual Site
              IF ( nvsitecon /= 0 ) &
-                CALL shake_vsite_int( molecule, pos, error)
+                CALL shake_vsite_int( molecule, pos)
           END DO
        END DO MOL
        ! Intermolecular constraints
@@ -181,24 +178,24 @@ CONTAINS
           ! 3x3
           IF ( gci%ng3x3 /= 0 ) &
                CALL shake_3x3_ext( gci, particle_set, pos, vel, dt, ishake_ext,&
-               max_sigma, error)
+               max_sigma)
           ! 4x6
           IF ( gci%ng4x6 /= 0 ) &
                CALL shake_4x6_ext( gci, particle_set, pos, vel, dt, ishake_ext,&
-               max_sigma, error)
+               max_sigma)
           ! Collective Variables
           IF ( gci%ncolv%ntot /= 0 ) &
                CALL shake_colv_ext(gci, particle_set, pos, vel, dt, ishake_ext,&
-               cell, imass, max_sigma, error)
+               cell, imass, max_sigma)
           ! Virtual Site
           IF ( gci%nvsite /= 0 ) &
-               CALL shake_vsite_ext( gci, pos, error)
+               CALL shake_vsite_ext( gci, pos)
           CALL restore_temporary_set( particle_set, local_particles, pos=pos, vel=vel )
        END IF
-       CALL shake_ext_info(log_unit,ishake_ext,max_sigma,error)
+       CALL shake_ext_info(log_unit,ishake_ext,max_sigma)
     END DO Shake_Inter_Loop
     CALL dump_lagrange_mult(dump_lm, lagrange_mult,local_molecules,molecule_set,gci,&
-         molecule_kind_set,group,"S",error)
+         molecule_kind_set,group,"S")
 
     CALL timestop(handle)
   END SUBROUTINE shake_control
@@ -219,13 +216,12 @@ CONTAINS
 !> \param cell ...
 !> \param group ...
 !> \param local_particles ...
-!> \param error ...
 !> \par History
 !>      Teodoro Laino [tlaino] 2007 - Extension to Intermolecular constraints
 ! *****************************************************************************
   SUBROUTINE rattle_control( gci, local_molecules, molecule_set, molecule_kind_set,  &
        particle_set, vel, dt, rattle_tol, log_unit, lagrange_mult, dump_lm, cell, group,&
-       local_particles, error )
+       local_particles)
 
     TYPE(global_constraint_type), POINTER    :: gci
     TYPE(distribution_1d_type), POINTER      :: local_molecules
@@ -239,7 +235,6 @@ CONTAINS
     TYPE(cell_type), POINTER                 :: cell
     INTEGER, INTENT(in)                      :: group
     TYPE(distribution_1d_type), POINTER      :: local_particles
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'rattle_control', &
       routineP = moduleN//':'//routineN
@@ -284,17 +279,17 @@ CONTAINS
                 irattle_int = irattle_int + 1
                 ! 3x3
                 IF ( n3x3con /= 0 ) &
-                     CALL rattle_3x3_int( molecule, particle_set, vel, dt, error)
+                     CALL rattle_3x3_int( molecule, particle_set, vel, dt)
                 ! 4x6
                 IF ( n4x6con /= 0 ) &
-                     CALL rattle_4x6_int( molecule, particle_set, vel, dt, error)
+                     CALL rattle_4x6_int( molecule, particle_set, vel, dt)
                 ! Collective Variables
                 IF ( ncolv%ntot /= 0 ) &
                      CALL rattle_colv_int( molecule, particle_set, vel, dt, &
-                     irattle_int, cell, imass, int_max_sigma, error )
+                     irattle_int, cell, imass, int_max_sigma)
              END DO Rattle_Intra_Loop
              max_sigma = MAX(max_sigma, int_max_sigma)
-             CALL rattle_int_info(log_unit,i,irattle_int,max_sigma,error)
+             CALL rattle_int_info(log_unit,i,irattle_int,max_sigma)
           END DO
        END DO MOL
        ! Intermolecular Constraints
@@ -302,20 +297,20 @@ CONTAINS
           CALL update_temporary_set ( group, vel = vel )
           ! 3x3
           IF ( gci%ng3x3 /= 0 ) &
-               CALL rattle_3x3_ext( gci, particle_set, vel, dt, error)
+               CALL rattle_3x3_ext( gci, particle_set, vel, dt)
           ! 4x6
           IF ( gci%ng4x6 /= 0 ) &
-               CALL rattle_4x6_ext( gci, particle_set, vel, dt, error)
+               CALL rattle_4x6_ext( gci, particle_set, vel, dt)
           ! Collective Variables
           IF ( gci%ncolv%ntot /= 0 ) &
                CALL rattle_colv_ext( gci, particle_set, vel, dt, &
-               irattle_ext, cell, imass, max_sigma, error )
+               irattle_ext, cell, imass, max_sigma)
           CALL restore_temporary_set ( particle_set, local_particles, vel = vel )
        END IF
-       CALL rattle_ext_info(log_unit,irattle_ext,max_sigma,error)
+       CALL rattle_ext_info(log_unit,irattle_ext,max_sigma)
     END DO Rattle_Inter_Loop
     CALL dump_lagrange_mult(dump_lm,lagrange_mult,local_molecules,molecule_set,gci,&
-         molecule_kind_set,group,"R",error)
+         molecule_kind_set,group,"R")
     CALL timestop(handle)
 
   END SUBROUTINE rattle_control
@@ -339,13 +334,12 @@ CONTAINS
 !> \param u ...
 !> \param cell ...
 !> \param local_particles ...
-!> \param error ...
 !> \par History
 !>      Teodoro Laino [tlaino] 2007 - Extension to Intermolecular constraints
 ! *****************************************************************************
   SUBROUTINE shake_roll_control( gci, local_molecules, molecule_set,&
        molecule_kind_set, particle_set, pos, vel, dt, simpar, roll_tol, iroll,&
-       vector_r, vector_v, group, u, cell, local_particles, error )
+       vector_r, vector_v, group, u, cell, local_particles)
 
     TYPE(global_constraint_type), POINTER    :: gci
     TYPE(distribution_1d_type), POINTER      :: local_molecules
@@ -363,7 +357,6 @@ CONTAINS
       INTENT(IN), OPTIONAL                   :: u
     TYPE(cell_type), POINTER                 :: cell
     TYPE(distribution_1d_type), POINTER      :: local_particles
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'shake_roll_control', &
       routineP = moduleN//':'//routineN
@@ -423,23 +416,21 @@ CONTAINS
                 ! 3x3
                 IF ( n3x3con /= 0 ) &
                      CALL shake_roll_3x3_int( molecule, particle_set, pos, vel, r_shake,&
-                     v_shake, dt, ishake_int, int_max_sigma, error)
+                     v_shake, dt, ishake_int, int_max_sigma)
                 ! 4x6
                 IF ( n4x6con /= 0 ) &
                      CALL shake_roll_4x6_int( molecule, particle_set, pos, vel, r_shake,&
-                     dt, ishake_int, int_max_sigma, error)
+                     dt, ishake_int, int_max_sigma)
                 ! Collective Variables
                 IF ( ncolv%ntot /= 0 ) &
                      CALL shake_roll_colv_int( molecule, particle_set, pos, vel, r_shake,&
-                     v_shake, dt, ishake_int, cell, imass, int_max_sigma, error )
+                     v_shake, dt, ishake_int, cell, imass, int_max_sigma)
              END DO Shake_Roll_Intra_Loop
              max_sigma = MAX(max_sigma, int_max_sigma)
-             CALL shake_int_info(log_unit,i,ishake_int,max_sigma,error)
+             CALL shake_int_info(log_unit,i,ishake_int,max_sigma)
              ! Virtual Site
              IF ( nvsitecon /= 0 ) THEN
-                CALL cp_unimplemented_error(fromWhere=routineP, &
-                     message="Virtual Site Constraint/Restraint not implemented for SHAKE_ROLL!", &
-                     error=error, error_level=cp_failure_level)
+                CPABORT("Virtual Site Constraint/Restraint not implemented for SHAKE_ROLL!")
              END IF
           END DO
        END DO MOL
@@ -449,26 +440,24 @@ CONTAINS
           ! 3x3
           IF ( gci%ng3x3 /= 0 ) &
                CALL shake_roll_3x3_ext( gci, particle_set, pos, vel, r_shake,&
-               v_shake, dt, ishake_ext, max_sigma, error)
+               v_shake, dt, ishake_ext, max_sigma)
           ! 4x6
           IF ( gci%ng4x6 /= 0 ) &
                CALL shake_roll_4x6_ext( gci, particle_set, pos, vel, r_shake,&
-               dt, ishake_ext, max_sigma, error)
+               dt, ishake_ext, max_sigma)
           ! Collective Variables
           IF ( gci%ncolv%ntot /= 0 ) &
                CALL shake_roll_colv_ext( gci, particle_set, pos, vel, r_shake,&
-               v_shake, dt, ishake_ext, cell, imass, max_sigma, error )
+               v_shake, dt, ishake_ext, cell, imass, max_sigma)
           ! Virtual Site
           IF ( gci%nvsite /= 0 ) &
-               CALL cp_unimplemented_error(fromWhere=routineP, &
-               message="Virtual Site Constraint/Restraint not implemented for SHAKE_ROLL!", &
-               error=error, error_level=cp_failure_level)
+               CPABORT("Virtual Site Constraint/Restraint not implemented for SHAKE_ROLL!")
           CALL restore_temporary_set ( particle_set, local_particles, pos = pos, vel = vel )
        END IF
-       CALL shake_ext_info(log_unit,ishake_ext,max_sigma,error)
+       CALL shake_ext_info(log_unit,ishake_ext,max_sigma)
     END DO Shake_Inter_Loop
     CALL dump_lagrange_mult(dump_lm,lagrange_mult,local_molecules,molecule_set,gci,&
-         molecule_kind_set,group,"S",error)
+         molecule_kind_set,group,"S")
     CALL check_tol ( roll_tol, iroll, 'SHAKE', r_shake )
     CALL timestop(handle)
 
@@ -492,13 +481,12 @@ CONTAINS
 !> \param u ...
 !> \param cell ...
 !> \param local_particles ...
-!> \param error ...
 !> \par History
 !>      Teodoro Laino [tlaino] 2007 - Extension to Intermolecular constraints
 ! *****************************************************************************
   SUBROUTINE rattle_roll_control( gci, local_molecules, molecule_set, &
        molecule_kind_set, particle_set, vel, dt, simpar, vector,&
-       veps, roll_tol, iroll, para_env, u, cell, local_particles, error )
+       veps, roll_tol, iroll, para_env, u, cell, local_particles)
 
     TYPE(global_constraint_type), POINTER    :: gci
     TYPE(distribution_1d_type), POINTER      :: local_molecules
@@ -518,7 +506,6 @@ CONTAINS
       INTENT(IN), OPTIONAL                   :: u
     TYPE(cell_type), POINTER                 :: cell
     TYPE(distribution_1d_type), POINTER      :: local_particles
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'rattle_roll_control', &
       routineP = moduleN//':'//routineN
@@ -579,18 +566,18 @@ CONTAINS
                 ! 3x3
                 IF ( n3x3con /= 0 ) &
                      CALL rattle_roll_3x3_int( molecule, particle_set, vel, r_rattle, dt,&
-                     veps, error )
+                     veps)
                 ! 4x6
                 IF ( n4x6con /= 0 ) &
                      CALL rattle_roll_4x6_int( molecule, particle_set, vel, r_rattle, dt,&
-                     veps, error )
+                     veps)
                 ! Collective Variables
                 IF ( ncolv%ntot /= 0 ) &
                      CALL rattle_roll_colv_int( molecule, particle_set, vel, r_rattle, dt,&
-                     irattle_int, veps, cell, imass, int_max_sigma, error  )
+                     irattle_int, veps, cell, imass, int_max_sigma)
              END DO Rattle_Roll_Intramolecular
              max_sigma = MAX(max_sigma, int_max_sigma)
-             CALL rattle_int_info(log_unit,i,irattle_int,max_sigma,error)
+             CALL rattle_int_info(log_unit,i,irattle_int,max_sigma)
           END DO
        END DO MOL
        ! Intermolecular Constraints
@@ -599,21 +586,21 @@ CONTAINS
           ! 3x3
           IF ( gci%ng3x3 /= 0 )&
                CALL rattle_roll_3x3_ext( gci, particle_set, vel, r_rattle, dt,&
-               veps, error )
+               veps)
           ! 4x6
           IF ( gci%ng4x6 /= 0 ) &
                CALL rattle_roll_4x6_ext( gci, particle_set, vel, r_rattle, dt,&
-               veps, error )
+               veps)
           ! Collective Variables
           IF ( gci%ncolv%ntot /= 0 ) &
                CALL rattle_roll_colv_ext( gci, particle_set, vel, r_rattle, dt,&
-               irattle_ext, veps, cell, imass, max_sigma, error  )
+               irattle_ext, veps, cell, imass, max_sigma)
           CALL restore_temporary_set ( particle_set, local_particles, vel = vel )
        END IF
-       CALL rattle_ext_info(log_unit,irattle_ext,max_sigma,error)
+       CALL rattle_ext_info(log_unit,irattle_ext,max_sigma)
     END DO Rattle_Inter_Loop
     CALL dump_lagrange_mult(dump_lm,lagrange_mult,local_molecules,molecule_set,gci,&
-         molecule_kind_set,para_env%group,"R",error)
+         molecule_kind_set,para_env%group,"R")
     CALL check_tol ( roll_tol, iroll, 'RATTLE', veps = veps )
     CALL timestop(handle)
   END SUBROUTINE rattle_roll_control
@@ -628,12 +615,11 @@ CONTAINS
 !> \param molecule_kind_set ...
 !> \param group ...
 !> \param id_type ...
-!> \param error ...
 !> \par History
 !>      Teodoro Laino [tlaino] 2007 - Dumps lagrange multipliers
 ! *****************************************************************************
   SUBROUTINE dump_lagrange_mult(dump_lm,log_unit,local_molecules,molecule_set,gci,&
-       molecule_kind_set, group, id_type, error)
+       molecule_kind_set, group, id_type)
     LOGICAL, INTENT(IN)                      :: dump_lm
     INTEGER, INTENT(IN)                      :: log_unit
     TYPE(distribution_1d_type), POINTER      :: local_molecules
@@ -642,7 +628,6 @@ CONTAINS
     TYPE(molecule_kind_type), POINTER        :: molecule_kind_set( : )
     INTEGER, INTENT(IN)                      :: group
     CHARACTER(LEN=1), INTENT(IN)             :: id_type
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'dump_lagrange_mult', &
       routineP = moduleN//':'//routineN
@@ -650,15 +635,14 @@ CONTAINS
     CHARACTER(LEN=default_string_length)     :: label
     INTEGER                                  :: handle, i, ikind, imol, j, &
                                                 my_index, n3x3con, n4x6con, &
-                                                nconstraint, nkind, stat
+                                                nconstraint, nkind
     LOGICAL                                  :: do_ext_constraint, &
-                                                do_int_constraint, failure
+                                                do_int_constraint
     REAL(KIND=dp), DIMENSION(:), POINTER     :: lagr
     TYPE(colvar_counters)                    :: ncolv
     TYPE(molecule_kind_type), POINTER        :: molecule_kind
     TYPE(molecule_type), POINTER             :: molecule
 
-    failure = .FALSE.
     CALL timeset(routineN,handle)
     ! Total number of intramolecular constraints (distributed)
     CALL get_molecule_kind_set(molecule_kind_set=molecule_kind_set,&
@@ -667,8 +651,7 @@ CONTAINS
     do_ext_constraint = (gci%ntot>0)
     IF (dump_lm.AND.(do_int_constraint.OR.do_ext_constraint)) THEN
        nkind = SIZE (  molecule_kind_set )
-       ALLOCATE(lagr(nconstraint),stat=stat)
-       CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+       ALLOCATE(lagr(nconstraint))
        lagr = 0.0_dp
        ! Dump lagrange multipliers for Intramolecular Constraints
        my_index = 0
@@ -730,15 +713,14 @@ CONTAINS
           ELSEIF (id_type=="R") THEN
              label = "Rattle Lagrangian Multipliers:"
           ELSE
-             CPPrecondition(.FALSE.,cp_failure_level,routineP,error,failure)
+             CPABORT("")
           END IF
           WRITE(log_unit,FMT='(A,T40,4F15.9)')TRIM(label),lagr(1:MIN(4,SIZE(lagr)))
           DO j = 5, SIZE(lagr), 4
              WRITE(log_unit,FMT='(T40,4F15.9)')lagr(j:MIN(j+3,SIZE(lagr)))
           END DO
        END IF
-       DEALLOCATE(lagr,stat=stat)
-       CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE(lagr)
     END IF
     CALL timestop(handle)
 
@@ -750,32 +732,27 @@ CONTAINS
 !> \param i ...
 !> \param ishake_int ...
 !> \param max_sigma ...
-!> \param error ...
 !> \par History
 !>      Teodoro Laino [tlaino] 2007 - University of Zurich
 ! *****************************************************************************
-  SUBROUTINE shake_int_info(log_unit,i,ishake_int,max_sigma,error)
+  SUBROUTINE shake_int_info(log_unit,i,ishake_int,max_sigma)
     INTEGER, INTENT(IN)                      :: log_unit, i, ishake_int
     REAL(KIND=dp), INTENT(IN)                :: max_sigma
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'shake_int_info', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
     IF (log_unit>0) THEN
        ! Dump info if requested
        WRITE(log_unit,'("SHAKE_INFO|",2X,2(A,I6),A,F15.9)')&
             "Molecule Nr.:",i," Nr. Iterations:",ishake_int," Max. Err.:",max_sigma
     END IF
     ! Notify a not converged SHAKE
-    CALL cp_assert(ishake_int<=Max_Shake_Iter,cp_warning_level,cp_assertion_failed,routineP,&
-         "Shake NOT converged in "//cp_to_string(Max_Shake_Iter)//" iterations in the "//&
-         " intramolecular constraint loop for Molecule nr. "//cp_to_string(i)//&
-         ". CP2K continues but results could be meaningless. "//&
-CPSourceFileRef)
+    IF(ishake_int>Max_Shake_Iter)&
+       CALL cp_warn(__LOCATION__,&
+            "Shake NOT converged in "//cp_to_string(Max_Shake_Iter)//" iterations in the "//&
+            " intramolecular constraint loop for Molecule nr. "//cp_to_string(i)//&
+            ". CP2K continues but results could be meaningless. ")
   END SUBROUTINE shake_int_info
 
 ! *****************************************************************************
@@ -783,21 +760,16 @@ CPSourceFileRef)
 !> \param log_unit ...
 !> \param ishake_ext ...
 !> \param max_sigma ...
-!> \param error ...
 !> \par History
 !>      Teodoro Laino [tlaino] 2007 - University of Zurich
 ! *****************************************************************************
-  SUBROUTINE shake_ext_info(log_unit,ishake_ext,max_sigma,error)
+  SUBROUTINE shake_ext_info(log_unit,ishake_ext,max_sigma)
     INTEGER, INTENT(IN)                      :: log_unit, ishake_ext
     REAL(KIND=dp), INTENT(IN)                :: max_sigma
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'shake_ext_info', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
     IF (log_unit>0) THEN
        ! Dump info if requested
        WRITE(log_unit,'("SHAKE_INFO|",2X,A,I6,A,F15.9)')&
@@ -805,10 +777,10 @@ CPSourceFileRef)
             " Max. Err.:",max_sigma
     END IF
     ! Notify a not converged SHAKE
-    CALL cp_assert(ishake_ext<=Max_Shake_Iter,cp_warning_level,cp_assertion_failed,routineP,&
-         "Shake NOT converged in "//cp_to_string(Max_Shake_Iter)//" iterations in the "//&
-         " intermolecular constraint. CP2K continues but results could be meaningless. "//&
-CPSourceFileRef)
+    IF(ishake_ext>Max_Shake_Iter)&
+       CALL cp_warn(__LOCATION__,&
+            "Shake NOT converged in "//cp_to_string(Max_Shake_Iter)//" iterations in the "//&
+            " intermolecular constraint. CP2K continues but results could be meaningless. ")
   END SUBROUTINE shake_ext_info
 
 ! *****************************************************************************
@@ -817,32 +789,27 @@ CPSourceFileRef)
 !> \param i ...
 !> \param irattle_int ...
 !> \param max_sigma ...
-!> \param error ...
 !> \par History
 !>      Teodoro Laino [tlaino] 2007 - University of Zurich
 ! *****************************************************************************
-  SUBROUTINE rattle_int_info(log_unit,i,irattle_int,max_sigma,error)
+  SUBROUTINE rattle_int_info(log_unit,i,irattle_int,max_sigma)
     INTEGER, INTENT(IN)                      :: log_unit, i, irattle_int
     REAL(KIND=dp), INTENT(IN)                :: max_sigma
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'rattle_int_info', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
     IF (log_unit>0) THEN
        ! Dump info if requested
        WRITE(log_unit,'("RATTLE_INFO|",1X,2(A,I6),A,F15.9)')&
             "Molecule Nr.:",i," Nr. Iterations:",irattle_int," Max. Err.:",max_sigma
     END IF
     ! Notify a not converged RATTLE
-    CALL cp_assert(irattle_int<=Max_shake_Iter,cp_warning_level,cp_assertion_failed,routineP,&
-         "Rattle NOT converged in "//cp_to_string(Max_Shake_Iter)//" iterations in the "//&
-         " intramolecular constraint loop for Molecule nr. "//cp_to_string(i)//&
-         ". CP2K continues but results could be meaningless. "//&
-CPSourceFileRef)
+    IF(irattle_int>Max_shake_Iter)&
+       CALL cp_warn(__LOCATION__,&
+            "Rattle NOT converged in "//cp_to_string(Max_Shake_Iter)//" iterations in the "//&
+            " intramolecular constraint loop for Molecule nr. "//cp_to_string(i)//&
+            ". CP2K continues but results could be meaningless. ")
   END SUBROUTINE rattle_int_info
 
 ! *****************************************************************************
@@ -850,21 +817,16 @@ CPSourceFileRef)
 !> \param log_unit ...
 !> \param irattle_ext ...
 !> \param max_sigma ...
-!> \param error ...
 !> \par History
 !>      Teodoro Laino [tlaino] 2007 - University of Zurich
 ! *****************************************************************************
-  SUBROUTINE rattle_ext_info(log_unit,irattle_ext,max_sigma,error)
+  SUBROUTINE rattle_ext_info(log_unit,irattle_ext,max_sigma)
     INTEGER, INTENT(IN)                      :: log_unit, irattle_ext
     REAL(KIND=dp), INTENT(IN)                :: max_sigma
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'rattle_ext_info', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
     IF (log_unit>0) THEN
        ! Dump info if requested
        WRITE(log_unit,'("RATTLE_INFO|",1X,A,I6,A,F15.9)')&
@@ -872,10 +834,10 @@ CPSourceFileRef)
             " Max. Err.:",max_sigma
     END IF
     ! Notify a not converged RATTLE
-    CALL cp_assert(irattle_ext<=Max_shake_Iter,cp_warning_level,cp_assertion_failed,routineP,&
-         "Rattle NOT converged in "//cp_to_string(Max_Shake_Iter)//" iterations in the "//&
-         " intermolecular constraint. CP2K continues but results could be meaningless. "//&
-CPSourceFileRef)
+    IF(irattle_ext>Max_shake_Iter)&
+       CALL cp_warn(__LOCATION__,&
+            "Rattle NOT converged in "//cp_to_string(Max_Shake_Iter)//" iterations in the "//&
+            " intermolecular constraint. CP2K continues but results could be meaningless. ")
   END SUBROUTINE rattle_ext_info
 
 ! *****************************************************************************
@@ -887,12 +849,11 @@ CPSourceFileRef)
 !> \param molecule_kind_set ...
 !> \param dt ...
 !> \param root_section ...
-!> \param error ...
 !> \date    02.2008
 !> \author  Teodoro Laino [tlaino] - University of Zurich
 ! *****************************************************************************
   SUBROUTINE shake_update_targets( gci, local_molecules, molecule_set, &
-       molecule_kind_set, dt, root_section, error )
+       molecule_kind_set, dt, root_section)
 
     TYPE(global_constraint_type), POINTER    :: gci
     TYPE(distribution_1d_type), POINTER      :: local_molecules
@@ -900,7 +861,6 @@ CPSourceFileRef)
     TYPE(molecule_kind_type), POINTER        :: molecule_kind_set( : )
     REAL(kind=dp), INTENT(in)                :: dt
     TYPE(section_vals_type), POINTER         :: root_section
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'shake_update_targets', &
       routineP = moduleN//':'//routineN
@@ -914,7 +874,7 @@ CPSourceFileRef)
     TYPE(section_vals_type), POINTER         :: motion_section
 
     CALL timeset(routineN,handle)
-    motion_section => section_vals_get_subs_vals(root_section,"MOTION",error=error)
+    motion_section => section_vals_get_subs_vals(root_section,"MOTION")
     nkind = SIZE ( molecule_kind_set )
     do_ext_constraint = (gci%ntot/=0)
     ! Intramolecular Constraints
@@ -927,13 +887,13 @@ CPSourceFileRef)
           CALL get_molecule_kind ( molecule_kind, ncolv=ncolv )
 
           ! Updating TARGETS for Collective Variables only
-          IF ( ncolv%ntot /= 0 ) CALL shake_update_colv_int(molecule, dt, motion_section, error)
+          IF ( ncolv%ntot /= 0 ) CALL shake_update_colv_int(molecule, dt, motion_section)
        END DO
     END DO MOL
     ! Intermolecular constraints
     IF (do_ext_constraint) THEN
        ! Collective Variables
-       IF (gci%ncolv%ntot/= 0) CALL shake_update_colv_ext(gci, dt, motion_section, error)
+       IF (gci%ncolv%ntot/= 0) CALL shake_update_colv_ext(gci, dt, motion_section)
     END IF
     CALL timestop(handle)
   END SUBROUTINE shake_update_targets

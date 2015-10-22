@@ -24,9 +24,8 @@ MODULE al_system_dynamics
   USE particle_types,                  ONLY: particle_type
   USE thermostat_utils,                ONLY: ke_region_particles,&
                                              vel_rescale_particles
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "../../common/cp_common_uses.f90"
+#include "../../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -49,11 +48,10 @@ CONTAINS
 !> \param local_particles ...
 !> \param group ...
 !> \param vel ...
-!> \param error ...
 !> \author Noam Bernstein [noamb] 02.2012
 ! *****************************************************************************
   SUBROUTINE al_particles( al, force_env, molecule_kind_set, molecule_set,  &
-       particle_set, local_molecules, local_particles, group, vel, error)
+       particle_set, local_molecules, local_particles, group, vel)
 
     TYPE(al_system_type), POINTER            :: al
     TYPE(force_env_type), POINTER            :: force_env
@@ -64,7 +62,6 @@ CONTAINS
                                                 local_particles
     INTEGER, INTENT(IN)                      :: group
     REAL(KIND=dp), INTENT(INOUT), OPTIONAL   :: vel(:,:)
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'al_particles', &
       routineP = moduleN//':'//routineN
@@ -82,44 +79,44 @@ CONTAINS
 
     IF (al%tau_nh <= 0.0_dp) THEN
        CALL al_OU_step(0.5_dp, al, force_env, map_info, molecule_kind_set, molecule_set, &
-         particle_set, local_molecules, local_particles, vel, error)
+         particle_set, local_molecules, local_particles, vel)
       IF (debug_this_module) &
          CALL dump_vel(molecule_kind_set, molecule_set, local_molecules, particle_set, vel, "post OU")
     ELSE
        ! quarter step of Langevin using Ornstein-Uhlenbeck
        CALL al_OU_step(0.25_dp, al, force_env, map_info, molecule_kind_set, molecule_set, &
-         particle_set, local_molecules, local_particles, vel, error)
+         particle_set, local_molecules, local_particles, vel)
       IF (debug_this_module) &
          CALL dump_vel(molecule_kind_set, molecule_set, local_molecules, particle_set, vel, "post 1st OU")
 
        ! Compute the kinetic energy for the region to thermostat for the (T dependent chi step)
        CALL ke_region_particles(map_info, particle_set, molecule_kind_set,&
-            local_molecules, molecule_set, group, vel=vel, error=error)
+            local_molecules, molecule_set, group, vel=vel)
        ! quarter step of chi, and set vel drag factors for a half step
-       CALL al_NH_quarter_step(al, map_info, set_half_step_vel_factors=.TRUE., error=error)
+       CALL al_NH_quarter_step(al, map_info, set_half_step_vel_factors=.TRUE.)
 
        ! Now scale the particle velocities for a NH half step
        CALL vel_rescale_particles(map_info, molecule_kind_set, molecule_set, particle_set, &
-            local_molecules, my_shell_adiabatic, vel=vel, error=error)
+            local_molecules, my_shell_adiabatic, vel=vel)
        ! Recompute the kinetic energy for the region to thermostat (for the T dependent chi step)
        CALL ke_region_particles(map_info, particle_set, molecule_kind_set,&
-            local_molecules, molecule_set, group, vel=vel, error=error)
+            local_molecules, molecule_set, group, vel=vel)
       IF (debug_this_module) &
          CALL dump_vel(molecule_kind_set, molecule_set, local_molecules, particle_set, vel, "post rescale_vel")
 
        ! quarter step of chi
-       CALL al_NH_quarter_step(al, map_info, set_half_step_vel_factors=.FALSE., error=error)
+       CALL al_NH_quarter_step(al, map_info, set_half_step_vel_factors=.FALSE.)
 
        ! quarter step of Langevin using Ornstein-Uhlenbeck
        CALL al_OU_step(0.25_dp, al, force_env, map_info, molecule_kind_set, molecule_set, &
-         particle_set, local_molecules, local_particles, vel, error)
+         particle_set, local_molecules, local_particles, vel)
       IF (debug_this_module) &
          CALL dump_vel(molecule_kind_set, molecule_set, local_molecules, particle_set, vel, "post 2nd OU")
    ENDIF
 
     ! Recompute the final kinetic energy for the region to thermostat
     CALL ke_region_particles(map_info, particle_set, molecule_kind_set,&
-         local_molecules, molecule_set, group, vel=vel, error=error)
+         local_molecules, molecule_set, group, vel=vel)
 
     CALL timestop(handle)
   END SUBROUTINE al_particles
@@ -175,10 +172,9 @@ CONTAINS
 !> \param local_molecules ...
 !> \param local_particles ...
 !> \param vel ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE al_OU_step(step, al, force_env, map_info, molecule_kind_set, molecule_set, &
-    particle_set, local_molecules, local_particles, vel, error)
+    particle_set, local_molecules, local_particles, vel)
     REAL(dp), INTENT(in)                     :: step
     TYPE(al_system_type), POINTER            :: al
     TYPE(force_env_type), POINTER            :: force_env
@@ -189,15 +185,14 @@ CONTAINS
     TYPE(distribution_1d_type), POINTER      :: local_molecules, &
                                                 local_particles
     REAL(KIND=dp), INTENT(INOUT), OPTIONAL   :: vel(:,:)
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'al_OU_step', &
       routineP = moduleN//':'//routineN
 
     INTEGER :: first_atom, i, ii, ikind, imap, imol, imol_local, ipart, &
       iparticle_kind, iparticle_local, last_atom, nmol_local, nparticle, &
-      nparticle_kind, nparticle_local, stat
-    LOGICAL                                  :: check, failure, present_vel
+      nparticle_kind, nparticle_local
+    LOGICAL                                  :: check, present_vel
     REAL(KIND=dp)                            :: mass
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :)                        :: w(:,:)
@@ -223,27 +218,26 @@ CONTAINS
 
     nparticle = SIZE(particle_set)
     nparticle_kind = SIZE(local_particles%n_el)
-    ALLOCATE (w(3,nparticle),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (w(3,nparticle))
     w(:,:) = 0.0_dp
     check=(nparticle_kind <= SIZE(local_particles%n_el) .AND. nparticle_kind <= SIZE(local_particles%list))
-    CPPrecondition(check, cp_failure_level, routineP, error, failure)
+    CPASSERT(check)
     check=ASSOCIATED(local_particles%local_particle_set)
-    CPPrecondition(check, cp_failure_level, routineP, error, failure)
+    CPASSERT(check)
     DO iparticle_kind=1,nparticle_kind
       nparticle_local = local_particles%n_el(iparticle_kind)
       check=(nparticle_local <= SIZE(local_particles%list(iparticle_kind)%array))
-      CPPrecondition( check, cp_failure_level, routineP, error, failure)
+      CPASSERT(check)
       DO iparticle_local = 1, nparticle_local
           ipart = local_particles%list(iparticle_kind)%array(iparticle_local)
           rng_stream => local_particles%local_particle_set(iparticle_kind)%rng(iparticle_local)%stream
-          w(1,ipart) = next_random_number(rng_stream,variance=1.0_dp,error=error)
-          w(2,ipart) = next_random_number(rng_stream,variance=1.0_dp,error=error)
-          w(3,ipart) = next_random_number(rng_stream,variance=1.0_dp,error=error)
+          w(1,ipart) = next_random_number(rng_stream,variance=1.0_dp)
+          w(2,ipart) = next_random_number(rng_stream,variance=1.0_dp)
+          w(3,ipart) = next_random_number(rng_stream,variance=1.0_dp)
        END DO
     END DO
 
-    CALL fix_atom_control(force_env,error,w)
+    CALL fix_atom_control(force_env,w)
 
     ii = 0
     DO ikind=1, SIZE(molecule_kind_set)
@@ -267,8 +261,7 @@ CONTAINS
       END DO
     END DO
 
-    DEALLOCATE (w,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE (w)
 
   END SUBROUTINE al_OU_step
 
@@ -277,14 +270,12 @@ CONTAINS
 !> \param al ...
 !> \param map_info ...
 !> \param set_half_step_vel_factors ...
-!> \param error ...
 !> \author Noam Bernstein [noamb] 02.2012
 ! *****************************************************************************
-  SUBROUTINE al_NH_quarter_step(al, map_info, set_half_step_vel_factors, error)
+  SUBROUTINE al_NH_quarter_step(al, map_info, set_half_step_vel_factors)
     TYPE(al_system_type), POINTER            :: al
     TYPE(map_info_type), POINTER             :: map_info
     LOGICAL, INTENT(in)                      :: set_half_step_vel_factors
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'al_NH_quarter_step', &
       routineP = moduleN//':'//routineN

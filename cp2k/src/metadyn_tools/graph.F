@@ -33,6 +33,8 @@ PROGRAM graph
   USE machine,                         ONLY: m_getarg,&
                                              m_iargc
   USE mathconstants,                   ONLY: pi
+#include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -48,7 +50,7 @@ PROGRAM graph
                                               inds(:), iperd(:), iprd(:), &
                                               ngrid(:), nn(:,:), nn_max(:), &
                                               tmp(:)
-  LOGICAL                                  :: failure, fix, l_cp2k, l_cpmd, &
+  LOGICAL                                  :: fix, l_cp2k, l_cpmd, &
                                               l_dp, l_fes_int, l_fmin, &
                                               l_grid, l_math, l_orac, &
                                               l_pmin, lstride, l_popt, l_int,&
@@ -61,7 +63,6 @@ PROGRAM graph
   TYPE(mep_input_data_type)                :: mep_input_data
 
 
-  failure=.FALSE.
   ! Initialize variables
   nprd    = 0
   ndim    = 1
@@ -122,7 +123,7 @@ PROGRAM graph
      WRITE(iw,*)''
      WRITE(iw,*)'DEFAULT OUTPUT: fes.dat'
      WRITE(iw,*)''
-     STOP  "Please provide arguments to run FES!"
+     CPABORT("Please provide arguments to run FES!")
   ENDIF
   
   DO i=1,argcount
@@ -197,7 +198,7 @@ PROGRAM graph
 
   END DO
   IF (COUNT((/l_orac,l_cp2k,l_cpmd/))/=1) &
-       STOP "Error! You've to specify either ORAC, CP2K or CPMD!!"
+       CPABORT("Error! You've to specify either ORAC, CP2K or CPMD!!")
 
   ! For CPMD move filename to colvar_mtd
   IF (l_cpmd) THEN
@@ -211,15 +212,15 @@ PROGRAM graph
   ! Basic Allocation
   ndw = ndim
   ALLOCATE(ngrid(ndim),stat=stat)
-  IF (stat/=0) STOP "Allocation Error"
+  IF (stat/=0) CPABORT("Allocation Error")
   ALLOCATE(dp_grid(ndim),stat=stat)
-  IF (stat/=0) STOP "Allocation Error"
+  IF (stat/=0) CPABORT("Allocation Error")
   ALLOCATE(idw(ndw),stat=stat)
-  IF (stat/=0) STOP "Allocation Error"
+  IF (stat/=0) CPABORT("Allocation Error")
   ALLOCATE(iperd(ndim),stat=stat)
-  IF (stat/=0) STOP "Allocation Error"
+  IF (stat/=0) CPABORT("Allocation Error")
   ALLOCATE(iprd(nprd),stat=stat)
-  IF (stat/=0) STOP "Allocation Error"
+  IF (stat/=0) CPABORT("Allocation Error")
   DO i = 1, ndim
      idw(i)   = i
      iperd(i) = 0
@@ -229,8 +230,7 @@ PROGRAM graph
      CALL M_GETARG(i,wq_char)
 
      IF (INDEX(wq_char,'-ndw').NE.0)THEN
-        DEALLOCATE(idw,stat=stat)
-        IF (stat/=0) STOP "Allocation Error"
+        DEALLOCATE(idw)
 
         ndw=0
         ndw_loop: DO ix=i+1,argcount
@@ -243,7 +243,7 @@ PROGRAM graph
         ENDDO ndw_loop
 
         ALLOCATE(idw(ndw),stat=stat)
-        IF (stat/=0) STOP "Allocation Error"
+        IF (stat/=0) CPABORT("Allocation Error")
 
         DO id=1,ndw
            CALL M_GETARG(i+id,wq_char)
@@ -262,10 +262,9 @@ PROGRAM graph
            ENDIF
         ENDDO nprd_loop
 
-        DEALLOCATE(iprd,stat=stat)
-        IF (stat/=0) STOP "Allocation Error"
+        DEALLOCATE(iprd)
         ALLOCATE(iprd(nprd),stat=stat)
-        IF (stat/=0) STOP "Allocation Error"
+        IF (stat/=0) CPABORT("Allocation Error")
 
         DO id=1,nprd
            CALL M_GETARG(i+id,wq_char)
@@ -342,7 +341,7 @@ PROGRAM graph
 
      END DO
      IF (ANY(mep_input_data%minima==HUGE(0.0_dp))) &
-          STOP "-find-path requires the specification of -point-a and -point-b !"
+          CPABORT("-find-path requires the specification of -point-a and -point-b !")
   ELSE
      ALLOCATE(mep_input_data%minima(0,0))
   END IF
@@ -390,7 +389,7 @@ PROGRAM graph
 
   !  Defines the order of the collectiv var.: first the "wanted" ones, then the others
   ALLOCATE(i_map(ndim),stat=stat)
-  IF (stat/=0) STOP "Allocation Error" 
+  IF (stat/=0) CPABORT("Allocation Error")
   i_map = 0
 
   DO id=1,ndw
@@ -416,13 +415,12 @@ PROGRAM graph
   ! Grid size
   IF(l_grid) THEN
      ALLOCATE(tmp(ndim),stat=stat)
-     IF (stat/=0) STOP "Allocation Error"
+     IF (stat/=0) CPABORT("Allocation Error")
      tmp=ngrid
      DO i=1,ndim
         ngrid(i_map(i))=tmp(i)
      END DO
-     DEALLOCATE(tmp,stat=stat)
-     IF (stat/=0) STOP "Allocation Error" 
+     DEALLOCATE(tmp)
   ELSE
      ngrid=100
   END IF
@@ -448,25 +446,25 @@ PROGRAM graph
   END IF
   
   ALLOCATE( x0(ndim)         , stat=stat )
-  IF (stat/=0) STOP "Allocation Error"
+  IF (stat/=0) CPABORT("Allocation Error")
   ALLOCATE( xf(ndim)         , stat=stat )
-  IF (stat/=0) STOP "Allocation Error"
+  IF (stat/=0) CPABORT("Allocation Error")
   ALLOCATE( ss0(ndim,nt)     , stat=stat )
-  IF (stat/=0) STOP "Allocation Error"
+  IF (stat/=0) CPABORT("Allocation Error")
   ALLOCATE( delta_s(ndim,nt) , stat=stat )
-  IF (stat/=0) STOP "Allocation Error"
+  IF (stat/=0) CPABORT("Allocation Error")
   ALLOCATE( ww(nt)           , stat=stat )
-  IF (stat/=0) STOP "Allocation Error"
+  IF (stat/=0) CPABORT("Allocation Error")
   ALLOCATE( ind(ndim)        , stat=stat )
-  IF (stat/=0) STOP "Allocation Error"
+  IF (stat/=0) CPABORT("Allocation Error")
   ALLOCATE( inds(ndim)       , stat=stat )
-  IF (stat/=0) STOP "Allocation Error"
+  IF (stat/=0) CPABORT("Allocation Error")
   ALLOCATE( nn(ndim,nt)      , stat=stat )
-  IF (stat/=0) STOP "Allocation Error"
+  IF (stat/=0) CPABORT("Allocation Error")
   ALLOCATE( nn_max(ndim)     , stat=stat )
-  IF (stat/=0) STOP "Allocation Error"
+  IF (stat/=0) CPABORT("Allocation Error")
   ALLOCATE( dp_cut(ndim)     , stat=stat )
-  IF (stat/=0) STOP "Allocation Error"
+  IF (stat/=0) CPABORT("Allocation Error")
 
   IF      (l_cp2k) THEN
      CALL get_val_res(unit=unit_nr,section="&METADYN",subsection="&SPAWNED_HILLS_POS")
@@ -640,7 +638,7 @@ PROGRAM graph
         ELSE
            WRITE(out3_stride,'(A,i3)')TRIM(out3),ncount
         END IF
-        CALL open_file(unit_number=unit_nr,file_name=out3_stride)
+        CALL open_file(unit_number=unit_nr,file_name=out3_stride,file_action="WRITE",file_status="UNKNOWN",file_form="FORMATTED")
         ind   = 1
         CALL fes_only_write(ndim, fes,  ind,  ndim, ngrid, dp_grid, ndw, l_fes_int, unit_nr)
         CALL close_file(unit_nr)
@@ -674,49 +672,31 @@ PROGRAM graph
   IF (l_fmin) CALL fes_min(fes, ndim, iperd, ngrid, dp_grid, x0, ndw)
 
   ! If requested find  or opt path
-  IF ((l_pmin) .AND. (l_popt)) STOP "USE EITHER -find-path OR -opt-path"
+  IF ((l_pmin) .AND. (l_popt)) CPABORT("USE EITHER -find-path OR -opt-path")
   IF (l_pmin) l_int=.TRUE.
   IF (l_popt) l_int=.FALSE.
 
   IF ((l_pmin) .OR. (l_popt)) CALL fes_path(fes, ndim, ngrid, dp_grid, iperd, x0, ndw, mep_input_data, l_int)
   
   ! Free memory
-  DEALLOCATE(ngrid,stat=stat)
-  IF (stat/=0) STOP "Deallocation Error"
-  DEALLOCATE(dp_grid,stat=stat)
-  IF (stat/=0) STOP "Deallocation Error"
-  DEALLOCATE(idw,stat=stat)
-  IF (stat/=0) STOP "Deallocation Error"
-  DEALLOCATE(iperd,stat=stat)
-  IF (stat/=0) STOP "Deallocation Error"
-  DEALLOCATE(x0,stat=stat )
-  IF (stat/=0) STOP "Deallocation Error"
-  DEALLOCATE(xf,stat=stat )
-  IF (stat/=0) STOP "Deallocation Error"
-  DEALLOCATE(ss0,stat=stat )
-  IF (stat/=0) STOP "Deallocation Error"
-  DEALLOCATE(delta_s,stat=stat )
-  IF (stat/=0) STOP "Deallocation Error"
-  DEALLOCATE(ww,stat=stat )
-  IF (stat/=0) STOP "Deallocation Error"
-  DEALLOCATE(ind,stat=stat )
-  IF (stat/=0) STOP "Deallocation Error"
-  DEALLOCATE(inds,stat=stat )
-  IF (stat/=0) STOP "Deallocation Error"
-  DEALLOCATE(nn,stat=stat )
-  IF (stat/=0) STOP "Deallocation Error"
-  DEALLOCATE(nn_max,stat=stat )
-  IF (stat/=0) STOP "Deallocation Error"
-  DEALLOCATE(dp_cut,stat=stat )
-  IF (stat/=0) STOP "Deallocation Error"
-  DEALLOCATE(i_map,stat=stat )
-  IF (stat/=0) STOP "Deallocation Error"
-  DEALLOCATE(fes,stat=stat )
-  IF (stat/=0) STOP "Deallocation Error"
-  DEALLOCATE(iprd,stat=stat )
-  IF (stat/=0) STOP "Deallocation Error"
-  DEALLOCATE(mep_input_data%minima,stat=stat)
-  IF (stat/=0) STOP "Deallocation Error"
+  DEALLOCATE(ngrid)
+  DEALLOCATE(dp_grid)
+  DEALLOCATE(idw)
+  DEALLOCATE(iperd)
+  DEALLOCATE(x0)
+  DEALLOCATE(xf)
+  DEALLOCATE(ss0)
+  DEALLOCATE(delta_s)
+  DEALLOCATE(ww)
+  DEALLOCATE(ind)
+  DEALLOCATE(inds)
+  DEALLOCATE(nn)
+  DEALLOCATE(nn_max)
+  DEALLOCATE(dp_cut)
+  DEALLOCATE(i_map)
+  DEALLOCATE(fes)
+  DEALLOCATE(iprd)
+  DEALLOCATE(mep_input_data%minima)
 
   ! Terminate FES
   WRITE(iw,'(/,A,/)') "FES| NORMAL FES TERMINATION."

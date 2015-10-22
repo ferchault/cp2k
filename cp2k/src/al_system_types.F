@@ -18,6 +18,7 @@ MODULE al_system_types
   USE kinds,                           ONLY: dp
   USE simpar_types,                    ONLY: simpar_type
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -55,15 +56,12 @@ CONTAINS
 !> \param al ...
 !> \param simpar ...
 !> \param section ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Noam Bernstein [noamb] 02.2012
 ! *****************************************************************************
-  SUBROUTINE al_init(al, simpar, section, error)
+  SUBROUTINE al_init(al, simpar, section)
     TYPE(al_system_type), POINTER            :: al
     TYPE(simpar_type), POINTER               :: simpar
     TYPE(section_vals_type), POINTER         :: section
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'al_init', &
       routineP = moduleN//':'//routineN
@@ -75,69 +73,54 @@ CONTAINS
     al%dt_fact=1.0_dp
     al%dt=simpar%dt
     CALL cite_reference(Jones2011)
-    CALL section_vals_val_get(section,"TIMECON_NH",r_val=al%tau_nh,error=error)
-    CALL section_vals_val_get(section,"TIMECON_LANGEVIN",r_val=al%tau_langevin,error=error)
-    CALL create_map_info_type(al%map_info, error)
+    CALL section_vals_val_get(section,"TIMECON_NH",r_val=al%tau_nh)
+    CALL section_vals_val_get(section,"TIMECON_LANGEVIN",r_val=al%tau_langevin)
+    CALL create_map_info_type(al%map_info)
     
   END SUBROUTINE al_init
 
 ! *****************************************************************************
 !> \brief Initialize NVT type for AD_LANGEVIN thermostat
 !> \param al ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Noam Bernstein [noamb]  02.2012
 ! *****************************************************************************
-  SUBROUTINE al_thermo_create(al, error)
+  SUBROUTINE al_thermo_create(al)
     TYPE(al_system_type), POINTER            :: al
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'al_thermo_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: i
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :, :)                     :: seed
 
-    failure = .FALSE.
-    CPPrecondition(ASSOCIATED(al),cp_fatal_level,routineP,error,failure)
-    CPPrecondition(.NOT.ASSOCIATED(al%nvt),cp_fatal_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(al))
+    CPASSERT(.NOT.ASSOCIATED(al%nvt))
     
-    ALLOCATE ( al%nvt(al%loc_num_al),stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE ( al%nvt(al%loc_num_al))
     DO i = 1, al%loc_num_al
        al%nvt(i)%chi = 0.0_dp
     END DO
     ! Initialize the gaussian stream random number
-    ALLOCATE (seed(3,2,al%glob_num_al),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (seed(3,2,al%glob_num_al))
 
   END SUBROUTINE al_thermo_create
 
 ! *****************************************************************************
 !> \brief Deallocate type for AD_LANGEVIN thermostat
 !> \param al ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Noam Bernstein [noamb] 02.2012
 ! *****************************************************************************
-  SUBROUTINE al_dealloc ( al, error )
+  SUBROUTINE al_dealloc ( al)
     TYPE(al_system_type), POINTER            :: al
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'al_dealloc', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
     IF (ASSOCIATED(al)) THEN
-       CALL al_thermo_dealloc(al%nvt, error)
-       CALL release_map_info_type(al%map_info, error)
-       DEALLOCATE (al, STAT=stat)
-       CPPrecondition(stat==0,cp_fatal_level,routineP,error,failure)
+       CALL al_thermo_dealloc(al%nvt)
+       CALL release_map_info_type(al%map_info)
+       DEALLOCATE (al)
     ENDIF
 
   END SUBROUTINE al_dealloc
@@ -145,25 +128,17 @@ CONTAINS
 ! *****************************************************************************
 !> \brief Deallocate NVT type for AD_LANGEVIN thermostat
 !> \param nvt ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Noam Bernstein [noamb] 02.2012
 ! *****************************************************************************
-  SUBROUTINE al_thermo_dealloc ( nvt, error )
+  SUBROUTINE al_thermo_dealloc ( nvt)
     TYPE(al_thermo_type), DIMENSION(:), &
       POINTER                                :: nvt
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'al_thermo_dealloc', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
     IF (ASSOCIATED(nvt)) THEN
-       DEALLOCATE (nvt, STAT=stat)
-       CPPrecondition(stat==0,cp_fatal_level,routineP,error,failure)
+       DEALLOCATE (nvt)
     ENDIF
   END SUBROUTINE al_thermo_dealloc
   

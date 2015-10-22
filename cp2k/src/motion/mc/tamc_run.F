@@ -10,8 +10,7 @@
 !> \author Alin M Elena
 ! *****************************************************************************
 MODULE tamc_run
-!!!!!!!!!!
-!!!!!!!!!! integrators
+
   USE atomic_kind_list_types,          ONLY: atomic_kind_list_type
   USE atomic_kind_types,               ONLY: atomic_kind_type
   USE averages_types,                  ONLY: average_quantities_type
@@ -127,14 +126,13 @@ MODULE tamc_run
   USE thermostat_methods,              ONLY: create_thermostats
   USE thermostat_types,                ONLY: release_thermostats,&
                                              thermostats_type
-  USE timings,                         ONLY: timeset,&
-                                             timestop
   USE virial_methods,                  ONLY: virial_evaluate
   USE virial_types,                    ONLY: virial_type
   USE wiener_process,                  ONLY: create_wiener_process,&
                                              create_wiener_process_cv
 !!!!! monte carlo part
 #include "../../common/cp_common_uses.f90"
+#include "../../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -152,17 +150,15 @@ CONTAINS
 !> \param force_env ...
 !> \param globenv ...
 !> \param averages ...
-!> \param error ...
 !> \author Alin M Elena
 !> \note it computes the forces using QuickStep.
 ! *****************************************************************************
-SUBROUTINE qs_tamc(force_env, globenv,averages,error)
+SUBROUTINE qs_tamc(force_env, globenv,averages)
 
     TYPE(force_env_type), POINTER            :: force_env
     TYPE(global_environment_type), POINTER   :: globenv
     TYPE(average_quantities_type), &
       OPTIONAL, POINTER                      :: averages
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'qs_tamc', &
       routineP = moduleN//':'//routineN
@@ -171,7 +167,7 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
     INTEGER :: handle, i, initialStep, iprint, isos, istep, j, md_stride, &
       nmccycles, output_unit, rand2skip, run_type_id
     INTEGER, POINTER                         :: itimes
-    LOGICAL                                  :: check, explicit, failure, &
+    LOGICAL                                  :: check, explicit, &
                                                 my_rm_restart_info, save_mem, &
                                                 should_stop
     REAL(KIND=dp)                            :: auxRandom, inittime, rval, &
@@ -212,79 +208,77 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
     inittime=0.0_dp
 
     CALL timeset(routineN,handle)
-    failure = .FALSE.
     my_rm_restart_info = .TRUE.
     NULLIFY(md_env, para_env,fs_section, virial)
     para_env       => force_env%para_env
-    motion_section => section_vals_get_subs_vals(force_env%root_section,"MOTION",error=error)
-    md_section     => section_vals_get_subs_vals(motion_section,"MD",error=error)
+    motion_section => section_vals_get_subs_vals(force_env%root_section,"MOTION")
+    md_section     => section_vals_get_subs_vals(motion_section,"MD")
 
     ! Real call to MD driver - Low Level
-    CALL md_env_create(md_env, md_section, para_env, force_env=force_env, error=error)
-    IF (PRESENT(averages)) CALL set_md_env(md_env, averages=averages, error=error)
+    CALL md_env_create(md_env, md_section, para_env, force_env=force_env)
+    IF (PRESENT(averages)) CALL set_md_env(md_env, averages=averages)
 
 
 
-    CPPrecondition(ASSOCIATED(globenv),cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(force_env),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(globenv))
+    CPASSERT(ASSOCIATED(force_env))
 
-    failure=.FALSE.
     NULLIFY (particles, cell, simpar, itimes, used_time, subsys, &
          md_ener, thermostats, barostat, reftraj, force_env_section, &
          reftraj_section, work_section, atomic_kinds, &
          local_particles, time, fe_env, free_energy_section, &
          constraint_section, thermal_regions, subsys_i)
-    logger   => cp_error_get_logger(error)
+    logger   => cp_get_default_logger()
     para_env => force_env%para_env
 
-    global_section => section_vals_get_subs_vals(force_env%root_section,"GLOBAL",error=error)
-    free_energy_section =>section_vals_get_subs_vals(motion_section,"FREE_ENERGY",error=error)
-    constraint_section =>section_vals_get_subs_vals(motion_section,"CONSTRAINT",error=error)
-    CALL section_vals_val_get(global_section,"SAVE_MEM",l_val=save_mem,error=error)
+    global_section => section_vals_get_subs_vals(force_env%root_section,"GLOBAL")
+    free_energy_section =>section_vals_get_subs_vals(motion_section,"FREE_ENERGY")
+    constraint_section =>section_vals_get_subs_vals(motion_section,"CONSTRAINT")
+    CALL section_vals_val_get(global_section,"SAVE_MEM",l_val=save_mem)
 
-    CALL section_vals_val_get(global_section,"RUN_TYPE", i_val=run_type_id,error=error)
+    CALL section_vals_val_get(global_section,"RUN_TYPE", i_val=run_type_id)
 
-    CALL create_simpar_type(simpar, error)
+    CALL create_simpar_type(simpar)
     force_env_section => force_env%force_env_section
-    subsys_section => section_vals_get_subs_vals(force_env_section,"SUBSYS",error=error)
-    CALL cp_add_iter_level(logger%iter_info,"MD",error=error)
-    CALL cp_iterate(logger%iter_info,iter_nr=initialStep,error=error)
+    subsys_section => section_vals_get_subs_vals(force_env_section,"SUBSYS")
+    CALL cp_add_iter_level(logger%iter_info,"MD")
+    CALL cp_iterate(logger%iter_info,iter_nr=initialStep)
     ! Read MD section
-    CALL read_md_section(simpar, motion_section, md_section, error)
+    CALL read_md_section(simpar, motion_section, md_section)
     ! Setup print_keys
     simpar%info_constraint = cp_print_key_unit_nr(logger,constraint_section,&
-         "CONSTRAINT_INFO",extension=".shakeLog",log_filename=.FALSE.,error=error)
+         "CONSTRAINT_INFO",extension=".shakeLog",log_filename=.FALSE.)
     simpar%lagrange_multipliers = cp_print_key_unit_nr(logger,constraint_section,&
-         "LAGRANGE_MULTIPLIERS",extension=".LagrangeMultLog",log_filename=.FALSE.,error=error)
+         "LAGRANGE_MULTIPLIERS",extension=".LagrangeMultLog",log_filename=.FALSE.)
     simpar%dump_lm = BTEST(cp_print_key_should_output(logger%iter_info,constraint_section,&
-         "LAGRANGE_MULTIPLIERS",error=error),cp_p_file)
+         "LAGRANGE_MULTIPLIERS"),cp_p_file)
 
     ! Create the structure for the md energies
-    CALL create_md_ener(md_ener, error=error)
-    CALL set_md_env(md_env, md_ener=md_ener, error=error)
-    CALL release_md_ener(md_ener, error=error)
+    CALL create_md_ener(md_ener)
+    CALL set_md_env(md_env, md_ener=md_ener)
+    CALL release_md_ener(md_ener)
 
     ! If requested setup Thermostats
     CALL create_thermostats(thermostats,  md_section, force_env, simpar, para_env,&
-         globenv, global_section, error )
+         globenv, global_section)
 
     ! If requested setup Barostat
-    CALL create_barostat_type(barostat, md_section, force_env, simpar, globenv, error )
+    CALL create_barostat_type(barostat, md_section, force_env, simpar, globenv)
 
     ! If requested setup different thermal regions
-    CALL create_thermal_regions(thermal_regions,  md_section, simpar, force_env, error )
+    CALL create_thermal_regions(thermal_regions,  md_section, simpar, force_env)
 
-    CALL set_md_env(md_env, thermostats=thermostats, barostat=barostat, thermal_regions=thermal_regions,error=error)
+    CALL set_md_env(md_env, thermostats=thermostats, barostat=barostat, thermal_regions=thermal_regions)
 
     IF(simpar%ensemble == reftraj_ensemble) THEN
-        reftraj_section => section_vals_get_subs_vals(md_section,"REFTRAJ",error=error)
-        CALL create_reftraj(reftraj, reftraj_section, para_env, error=error)
-        CALL set_md_env(md_env, reftraj=reftraj, error=error)
-        CALL release_reftraj(reftraj,error=error)
+        reftraj_section => section_vals_get_subs_vals(md_section,"REFTRAJ")
+        CALL create_reftraj(reftraj, reftraj_section, para_env)
+        CALL set_md_env(md_env, reftraj=reftraj)
+        CALL release_reftraj(reftraj)
     END IF
 
     CALL force_env_get(force_env, subsys=subsys, cell=cell, &
-                       force_env_section=force_env_section, error=error )
+                       force_env_section=force_env_section)
 
 
 
@@ -297,29 +291,29 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
 
     ! Initialize velocities possibly applying constraints at the zeroth MD step
 ! ! !     CALL section_vals_val_get(motion_section,"PRINT%RESTART%SPLIT_RESTART_FILE",&
-! ! !                               l_val=write_binary_restart_file,error=error)
+! ! !                               l_val=write_binary_restart_file)
 !! let us see if this created all the trouble
 !      CALL setup_velocities(force_env,simpar,globenv,md_env,md_section,constraint_section, &
-!                            write_binary_restart_file,error)
+!                            write_binary_restart_file)
 
     ! Setup Free Energy Calculation (if required)
-    CALL fe_env_create (fe_env, free_energy_section, error)
+    CALL fe_env_create (fe_env, free_energy_section)
     CALL set_md_env(md_env=md_env, simpar=simpar, fe_env=fe_env, cell=cell,&
-                    force_env=force_env, error=error)
+                    force_env=force_env)
 
     ! Possibly initialize Wiener processes
-    IF (simpar%ensemble == langevin_ensemble) CALL create_wiener_process(md_env,error)
+    IF (simpar%ensemble == langevin_ensemble) CALL create_wiener_process(md_env)
     time_iter_start=m_walltime()
 
     CALL get_md_env(md_env, force_env=force_env, itimes=itimes, constant=constant,&
-                    md_ener=md_ener, t=time, used_time=used_time, error=error)
+                    md_ener=md_ener, t=time, used_time=used_time)
 
     ! Attach the time counter of the meta_env to the one of the MD
-    CALL set_meta_env(force_env%meta_env, time=time, error=error)
+    CALL set_meta_env(force_env%meta_env, time=time)
     ! Initialize the md_ener structure
 
     force_env%meta_env%dt=force_env%meta_env%zdt
-    CALL initialize_md_ener(md_ener, force_env, simpar, error=error)
+    CALL initialize_md_ener(md_ener, force_env, simpar)
 !     force_env%meta_env%dt=force_env%meta_env%zdt
 
 
@@ -328,35 +322,34 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
 
       NULLIFY(mc_env,mc_par,rng_stream_mc,MCaverages)
 
-      CALL section_vals_get(force_env_section,n_repetition=isos,error=error)
-      CPPostconditionNoFail(isos==1,cp_warning_level,routineP,error)
+      CALL section_vals_get(force_env_section,n_repetition=isos)
+      CPASSERT(isos==1)
 ! set some values...will use get_globenv if that ever comes around
 
 ! initialize the random numbers
 !       IF (para_env%ionode) THEN
         CALL create_rng_stream(rng_stream=rng_stream_mc,&
                              name="Random numbers for monte carlo acc/rej",&
-                             distribution_type=UNIFORM,error=error)
+                             distribution_type=UNIFORM)
 !       ENDIF
 !!!!! this shoudl go in a routine hmc_read
 
       NULLIFY(mc_section)
-      ALLOCATE(mc_par, stat=isos) ! do not forget to clean this mess
-      CPPostcondition(isos==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(mc_par)
 
       mc_section => section_vals_get_subs_vals(force_env%root_section,&
-         "MOTION%MC",error=error)
+         "MOTION%MC")
       CALL section_vals_val_get(mc_section,"ENSEMBLE",&
-           c_val=ensemble,error=error)
-      CPPostcondition(str_comp(ensemble,"TRADITIONAL"),cp_failure_level,routineP,error,failure)
+           c_val=ensemble)
+      CPASSERT(str_comp(ensemble,"TRADITIONAL"))
       CALL section_vals_val_get(mc_section,"NSTEP",&
-           i_val=nmccycles,error=error)
-      CPPostcondition(nmccycles>0,cp_failure_level,routineP,error,failure)
+           i_val=nmccycles)
+      CPASSERT(nmccycles>0)
       CALL section_vals_val_get(mc_section,"IPRINT",&
-           i_val=iprint,error=error)
-      CALL section_vals_val_get(mc_section,"RANDOMTOSKIP",i_val=rand2skip,error=error)
-      CPPostcondition(rand2skip>=0,cp_failure_level,routineP,error,failure)
-      temp=cp_unit_from_cp2k(simpar%temp_ext,"K",error=error)
+           i_val=iprint)
+      CALL section_vals_val_get(mc_section,"RANDOMTOSKIP",i_val=rand2skip)
+      CPASSERT(rand2skip>=0)
+      temp=cp_unit_from_cp2k(simpar%temp_ext,"K")
 !
 
       CALL set_mc_par(mc_par, ensemble=ensemble, nstep=nmccycles, iprint=iprint, temperature=temp, &
@@ -374,21 +367,21 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
         WRITE(output_unit,'(a,f16.8,a)')"HMC| Temperature ",temp, "K"
       ENDIF
 
-       CALL force_env_get( force_env, subsys=subsys, error=error )
+       CALL force_env_get( force_env, subsys=subsys)
 
        CALL cp_subsys_get(subsys,atomic_kinds=atomic_kinds,local_particles=local_particles,&
-            particles=particles,virial=virial,error=error)
+            particles=particles,virial=virial)
 
         DO i=1,rand2skip
-          auxRandom=next_random_number(rng_stream_mc,error=error)
+          auxRandom=next_random_number(rng_stream_mc)
           DO j=1,3*SIZE(particles%els)
-            auxRandom=next_random_number(globenv%gaussian_rng_stream,error=error)
+            auxRandom=next_random_number(globenv%gaussian_rng_stream)
           ENDDO
         ENDDO
 
 
 
-      CALL mc_env_create ( mc_env, error = error )
+      CALL mc_env_create ( mc_env)
       CALL set_mc_env( mc_env,mc_par=mc_par,force_env=force_env)
 !!!!!!!end mc setup
 
@@ -401,52 +394,50 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
          (simpar%ensemble==nph_uniaxial_ensemble).OR.&
          (simpar%ensemble==nph_uniaxial_damped_ensemble)) THEN
        check = virial%pv_availability
-       CALL cp_assert(check,cp_failure_level,cp_assertion_failed,&
-            routineP,"Virial evaluation not requested for this run in the input file! "//&
+       IF(.NOT.check)&
+           CALL cp_abort(__LOCATION__,&
+            "Virial evaluation not requested for this run in the input file! "//&
             "You may consider to switch on the virial evaluation with the keyword: STRESS_TENSOR."//&
-            "Be sure the method you are using can compute the virial! "//&
- CPSourceFileRef,&
-            error,failure)
+            "Be sure the method you are using can compute the virial!")
        IF (ASSOCIATED(force_env%sub_force_env)) THEN
           DO i = 1, SIZE(force_env%sub_force_env)
              IF (ASSOCIATED(force_env%sub_force_env(i)%force_env)) THEN
-                CALL force_env_get(force_env%sub_force_env(i)%force_env, subsys=subsys_i, error=error )
-                CALL cp_subsys_get(subsys_i, virial=virial, error=error)
+                CALL force_env_get(force_env%sub_force_env(i)%force_env, subsys=subsys_i)
+                CALL cp_subsys_get(subsys_i, virial=virial)
                 check = check .AND. virial%pv_availability
              END IF
           END DO
        END IF
-       CALL cp_assert(check,cp_failure_level,cp_assertion_failed,&
-            routineP,"Virial evaluation not requested for all the force_eval sections present in"//&
-            " the input file! You have to switch on the virial evaluation with the keyword: STRESS_TENSOR "//&
-            " in each force_eval section. Be sure the method you are using can compute the virial!"//&
-            CPSourceFileRef,&
-            error,failure)
+       IF(.NOT.check)&
+          CALL cp_abort(__LOCATION__,&
+               "Virial evaluation not requested for all the force_eval sections present in"//&
+               " the input file! You have to switch on the virial evaluation with the keyword: STRESS_TENSOR "//&
+               " in each force_eval section. Be sure the method you are using can compute the virial!")
     END IF
 
     ! Computing Forces at zero MD step
     IF (simpar%ensemble /= reftraj_ensemble) THEN
-       CALL section_vals_val_get(md_section,"STEP_START_VAL",i_val=itimes,error=error)
-       CALL section_vals_val_get(md_section,"TIME_START_VAL",r_val=time,error=error)
-       CALL section_vals_val_get(md_section,"ECONS_START_VAL",r_val=constant,error=error)
-       CALL section_vals_val_set(md_section,"STEP_START_VAL",i_val=initialStep,error=error)
-       CALL section_vals_val_set(md_section,"TIME_START_VAL",r_val=inittime,error=error)
+       CALL section_vals_val_get(md_section,"STEP_START_VAL",i_val=itimes)
+       CALL section_vals_val_get(md_section,"TIME_START_VAL",r_val=time)
+       CALL section_vals_val_get(md_section,"ECONS_START_VAL",r_val=constant)
+       CALL section_vals_val_set(md_section,"STEP_START_VAL",i_val=initialStep)
+       CALL section_vals_val_set(md_section,"TIME_START_VAL",r_val=inittime)
        initialStep=itimes
-       CALL cp_iterate(logger%iter_info,iter_nr=itimes,error=error)
+       CALL cp_iterate(logger%iter_info,iter_nr=itimes)
        IF(save_mem) THEN
-          work_section => section_vals_get_subs_vals(subsys_section,"VELOCITY",error=error)
-          CALL section_vals_remove_values(work_section, error)
-          work_section => section_vals_get_subs_vals(subsys_section,"SHELL_VELOCITY",error=error)
-          CALL section_vals_remove_values(work_section, error)
-          work_section => section_vals_get_subs_vals(subsys_section,"CORE_VELOCITY",error=error)
-          CALL section_vals_remove_values(work_section, error)
+          work_section => section_vals_get_subs_vals(subsys_section,"VELOCITY")
+          CALL section_vals_remove_values(work_section)
+          work_section => section_vals_get_subs_vals(subsys_section,"SHELL_VELOCITY")
+          CALL section_vals_remove_values(work_section)
+          work_section => section_vals_get_subs_vals(subsys_section,"CORE_VELOCITY")
+          CALL section_vals_remove_values(work_section)
        END IF
 
 
-!      CALL force_env_calc_energy_force (force_env, calc_force=.TRUE., error=error)
+!      CALL force_env_calc_energy_force (force_env, calc_force=.TRUE.)
        meta_env_saved=> force_env%meta_env
        NULLIFY(force_env%meta_env)
-       CALL force_env_calc_energy_force (force_env, calc_force=.FALSE., error=error)
+       CALL force_env_calc_energy_force (force_env, calc_force=.FALSE.)
        force_env%meta_env=>meta_env_saved
 
        IF(ASSOCIATED(force_env%qs_env))THEN
@@ -458,13 +449,13 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
        ! Warm-up engines for metadynamics
        IF (ASSOCIATED(force_env%meta_env)) THEN
           IF(force_env%meta_env%langevin) THEN
-             CALL create_wiener_process_cv(force_env%meta_env, error=error)
+             CALL create_wiener_process_cv(force_env%meta_env)
              NULLIFY(rng_stream)
              DO j=1, (rand2skip-1)/nmccycles
                DO i = 1 , force_env%meta_env%n_colvar
                  rng_stream => force_env%meta_env%rng(i)%stream
-                 auxRandom=next_random_number(rng_stream,error=error)
-                 auxRandom=next_random_number(rng_stream,error=error)
+                 auxRandom=next_random_number(rng_stream)
+                 auxRandom=next_random_number(rng_stream)
                ENDDO
              ENDDO
           ENDIF
@@ -474,10 +465,9 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
 !                 dummy=force_env%meta_env%wttemperature*(force_env%meta_env%wtgamma-1._dp)
 !                 IF (force_env%meta_env%delta_t>EPSILON(1._dp)) THEN
 !                    check=ABS(force_env%meta_env%delta_t-dummy)<1.E+3_dp*EPSILON(1._dp)
-!                    CALL cp_assert(check,cp_failure_level,cp_assertion_failed,routineP,&
+!                    IF(.NOT.check) CALL cp_abort(__LOCATION__,&
 !                       "Inconsistency between DELTA_T and WTGAMMA (both specified):"//&
-!                       " please, verify that DELTA_T=(WTGAMMA-1)*TEMPERATURE",&
-!                       error,failure)
+!                       " please, verify that DELTA_T=(WTGAMMA-1)*TEMPERATURE")
 !                 ELSE
 !                    force_env%meta_env%delta_t = dummy
 !                 ENDIF
@@ -487,64 +477,58 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
 !              ENDIF
 !              force_env%meta_env%invdt         = 1._dp/force_env%meta_env%delta_t
 !           ENDIF
-            CALL tamc_force(force_env,error=error)
-!           CALL metadyn_write_colvar(force_env,error=error)
+            CALL tamc_force(force_env)
+!           CALL metadyn_write_colvar(force_env)
        ENDIF
 
 
        IF (simpar%do_respa)THEN
           CALL force_env_calc_energy_force (force_env%sub_force_env(1)%force_env,&
-               calc_force=.TRUE.,error=error)
+               calc_force=.TRUE.)
        END IF
 
-!        CALL force_env_get( force_env, subsys=subsys, error=error )
+!        CALL force_env_get( force_env, subsys=subsys)
 !
 !        CALL cp_subsys_get(subsys,atomic_kinds=atomic_kinds,local_particles=local_particles,&
-!             particles=particles,error=error)
+!             particles=particles)
 
        CALL virial_evaluate(atomic_kinds%els, particles%els, local_particles,&
-            virial, force_env%para_env%group, error=error)
+            virial, force_env%para_env%group)
 
-       CALL md_energy(md_env,md_ener,error)
-!        CALL md_write_output(md_env, error) !inits the print env at itimes == 0 also writes trajectories
+       CALL md_energy(md_env,md_ener)
+!        CALL md_write_output(md_env) !inits the print env at itimes == 0 also writes trajectories
        md_stride = 1
     ELSE
-       CALL get_md_env(md_env, reftraj=reftraj, error=error)
-       CALL initialize_reftraj(reftraj, reftraj_section, md_env, error=error)
+       CALL get_md_env(md_env, reftraj=reftraj)
+       CALL initialize_reftraj(reftraj, reftraj_section, md_env)
        itimes = reftraj%info%first_snapshot -1
        md_stride = reftraj%info%stride
     END IF
 
     CALL cp_print_key_finished_output(simpar%info_constraint, logger,&
-         constraint_section,"CONSTRAINT_INFO",error=error)
+         constraint_section,"CONSTRAINT_INFO")
     CALL cp_print_key_finished_output(simpar%lagrange_multipliers, logger,&
-         constraint_section,"LAGRANGE_MULTIPLIERS",error=error)
+         constraint_section,"LAGRANGE_MULTIPLIERS")
       CALL init_mc_moves(moves)
       CALL init_mc_moves(gmoves)
-      ALLOCATE (r(1:3,SIZE(particles%els)),STAT=isos)
-      CPPostcondition(isos==0,cp_failure_level,routineP,error,failure)
-!       ALLOCATE (r_old(1:3,size(particles%els)),STAT=isos)
-!       CPPostcondition(isos==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE (r(1:3,SIZE(particles%els)))
+!       ALLOCATE (r_old(1:3,size(particles%els)))
       CALL mc_averages_create(MCaverages)
     !!!!! some more buffers
  ! Allocate random number for Langevin Thermostat acting on COLVARS
-      ALLOCATE (xieta(2*force_env%meta_env%n_colvar),STAT=isos)
-      CPPostcondition(isos==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE (xieta(2*force_env%meta_env%n_colvar))
       xieta(:) = 0.0_dp
-      ALLOCATE (An(force_env%meta_env%n_colvar),STAT=isos)
-      CPPostcondition(isos==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE (An(force_env%meta_env%n_colvar))
       An(:) = 0.0_dp
-      ALLOCATE (fz(force_env%meta_env%n_colvar),STAT=isos)
-      CPPostcondition(isos==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE (fz(force_env%meta_env%n_colvar))
       fz(:) = 0.0_dp
-      ALLOCATE (zbuff(2*force_env%meta_env%n_colvar),STAT=isos)
-      CPPostcondition(isos==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE (zbuff(2*force_env%meta_env%n_colvar))
       zbuff(:) = 0.0_dp
 
     IF (output_unit>0)THEN
          WRITE(output_unit,'(a)')"HMC|==== Initial average forces"
     ENDIF
-    CALL metadyn_write_colvar_header(force_env,error=error)
+    CALL metadyn_write_colvar_header(force_env)
     moves%hmc%attempts=0
     moves%hmc%successes=0
     gmoves%hmc%attempts=0
@@ -553,27 +537,27 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
 !!! if we come from a restart we shall properly compute the average force
 !!!      read the average force up to now
       DO i=1,force_env%meta_env%n_colvar
-          fs_section => section_vals_get_subs_vals(force_env%meta_env%metadyn_section,"EXT_LAGRANGE_FS",error=error)
-          CALL section_vals_get(fs_section, explicit=explicit, error=error)
+          fs_section => section_vals_get_subs_vals(force_env%meta_env%metadyn_section,"EXT_LAGRANGE_FS")
+          CALL section_vals_get(fs_section, explicit=explicit)
           IF (explicit) THEN
              CALL section_vals_val_get(fs_section,"_DEFAULT_KEYWORD_",&
-                  i_rep_val=i, r_val=rval, error=error)
+                  i_rep_val=i, r_val=rval)
              fz(i) = rval*rand2skip
           END IF
       ENDDO
 
       CALL HMCsampler(globenv,force_env,MCaverages,r,mc_par,moves,gmoves,rng_stream_mc,output_unit,&
-          fz,zbuff,nskip=rand2skip,error=error)
-      CALL cp_iterate(logger%iter_info,last=.FALSE.,iter_nr=0,error=error)
-      CALL section_vals_val_set(mc_section,"RANDOMTOSKIP",i_val=rand2skip+nmccycles,error=error)
-      CALL write_restart(md_env=md_env,root_section=force_env%root_section, error=error)
+          fz,zbuff,nskip=rand2skip)
+      CALL cp_iterate(logger%iter_info,last=.FALSE.,iter_nr=0)
+      CALL section_vals_val_set(mc_section,"RANDOMTOSKIP",i_val=rand2skip+nmccycles)
+      CALL write_restart(md_env=md_env,root_section=force_env%root_section)
     ENDIF
     IF (output_unit>0)THEN
          WRITE(output_unit,'(a)')"HMC|==== end initial average forces"
     ENDIF
-!     call set_md_env(md_env, init=.FALSE., error=error)
+!     call set_md_env(md_env, init=.FALSE.)
 
-    CALL metadyn_write_colvar(force_env,error=error)
+    CALL metadyn_write_colvar(force_env)
 
     DO istep=1, force_env%meta_env%TAMCSteps
        ! Increase counters
@@ -590,31 +574,31 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
           force_env%meta_env%time=force_env%qs_env%sim_time
        END IF
 
-       CALL cp_iterate(logger%iter_info,last=(istep==force_env%meta_env%TAMCSteps),iter_nr=itimes,error=error)
+       CALL cp_iterate(logger%iter_info,last=(istep==force_env%meta_env%TAMCSteps),iter_nr=itimes)
        ! Open possible Shake output units
        simpar%info_constraint = cp_print_key_unit_nr(logger,constraint_section,"CONSTRAINT_INFO",&
-            extension=".shakeLog",log_filename=.FALSE.,error=error)
+            extension=".shakeLog",log_filename=.FALSE.)
        simpar%lagrange_multipliers = cp_print_key_unit_nr(logger,constraint_section,&
-            "LAGRANGE_MULTIPLIERS",extension=".LagrangeMultLog",log_filename=.FALSE.,error=error)
+            "LAGRANGE_MULTIPLIERS",extension=".LagrangeMultLog",log_filename=.FALSE.)
        simpar%dump_lm = BTEST(cp_print_key_should_output(logger%iter_info,constraint_section,&
-            "LAGRANGE_MULTIPLIERS",error=error),cp_p_file)
+            "LAGRANGE_MULTIPLIERS"),cp_p_file)
 
        ! Velocity Verlet Integrator
 
        moves%hmc%attempts=0
        moves%hmc%successes=0
        CALL langevinVEC(md_env,globenv,mc_env,moves,gmoves,r,&
-          rng_stream_mc,xieta,An,fz,MCaverages,zbuff,error)
+          rng_stream_mc,xieta,An,fz,MCaverages,zbuff)
 
        ! Close Shake output if requested...
        CALL cp_print_key_finished_output(simpar%info_constraint, logger,&
-            constraint_section,"CONSTRAINT_INFO",error=error)
+            constraint_section,"CONSTRAINT_INFO")
        CALL cp_print_key_finished_output(simpar%lagrange_multipliers, logger,&
-            constraint_section,"LAGRANGE_MULTIPLIERS",error=error)
-       CALL cp_iterate(logger%iter_info,iter_nr=initialStep,error=error)
-       CALL metadyn_write_colvar(force_env,error=error)
+            constraint_section,"LAGRANGE_MULTIPLIERS")
+       CALL cp_iterate(logger%iter_info,iter_nr=initialStep)
+       CALL metadyn_write_colvar(force_env)
        ! Free Energy calculation
-!        CALL free_energy_evaluate(md_env,should_stop,free_energy_section,error)
+!        CALL free_energy_evaluate(md_env,should_stop,free_energy_section)
 
        ![AME:UB] IF (should_stop) EXIT
 
@@ -627,20 +611,20 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
        ! You can force to print the last step (for example if the method used
        ! to compute energy and forces is not SCF based) activating the print_key
        ! MOTION%MD%PRINT%FORCE_LAST.
-       CALL external_control(should_stop,"MD",globenv=globenv,error=error)
+       CALL external_control(should_stop,"MD",globenv=globenv)
        IF (should_stop) THEN
-          CALL cp_iterate(logger%iter_info,last=.TRUE.,iter_nr=itimes,error=error)
-!           CALL md_output(md_env,md_section,force_env%root_section,should_stop,error=error)
+          CALL cp_iterate(logger%iter_info,last=.TRUE.,iter_nr=itimes)
+!           CALL md_output(md_env,md_section,force_env%root_section,should_stop)
           EXIT
        END IF
 
 !        IF(simpar%ensemble /= reftraj_ensemble) THEN
-!           CALL md_energy(md_env, md_ener, error)
-!           CALL temperature_control(simpar, md_env, md_ener, force_env, logger, error)
-!           CALL comvel_control(md_ener, force_env, md_section, logger, error)
-!           CALL angvel_control(md_ener, force_env, md_section, logger, error)
+!           CALL md_energy(md_env, md_ener)
+!           CALL temperature_control(simpar, md_env, md_ener, force_env, logger)
+!           CALL comvel_control(md_ener, force_env, md_section, logger)
+!           CALL angvel_control(md_ener, force_env, md_section, logger)
 !        ELSE
-!           CALL md_ener_reftraj(md_env, md_ener, error)
+!           CALL md_ener_reftraj(md_env, md_ener)
 !        END IF
 
        time_iter_stop=m_walltime()
@@ -648,10 +632,10 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
        time_iter_start=time_iter_stop
 
 !!!!! this writes the restart...
-!         CALL md_output(md_env,md_section,force_env%root_section,should_stop,error=error)
+!         CALL md_output(md_env,md_section,force_env%root_section,should_stop)
 
 !        IF(simpar%ensemble == reftraj_ensemble ) THEN
-!           CALL write_output_reftraj(md_env,error=error)
+!           CALL write_output_reftraj(md_env)
 !        END IF
 
        IF (output_unit>0)THEN
@@ -659,49 +643,42 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
          WRITE(output_unit,'(a)')"HMC|==================================="
        ENDIF
     END DO
-    CALL cp_iterate(logger%iter_info,last=.TRUE.,iter_nr=itimes,error=error)
+    CALL cp_iterate(logger%iter_info,last=.TRUE.,iter_nr=itimes)
     force_env%qs_env%sim_time=0.0_dp
     force_env%qs_env%sim_step=0
     rand2skip=rand2skip+nmccycles*force_env%meta_env%TAMCSteps
     IF (initialStep == 0) rand2skip=rand2skip+nmccycles
-    CALL section_vals_val_set(mc_section,"RANDOMTOSKIP",i_val=rand2skip,error=error)
+    CALL section_vals_val_set(mc_section,"RANDOMTOSKIP",i_val=rand2skip)
 
-    CALL write_restart(md_env=md_env,root_section=force_env%root_section, error=error)
+    CALL write_restart(md_env=md_env,root_section=force_env%root_section)
 ! if we need the final kinetic energy for Hybrid Monte Carlo
 !     hmc_ekin%final_ekin=md_ener%ekin
 
     ! Remove the iteration level
-    CALL cp_rm_iter_level(logger%iter_info,"MD",error=error)
+    CALL cp_rm_iter_level(logger%iter_info,"MD")
 
     ! Deallocate Thermostats and Barostats
-    CALL release_thermostats(thermostats, error=error)
-    CALL release_barostat_type(barostat, error=error)
-    CALL release_simpar_type(simpar, error)
-    CALL release_thermal_regions(thermal_regions, error)
+    CALL release_thermostats(thermostats)
+    CALL release_barostat_type(barostat)
+    CALL release_simpar_type(simpar)
+    CALL release_thermal_regions(thermal_regions)
 
-    CALL md_env_release(md_env, error=error)
+    CALL md_env_release(md_env)
     ! Clean restartable sections..
-    IF (my_rm_restart_info) CALL remove_restart_info(force_env%root_section,error=error)
+    IF (my_rm_restart_info) CALL remove_restart_info(force_env%root_section)
 !     IF (para_env%ionode) THEN
-      CALL delete_rng_stream(rng_stream_mc,error=error)
+      CALL delete_rng_stream(rng_stream_mc)
 !     ENDIF
-    CALL MC_ENV_RELEASE(mc_env,error)
-    DEALLOCATE(mc_par, stat=isos) ! do not forget to clean this mess
-    CPPostcondition(isos==0,cp_failure_level,routineP,error,failure)
+    CALL MC_ENV_RELEASE(mc_env)
+    DEALLOCATE(mc_par)
     CALL MC_MOVES_RELEASE(moves)
     CALL MC_MOVES_RELEASE(gmoves)
-    DEALLOCATE(r,STAT=isos)
-    CPPostcondition(isos==0,cp_failure_level,routineP,error,failure)
-!     DEALLOCATE(r_old,STAT=isos)
-!     CPPostcondition(isos==0,cp_failure_level,routineP,error,failure)
-    DEALLOCATE(xieta,STAT=isos)
-    CPPostcondition(isos==0,cp_failure_level,routineP,error,failure)
-    DEALLOCATE(An,STAT=isos)
-    CPPostcondition(isos==0,cp_failure_level,routineP,error,failure)
-    DEALLOCATE(fz,STAT=isos)
-    CPPostcondition(isos==0,cp_failure_level,routineP,error,failure)
-    DEALLOCATE(zbuff,STAT=isos)
-    CPPostcondition(isos==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(r)
+!     DEALLOCATE(r_old)
+    DEALLOCATE(xieta)
+    DEALLOCATE(An)
+    DEALLOCATE(fz)
+    DEALLOCATE(zbuff)
     CALL mc_averages_release(MCaverages)
     CALL timestop(handle)
 
@@ -713,31 +690,27 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
 !> \brief Propagates velocities for z half a step
 !> \param force_env ...
 !> \param An ...
-!> \param error ...
 !> \author Alin M Elena
 !> \note   Vanden-Eijnden Ciccotti C.Phys.Letter 429 (2006) 310-316
 ! *****************************************************************************
-  SUBROUTINE tamc_velocities_colvar(force_env,An,error)
+  SUBROUTINE tamc_velocities_colvar(force_env,An)
     TYPE(force_env_type), POINTER            :: force_env
     REAL(KIND=dp), DIMENSION(:), &
       INTENT(INOUT)                          :: An
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'tamc_velocities_colvar', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, i_c
-    LOGICAL                                  :: failure
     REAL(kind=dp)                            :: dt, fft, sigma
     TYPE(cp_logger_type), POINTER            :: logger
     TYPE(meta_env_type), POINTER             :: meta_env
     TYPE(metavar_type), POINTER              :: cv
 
-    failure=.FALSE.
     NULLIFY(logger,meta_env,cv)
     meta_env => force_env%meta_env
     CALL timeset(routineN,handle)
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
     ! Add citation
     IF (meta_env%langevin) CALL cite_reference(VandenCic2006)
     dt = meta_env%dt
@@ -758,33 +731,29 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
 !> \brief propagates z one step
 !> \param force_env ...
 !> \param xieta ...
-!> \param error ...
 !> \author Alin M Elena
 !> \note  Vanden-Eijnden Ciccotti C.Phys.Letter 429 (2006) 310-316
 ! *****************************************************************************
-  SUBROUTINE tamc_position_colvar(force_env,xieta,error)
+  SUBROUTINE tamc_position_colvar(force_env,xieta)
     TYPE(force_env_type), POINTER            :: force_env
     REAL(KIND=dp), DIMENSION(:), &
       INTENT(INOUT)                          :: xieta
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'tamc_position_colvar', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, i_c
-    LOGICAL                                  :: failure
     REAL(kind=dp)                            :: dt, sigma
     TYPE(cp_logger_type), POINTER            :: logger
     TYPE(meta_env_type), POINTER             :: meta_env
     TYPE(metavar_type), POINTER              :: cv
 
-    failure=.FALSE.
     NULLIFY(logger,meta_env,cv)
     meta_env => force_env%meta_env
 !     IF (.NOT.ASSOCIATED(meta_env)) RETURN
 
     CALL timeset(routineN,handle)
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
 
     ! Add citation
     IF (meta_env%langevin) CALL cite_reference(VandenCic2006)
@@ -810,19 +779,17 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
 !> #details also can be used to get the potenzial evergy of z
 !> \param force_env ...
 !> \param zpot ...
-!> \param error ...
 !> \author Alin M Elena
 ! *****************************************************************************
-  SUBROUTINE tamc_force(force_env,zpot,error)
+  SUBROUTINE tamc_force(force_env,zpot)
     TYPE(force_env_type), POINTER            :: force_env
     REAL(KIND=dp), INTENT(inout), OPTIONAL   :: zpot
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'tamc_force', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, i, i_c, icolvar, ii
-    LOGICAL                                  :: explicit, failure
+    LOGICAL                                  :: explicit
     REAL(kind=dp)                            :: diff_ss, dt, rval
     TYPE(colvar_p_type), DIMENSION(:), &
       POINTER                                :: colvar_p
@@ -834,15 +801,14 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
     TYPE(section_vals_type), POINTER         :: ss0_section, ss_section, &
                                                 vvp_section
 
-    failure=.FALSE.
     NULLIFY(logger,meta_env)
     meta_env => force_env%meta_env
 !     IF (.NOT.ASSOCIATED(meta_env)) RETURN
 
     CALL timeset(routineN,handle)
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
     NULLIFY(colvar_p,subsys,cv,ss0_section, vvp_section,ss_section)
-    CALL force_env_get(force_env, subsys=subsys, error=error)
+    CALL force_env_get(force_env, subsys=subsys)
 
     dt = meta_env%dt
     IF (.NOT.meta_env%restart) meta_env%n_steps=meta_env%n_steps+1
@@ -850,35 +816,35 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
     DO i_c=1,meta_env%n_colvar
        cv => meta_env%metavar(i_c)
        icolvar = cv%icolvar
-       CALL colvar_eval_glob_f(icolvar,force_env,error=error)
+       CALL colvar_eval_glob_f(icolvar,force_env)
        cv%ss       = subsys%colvar_p(icolvar)%colvar%ss
        ! Restart for Extended Lagrangian Metadynamics
        IF (meta_env%restart) THEN
           ! Initialize the position of the collective variable in the extended lagrange
-          ss0_section => section_vals_get_subs_vals(meta_env%metadyn_section,"EXT_LAGRANGE_SS0",error=error)
-          CALL section_vals_get(ss0_section, explicit=explicit, error=error)
+          ss0_section => section_vals_get_subs_vals(meta_env%metadyn_section,"EXT_LAGRANGE_SS0")
+          CALL section_vals_get(ss0_section, explicit=explicit)
           IF (explicit) THEN
              CALL section_vals_val_get(ss0_section,"_DEFAULT_KEYWORD_",&
-                  i_rep_val=i_c, r_val=rval, error=error)
+                  i_rep_val=i_c, r_val=rval)
              cv%ss0 = rval
           ELSE
              cv%ss0 = cv%ss
           END IF
-          vvp_section => section_vals_get_subs_vals(meta_env%metadyn_section,"EXT_LAGRANGE_VVP",error=error)
-          CALL section_vals_get(vvp_section, explicit=explicit, error=error)
+          vvp_section => section_vals_get_subs_vals(meta_env%metadyn_section,"EXT_LAGRANGE_VVP")
+          CALL section_vals_get(vvp_section, explicit=explicit)
           IF (explicit) THEN
-             CALL setup_velocities_z(force_env,error)
+             CALL setup_velocities_z(force_env)
              CALL section_vals_val_get(vvp_section,"_DEFAULT_KEYWORD_",&
-                  i_rep_val=i_c, r_val=rval, error=error)
+                  i_rep_val=i_c, r_val=rval)
              cv%vvp = rval
           ELSE
-             CALL setup_velocities_z(force_env,error)
+             CALL setup_velocities_z(force_env)
           ENDIF
-          ss_section => section_vals_get_subs_vals(meta_env%metadyn_section,"EXT_LAGRANGE_SS",error=error)
-          CALL section_vals_get(ss_section, explicit=explicit, error=error)
+          ss_section => section_vals_get_subs_vals(meta_env%metadyn_section,"EXT_LAGRANGE_SS")
+          CALL section_vals_get(ss_section, explicit=explicit)
           IF (explicit) THEN
              CALL section_vals_val_get(ss_section,"_DEFAULT_KEYWORD_",&
-                  i_rep_val=i_c, r_val=rval, error=error)
+                  i_rep_val=i_c, r_val=rval)
              cv%ss = rval
           END IF
        END IF
@@ -887,7 +853,7 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
           ! forces on the atoms
        NULLIFY(particles)
        CALL cp_subsys_get(subsys, colvar_p=colvar_p, &
-          particles=particles,error=error)
+          particles=particles)
 
        meta_env%restart = .FALSE.
        meta_env%epot_s = 0.0_dp
@@ -911,7 +877,7 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
 
        ENDDO
     IF(PRESENT(zpot))zpot=meta_env%epot_s
-    CALL fix_atom_control(force_env, error=error)
+    CALL fix_atom_control(force_env)
 
     CALL timestop(handle)
   END SUBROUTINE tamc_force
@@ -932,11 +898,10 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
 !> \param fz ...
 !> \param averages ...
 !> \param zbuff ...
-!> \param error ...
 !> \author Alin M Elena
 ! *****************************************************************************
   SUBROUTINE langevinVEC ( md_env, globenv,mc_env,moves,gmoves,r,&
-              rng_stream_mc,xieta,An,fz,averages,zbuff,error)
+              rng_stream_mc,xieta,An,fz,averages,zbuff)
 
     TYPE(md_environment_type), POINTER       :: md_env
     TYPE(global_environment_type), POINTER   :: globenv
@@ -951,7 +916,6 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
       POINTER                                :: averages
     REAL(KIND=dp), DIMENSION(:), &
       INTENT(INOUT)                          :: zbuff
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'langevinVEC', &
       routineP = moduleN//':'//routineN
@@ -959,7 +923,6 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
     INTEGER                                  :: iprint, ivar, nparticle, &
                                                 nparticle_kind, nstep, &
                                                 output_unit
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: dt, gamma, mass, sigma
     TYPE(atomic_kind_list_type), POINTER     :: atomic_kinds
     TYPE(atomic_kind_type), DIMENSION(:), &
@@ -987,11 +950,10 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
     TYPE(virial_type), POINTER               :: virial
 
     NULLIFY(logger, mc_par)
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
     output_unit = cp_logger_get_default_io_unit(logger)
 
     NULLIFY(rng_stream)
-    failure = .FALSE.
 ! quantitites to be nullified for the get_md_env
     NULLIFY(simpar,force_env,para_env)
 ! quantities to be nullified for the force_env_get environment
@@ -1000,21 +962,21 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
     NULLIFY(atomic_kinds,local_particles,particles,local_molecules,molecules,molecule_kinds,gci)
 
     CALL get_md_env(md_env=md_env, simpar=simpar, force_env=force_env,&
-          para_env=para_env, error=error)
+          para_env=para_env)
     CALL get_mc_env(mc_env, mc_par=mc_par)
     CALL get_mc_par(mc_par,nstep=nstep,iprint=iprint)
 
     dt = simpar%dt
-    CALL force_env_get(force_env=force_env,subsys=subsys,cell=cell,error=error)
+    CALL force_env_get(force_env=force_env,subsys=subsys,cell=cell)
 
 !!!! this bit should vanish once I understand what the hell is with it
 
 !     ! Do some checks on coordinates and box
-     CALL apply_qmmm_walls_reflective(force_env, error=error)
+     CALL apply_qmmm_walls_reflective(force_env)
 
      CALL cp_subsys_get(subsys=subsys,atomic_kinds=atomic_kinds,local_particles=local_particles,&
          particles=particles,local_molecules_new=local_molecules,molecules_new=molecules,&
-         molecule_kinds_new=molecule_kinds,gci=gci,virial=virial,error=error)
+         molecule_kinds_new=molecule_kinds,gci=gci,virial=virial)
 
      nparticle_kind  = atomic_kinds%n_els
      atomic_kind_set => atomic_kinds%els
@@ -1023,14 +985,14 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
      nparticle    = particles%n_els
      particle_set => particles%els
      molecule_set => molecules%els
-     CPPrecondition(ASSOCIATED(force_env%meta_env),cp_failure_level,routineP,error,failure)
-     CPPrecondition(force_env%meta_env%langevin,cp_failure_level,routineP,error,failure)
+     CPASSERT(ASSOCIATED(force_env%meta_env))
+     CPASSERT(force_env%meta_env%langevin)
    !    *** Velocity Verlet for Langevin *** v(t)--> v(t+1/2)
          !!!!!! noise xi is in the first half, eta in the second half
       DO ivar = 1 , force_env%meta_env%n_colvar
           rng_stream => force_env%meta_env%rng(ivar)%stream
-          xieta(ivar)=next_random_number(rng_stream,error=error)
-          xieta(ivar+force_env%meta_env%n_colvar)=next_random_number(rng_stream,error=error)
+          xieta(ivar)=next_random_number(rng_stream)
+          xieta(ivar+force_env%meta_env%n_colvar)=next_random_number(rng_stream)
           gamma=force_env%meta_env%metavar(ivar)%gamma
           mass=force_env%meta_env%metavar(ivar)%mass
           sigma  = SQRT((force_env%meta_env%temp_wanted*kelvin)*2.0_dp*(boltzmann/joule)*gamma/mass)
@@ -1038,11 +1000,11 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
             dt*gamma*xieta(ivar+force_env%meta_env%n_colvar)/SQRT(12.0_dp))
       ENDDO
 !    *** Velocity Verlet for Langeving *** v(t)--> v(t+1/2)
-      CALL tamc_velocities_colvar(force_env,An,error=error)
+      CALL tamc_velocities_colvar(force_env,An)
 !    *** Velocity Verlet for Langevin S(t)->S(t+1)
-      CALL tamc_position_colvar(force_env,xieta,error)
+      CALL tamc_position_colvar(force_env,xieta)
 !!!!! start zHMC sampler
-      CALL HMCsampler(globenv,force_env,averages,r,mc_par,moves,gmoves,rng_stream_mc,output_unit,fz,zbuff,error=error)
+      CALL HMCsampler(globenv,force_env,averages,r,mc_par,moves,gmoves,rng_stream_mc,output_unit,fz,zbuff)
 
 !     CALL final_mc_write(mc_par,tmp_moves,&
 !                output_unit,energy_check,&
@@ -1051,9 +1013,9 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
 
 !!!!!!!!!!!!!!!!!!!! end zHMC sampler
          !    *** Velocity Verlet for Langeving *** v(t+1/2)--> v(t+1)
-      CALL tamc_velocities_colvar(force_env,An,error)
+      CALL tamc_velocities_colvar(force_env,An)
 !       CALL virial_evaluate ( atomic_kind_set, particle_set,  &
-!          local_particles, virial, para_env%group, error=error)
+!          local_particles, virial, para_env%group)
 
   END SUBROUTINE langevinVEC
 
@@ -1072,13 +1034,12 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
 !> \param fz ...
 !> \param zbuff ...
 !> \param nskip ...
-!> \param error ...
 !> \author Alin M Elena
 !> \note at the end of this routine %ff_s will contain mean force 
 ! *****************************************************************************
 
    SUBROUTINE HMCsampler(globenv,force_env,averages,r,mc_par,moves,gmoves,rng_stream_mc,output_unit,&
-                    fz,zbuff,nskip,error)
+                    fz,zbuff,nskip)
     TYPE(global_environment_type), POINTER   :: globenv
     TYPE(force_env_type), POINTER            :: force_env
     TYPE(mc_averages_type), POINTER          :: averages
@@ -1091,7 +1052,6 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
     REAL(KIND=dp), DIMENSION(:), &
       INTENT(INOUT)                          :: fz, zbuff
     INTEGER, INTENT(IN), OPTIONAL            :: nskip
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     INTEGER                                  :: i, iprint, ishift, it1, j, &
                                                 nsamples, nstep
@@ -1114,7 +1074,7 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
      CALL get_mc_par(mc_par,nstep=nstep,iprint=iprint)
      meta_env_saved=> force_env%meta_env
      NULLIFY(force_env%meta_env)
-     CALL force_env_get(force_env,potential_energy=old_epx,error=error)
+     CALL force_env_get(force_env,potential_energy=old_epx)
      force_env%meta_env=> meta_env_saved
 
      old_epz=force_env%meta_env%epot_s
@@ -1142,7 +1102,7 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
       ENDIF
 
       CALL mc_hmc_move(mc_par, force_env,globenv, moves,gmoves,old_epx,old_epz,energy_check,&
-          r, output_unit, rng_stream_mc,zbuff,error)
+          r, output_unit, rng_stream_mc,zbuff)
      ! check averages...
      ! force average for z needed too...
         averages%ave_energy=averages%ave_energy*REAL(i-1,dp)/REAL(i,dp)+&
@@ -1175,10 +1135,10 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
 !              DO j=1,force_env%meta_env%n_colvar
 !                force_env%meta_env%metavar(j)%ff_s=fz(j)/real(i+ishift,dp)
 !              ENDDO
-! !              CALL cp_iterate(logger%iter_info,last=.FALSE.,iter_nr=-1,error=error)
-!              CALL section_vals_val_set(mcsec,"RANDOMTOSKIP",i_val=i+ishift,error=error)
-!              CALL write_restart(md_env=mdenv,root_section=force_env%root_section, error=error)
-! !              CALL cp_iterate(logger%iter_info,last=.FALSE.,iter_nr=iter,error=error)
+! !              CALL cp_iterate(logger%iter_info,last=.FALSE.,iter_nr=-1)
+!              CALL section_vals_val_set(mcsec,"RANDOMTOSKIP",i_val=i+ishift)
+!              CALL write_restart(md_env=mdenv,root_section=force_env%root_section)
+! !              CALL cp_iterate(logger%iter_info,last=.FALSE.,iter_nr=iter)
 !           ENDIF
 !         ENDIF
       ENDDO
@@ -1210,13 +1170,12 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
 !> \param output_unit ...
 !> \param rng_stream ...
 !> \param zbuff ...
-!> \param error ...
 !> \author Alin M Elena
 !> \note It runs a NVE trajectory, followed by localisation and accepts rejects
 !> using the biased Hamiltonian, rather than the traditional guiding Hamiltonian
 ! *****************************************************************************
   SUBROUTINE mc_hmc_move ( mc_par,force_env, globenv, moves,gmoves,old_epx,old_epz,&
-                        energy_check,r,output_unit,rng_stream,zbuff,error)
+                        energy_check,r,output_unit,rng_stream,zbuff)
 
     TYPE(mc_simpar_type), POINTER            :: mc_par
     TYPE(force_env_type), POINTER            :: force_env
@@ -1229,14 +1188,13 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
     TYPE(rng_stream_type), POINTER           :: rng_stream
     REAL(KIND=dp), DIMENSION(:), &
       INTENT(INOUT)                          :: zbuff
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'mc_hmc_move', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: group, handle, iatom, istat, &
-                                                j, nAtoms, source
-    LOGICAL                                  :: failure, ionode, localise
+    INTEGER                                  :: group, handle, iatom, j, &
+                                                nAtoms, source
+    LOGICAL                                  :: ionode, localise
     REAL(KIND=dp)                            :: BETA, energy_term, &
                                                 exp_max_val, exp_min_val, &
                                                 new_energy, new_epx, new_epz, &
@@ -1251,11 +1209,10 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
 ! begin the timing of the subroutine
 
       CALL timeset(routineN,handle)
-      failure=.TRUE.
 
       NULLIFY(scf_env)
-      CALL get_qs_env(force_env%qs_env,scf_env=scf_env,error=error,input=input)
-      dft_section => section_vals_get_subs_vals(input,"DFT",error=error)
+      CALL get_qs_env(force_env%qs_env,scf_env=scf_env,input=input)
+      dft_section => section_vals_get_subs_vals(input,"DFT")
 
 ! get a bunch of stuff from mc_par
       CALL get_mc_par(mc_par,ionode=ionode,&
@@ -1266,16 +1223,13 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
 !       NULLIFY(particles_set,oldsys,hmc_ekin)
       NULLIFY(particles_set,oldsys,meta_env_saved,hmc_ekin)
       ! now let's grab the particle positions
-      CALL force_env_get(force_env,subsys=oldsys,&
-         error=error)
-      CALL cp_subsys_get(oldsys,particles=particles_set, &
-         error=error)
+      CALL force_env_get(force_env,subsys=oldsys)
+      CALL cp_subsys_get(oldsys,particles=particles_set)
       nAtoms=SIZE(particles_set%els)
 ! do some allocation
 
 
-      ALLOCATE (hmc_ekin,STAT=istat)
-      CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE (hmc_ekin)
 
 ! record the attempt
       moves%hmc%attempts=moves%hmc%attempts+1
@@ -1302,18 +1256,18 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
       force_env%qs_env%sim_time=0.0_dp
       force_env%qs_env%sim_step=0
       IF (.NOT. localise) THEN
-        CALL section_vals_val_set(dft_section,"LOCALIZE%_SECTION_PARAMETERS_",l_val=.FALSE.,error=error)
+        CALL section_vals_val_set(dft_section,"LOCALIZE%_SECTION_PARAMETERS_",l_val=.FALSE.)
       ENDIF
-      CALL qs_mol_dyn(force_env,globenv,error=error,hmc_e_initial=hmc_ekin%initial_ekin,hmc_e_final=hmc_ekin%final_ekin)
+      CALL qs_mol_dyn(force_env,globenv,hmc_e_initial=hmc_ekin%initial_ekin,hmc_e_final=hmc_ekin%final_ekin)
       IF (.NOT. localise) THEN
-        CALL section_vals_val_set(dft_section,"LOCALIZE%_SECTION_PARAMETERS_",l_val=.TRUE.,error=error)
-        CALL scf_post_calculation_gpw(dft_section, scf_env, force_env%qs_env, error)
+        CALL section_vals_val_set(dft_section,"LOCALIZE%_SECTION_PARAMETERS_",l_val=.TRUE.)
+        CALL scf_post_calculation_gpw(dft_section, scf_env, force_env%qs_env)
       ENDIF
 
-      CALL force_env_get(force_env, potential_energy=new_epx,error=error)
+      CALL force_env_get(force_env, potential_energy=new_epx)
 
       force_env%meta_env=>meta_env_saved
-      CALL tamc_force(force_env, zpot=new_epz,error=error)
+      CALL tamc_force(force_env, zpot=new_epz)
       new_energy=new_epx+new_epz
       IF (output_unit>0) THEN
         WRITE(output_unit,'(a,4(f16.8,1x))')"HMC|old Ep, Ekx, Epz, Epx ",old_epx+old_epz,hmc_ekin%initial_ekin, old_epz,old_epx
@@ -1331,7 +1285,7 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
          w=EXP(value)
       ENDIF
 
-      rand=next_random_number(rng_stream,error=error)
+      rand=next_random_number(rng_stream)
       IF (rand < w) THEN
 ! accept the move
          moves%hmc%successes=moves%hmc%successes+1
@@ -1352,8 +1306,7 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
 
       ENDIF
 
-      DEALLOCATE(hmc_ekin,STAT=istat)
-      CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+      DEALLOCATE(hmc_ekin)
 
 ! end the timing
       CALL timestop(handle)
@@ -1365,11 +1318,9 @@ SUBROUTINE qs_tamc(force_env, globenv,averages,error)
 ! *****************************************************************************
 !> \brief ...
 !> \param force_env ...
-!> \param error ...
 ! *****************************************************************************
-SUBROUTINE metadyn_write_colvar_header(force_env,error)
+SUBROUTINE metadyn_write_colvar_header(force_env)
     TYPE(force_env_type), POINTER            :: force_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'metadyn_write_colvar_header', &
       routineP = moduleN//':'//routineN
@@ -1378,20 +1329,18 @@ SUBROUTINE metadyn_write_colvar_header(force_env,error)
     CHARACTER(len=255)                       :: label1, label2, label3, &
                                                 label4, label5, label6
     INTEGER                                  :: handle, i, iw, m
-    LOGICAL                                  :: failure
     TYPE(cp_logger_type), POINTER            :: logger
     TYPE(meta_env_type), POINTER             :: meta_env
 
-    failure=.FALSE.
     NULLIFY(logger,meta_env)
     meta_env => force_env%meta_env
     IF (.NOT.ASSOCIATED(meta_env)) RETURN
 
     CALL timeset(routineN,handle)
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
 
     iw = cp_print_key_unit_nr(logger,meta_env%metadyn_section,&
-         "PRINT%COLVAR",extension=".metadynLog",error=error)
+         "PRINT%COLVAR",extension=".metadynLog")
     IF (iw>0) THEN
           label1=""
           label2=""
@@ -1440,7 +1389,7 @@ SUBROUTINE metadyn_write_colvar_header(force_env,error)
 
     END IF
     CALL cp_print_key_finished_output(iw,logger,meta_env%metadyn_section,&
-         "PRINT%COLVAR", error=error)
+         "PRINT%COLVAR")
 
     CALL timestop(handle)
 
@@ -1449,29 +1398,25 @@ SUBROUTINE metadyn_write_colvar_header(force_env,error)
 ! *****************************************************************************
 !> \brief ...
 !> \param force_env ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE metadyn_write_colvar(force_env,error)
+  SUBROUTINE metadyn_write_colvar(force_env)
     TYPE(force_env_type), POINTER            :: force_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'metadyn_write_colvar', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, i, i_c, iw
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: temp
     TYPE(cp_logger_type), POINTER            :: logger
     TYPE(meta_env_type), POINTER             :: meta_env
     TYPE(metavar_type), POINTER              :: cv
 
-    failure=.FALSE.
     NULLIFY(logger,meta_env,cv)
     meta_env => force_env%meta_env
     IF (.NOT.ASSOCIATED(meta_env)) RETURN
 
     CALL timeset(routineN,handle)
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
 
     IF (meta_env%langevin) THEN
        meta_env%ekin_s = 0.0_dp
@@ -1484,7 +1429,7 @@ SUBROUTINE metadyn_write_colvar_header(force_env,error)
 
     ! write COLVAR file
     iw = cp_print_key_unit_nr(logger,meta_env%metadyn_section,&
-         "PRINT%COLVAR",extension=".metadynLog",error=error)
+         "PRINT%COLVAR",extension=".metadynLog")
     IF (iw>0) THEN
        IF (meta_env%extended_lagrange) THEN
           WRITE(iw,'(f16.8,70f15.8)')meta_env%time*femtoseconds, &
@@ -1508,14 +1453,14 @@ SUBROUTINE metadyn_write_colvar_header(force_env,error)
        END IF
     END IF
     CALL cp_print_key_finished_output(iw,logger,meta_env%metadyn_section,&
-         "PRINT%COLVAR", error=error)
+         "PRINT%COLVAR")
     ! Temperature for COLVAR
     IF (meta_env%extended_lagrange) THEN
        temp = meta_env%ekin_s*2.0_dp/(REAL(meta_env%n_colvar,KIND=dp))*kelvin
        meta_env%avg_temp = (meta_env%avg_temp*REAL(meta_env%n_steps,KIND=dp)+&
             temp)/REAL(meta_env%n_steps+1,KIND=dp)
        iw = cp_print_key_unit_nr(logger,meta_env%metadyn_section,&
-            "PRINT%TEMPERATURE_COLVAR",extension=".metadynLog",error=error)
+            "PRINT%TEMPERATURE_COLVAR",extension=".metadynLog")
        IF (iw > 0) THEN
           WRITE (iw, '(T2,79("-"))')
           WRITE (iw,'( A,T51,f10.2,T71,f10.2)' )' COLVARS INSTANTANEOUS/AVERAGE TEMPERATURE ',&
@@ -1523,7 +1468,7 @@ SUBROUTINE metadyn_write_colvar_header(force_env,error)
           WRITE (iw, '(T2,79("-"))')
        ENDIF
        CALL cp_print_key_finished_output(iw,logger,meta_env%metadyn_section,&
-            "PRINT%TEMPERATURE_COLVAR", error=error)
+            "PRINT%TEMPERATURE_COLVAR")
     END IF
     CALL timestop(handle)
 
@@ -1533,11 +1478,9 @@ SUBROUTINE metadyn_write_colvar_header(force_env,error)
 ! *****************************************************************************
 !> \brief ...
 !> \param force_env ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE setup_velocities_z(force_env,error)
+  SUBROUTINE setup_velocities_z(force_env)
     TYPE(force_env_type), POINTER            :: force_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     INTEGER                                  :: i_c
     REAL(kind=dp)                            :: ekin_w, fac_t
@@ -1549,7 +1492,7 @@ SUBROUTINE metadyn_write_colvar_header(force_env,error)
     meta_env%ekin_s = 0.0_dp
     DO i_c=1,meta_env%n_colvar
       cv => meta_env%metavar(i_c)
-      cv%vvp = next_random_number(force_env%globenv%gaussian_rng_stream,error=error)
+      cv%vvp = next_random_number(force_env%globenv%gaussian_rng_stream)
       meta_env%ekin_s = meta_env%ekin_s + 0.5_dp*cv%mass*cv%vvp**2
     END DO
     ekin_w = 0.5_dp*meta_env%temp_wanted*REAL(meta_env%n_colvar,KIND=dp)

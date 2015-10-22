@@ -21,6 +21,7 @@ MODULE fist_nonbond_env_types
                                              siepmann_type,&
                                              tersoff_type
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -97,8 +98,6 @@ CONTAINS
 !> \param eam_data ...
 !> \param quip_data ...
 !> \param charges ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      12.2002 created [fawzi]
 !> \author Fawzi Mohamed
@@ -108,7 +107,7 @@ CONTAINS
        shift_cutoff, r_last_update, r_last_update_pbc, rshell_last_update_pbc, &
        rcore_last_update_pbc, cell_last_update, num_update, last_update, &
        counter, natom_types, long_range_correction, ij_kind_full_fac, eam_data, &
-       quip_data, charges, error)
+       quip_data, charges)
 
     TYPE(fist_nonbond_env_type), POINTER     :: fist_nonbond_env
     TYPE(pair_potential_pp_type), OPTIONAL, &
@@ -136,7 +135,6 @@ CONTAINS
     TYPE(quip_data_type), OPTIONAL, POINTER  :: quip_data
     REAL(KIND=dp), DIMENSION(:), OPTIONAL, &
       POINTER                                :: charges
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     IF ( PRESENT ( charges ) ) charges => fist_nonbond_env%charges
     IF ( PRESENT ( potparm14 ) ) potparm14 => fist_nonbond_env%potparm14
@@ -197,8 +195,6 @@ CONTAINS
 !> \param eam_data ...
 !> \param quip_data ...
 !> \param charges ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      12.2002 created [fawzi]
 !> \author Fawzi Mohamed
@@ -207,7 +203,7 @@ CONTAINS
        rlist_cut, rlist_lowsq, nonbonded, aup, lup, ei_scale14, vdw_scale14, &
        shift_cutoff, r_last_update, r_last_update_pbc, rshell_last_update_pbc, &
        rcore_last_update_pbc, cell_last_update, num_update, last_update, &
-       counter, natom_types, long_range_correction, eam_data, quip_data, charges, error)
+       counter, natom_types, long_range_correction, eam_data, quip_data, charges)
 
     TYPE(fist_nonbond_env_type), POINTER     :: fist_nonbond_env
     TYPE(pair_potential_pp_type), OPTIONAL, &
@@ -233,7 +229,6 @@ CONTAINS
     TYPE(quip_data_type), OPTIONAL, POINTER  :: quip_data
     REAL(KIND=dp), DIMENSION(:), OPTIONAL, &
       POINTER                                :: charges
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     IF ( PRESENT ( potparm14 ) ) fist_nonbond_env%potparm14 => potparm14
     IF ( PRESENT ( eam_data ) ) fist_nonbond_env%eam_data => eam_data
@@ -279,15 +274,13 @@ CONTAINS
 !> \param ei_scale14 ...
 !> \param vdw_scale14 ...
 !> \param shift_cutoff ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      12.2002 created [fawzi]
 !> \author Fawzi Mohamed
 ! *****************************************************************************
   SUBROUTINE fist_nonbond_env_create(fist_nonbond_env, atomic_kind_set, &
        potparm14, potparm, do_nonbonded, verlet_skin, ewald_rcut, ei_scale14, &
-       vdw_scale14, shift_cutoff, error)
+       vdw_scale14, shift_cutoff)
     TYPE(fist_nonbond_env_type), POINTER     :: fist_nonbond_env
     TYPE(atomic_kind_type), DIMENSION(:), &
       POINTER                                :: atomic_kind_set
@@ -297,17 +290,11 @@ CONTAINS
     REAL(KIND=dp), INTENT(IN)                :: verlet_skin, ewald_rcut, &
                                                 ei_scale14, vdw_scale14
     LOGICAL, INTENT(IN)                      :: shift_cutoff
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fist_nonbond_env_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
-    ALLOCATE(fist_nonbond_env, stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(fist_nonbond_env)
     NULLIFY(fist_nonbond_env%potparm14)
     NULLIFY(fist_nonbond_env%potparm)
     NULLIFY(fist_nonbond_env%rlist_cut)
@@ -324,7 +311,7 @@ CONTAINS
     NULLIFY(fist_nonbond_env%charges)
     CALL init_fist_nonbond_env(fist_nonbond_env, atomic_kind_set, potparm14, &
          potparm, do_nonbonded, verlet_skin, ewald_rcut, ei_scale14, vdw_scale14, &
-         shift_cutoff, error)
+         shift_cutoff)
   END SUBROUTINE fist_nonbond_env_create
 
 ! *****************************************************************************
@@ -339,12 +326,10 @@ CONTAINS
 !> \param ei_scale14 ...
 !> \param vdw_scale14 ...
 !> \param shift_cutoff ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 ! *****************************************************************************
   SUBROUTINE init_fist_nonbond_env(fist_nonbond_env, atomic_kind_set, &
        potparm14, potparm, do_nonbonded, verlet_skin, ewald_rcut, ei_scale14, &
-       vdw_scale14, shift_cutoff, error)
+       vdw_scale14, shift_cutoff)
 
     TYPE(fist_nonbond_env_type), POINTER     :: fist_nonbond_env
     TYPE(atomic_kind_type), DIMENSION(:), &
@@ -355,13 +340,12 @@ CONTAINS
     REAL(KIND=dp), INTENT(IN)                :: verlet_skin, ewald_rcut, &
                                                 ei_scale14, vdw_scale14
     LOGICAL, INTENT(IN)                      :: shift_cutoff
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'init_fist_nonbond_env', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: idim, jdim, natom_types, stat
-    LOGICAL                                  :: check, failure, use_potparm, &
+    INTEGER                                  :: idim, jdim, natom_types
+    LOGICAL                                  :: check, use_potparm, &
                                                 use_potparm14
     REAL(KIND=dp)                            :: fac, rcut, rlow
 
@@ -398,18 +382,15 @@ CONTAINS
        natom_types = SIZE(atomic_kind_set)
        IF (use_potparm14) THEN
           check = (SIZE(potparm14%pot,1)==natom_types)
-          CPPostcondition(check,cp_failure_level,routineP,error,failure)
+          CPASSERT(check)
        END IF
        IF (use_potparm) THEN
           check = (SIZE(potparm%pot,1)==natom_types)
-          CPPostcondition(check,cp_failure_level,routineP,error,failure)
+          CPASSERT(check)
        END IF
-       ALLOCATE ( fist_nonbond_env%rlist_cut(natom_types, natom_types), stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       ALLOCATE ( fist_nonbond_env%rlist_lowsq(natom_types, natom_types), stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       ALLOCATE ( fist_nonbond_env%ij_kind_full_fac(natom_types, natom_types), stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       ALLOCATE ( fist_nonbond_env%rlist_cut(natom_types, natom_types))
+       ALLOCATE ( fist_nonbond_env%rlist_lowsq(natom_types, natom_types))
+       ALLOCATE ( fist_nonbond_env%ij_kind_full_fac(natom_types, natom_types))
        fist_nonbond_env%ij_kind_full_fac = 1.0_dp
        DO idim = 1, natom_types
           DO jdim = idim, natom_types
@@ -472,113 +453,85 @@ CONTAINS
 ! *****************************************************************************
 !> \brief retains the given fist_nonbond_env (see doc/ReferenceCounting.html)
 !> \param fist_nonbond_env the object to retain
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      12.2002 created [fawzi]
 !> \author Fawzi Mohamed
 ! *****************************************************************************
-  SUBROUTINE fist_nonbond_env_retain(fist_nonbond_env,error)
+  SUBROUTINE fist_nonbond_env_retain(fist_nonbond_env)
     TYPE(fist_nonbond_env_type), POINTER     :: fist_nonbond_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fist_nonbond_env_retain', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
-    CPPrecondition(ASSOCIATED(fist_nonbond_env),cp_failure_level,routineP,error,failure)
-    IF (.NOT. failure) THEN
-       CPPrecondition(fist_nonbond_env%ref_count>0,cp_failure_level,routineP,error,failure)
-       fist_nonbond_env%ref_count=fist_nonbond_env%ref_count+1
-    END IF
+    CPASSERT(ASSOCIATED(fist_nonbond_env))
+    CPASSERT(fist_nonbond_env%ref_count>0)
+    fist_nonbond_env%ref_count=fist_nonbond_env%ref_count+1
   END SUBROUTINE fist_nonbond_env_retain
 
 ! *****************************************************************************
 !> \brief releases the given fist_nonbond_env (see doc/ReferenceCounting.html)
 !> \param fist_nonbond_env the object to release
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      12.2002 created [fawzi]
 !> \author Fawzi Mohamed
 ! *****************************************************************************
-  SUBROUTINE fist_nonbond_env_release(fist_nonbond_env,error)
+  SUBROUTINE fist_nonbond_env_release(fist_nonbond_env)
     TYPE(fist_nonbond_env_type), POINTER     :: fist_nonbond_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fist_nonbond_env_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
     IF (ASSOCIATED(fist_nonbond_env)) THEN
-       CPPrecondition(fist_nonbond_env%ref_count>0,cp_failure_level,routineP,error,failure)
+       CPASSERT(fist_nonbond_env%ref_count>0)
        fist_nonbond_env%ref_count=fist_nonbond_env%ref_count-1
        IF (fist_nonbond_env%ref_count<1) THEN
           IF (ASSOCIATED(fist_nonbond_env%nonbonded)) THEN
-             CALL fist_neighbor_deallocate (fist_nonbond_env%nonbonded, error )
+             CALL fist_neighbor_deallocate (fist_nonbond_env%nonbonded)
           END IF
           ! Release potparm
-          CALL pair_potential_pp_release ( fist_nonbond_env%potparm, error )
+          CALL pair_potential_pp_release ( fist_nonbond_env%potparm)
           ! Release potparm14
-          CALL pair_potential_pp_release ( fist_nonbond_env%potparm14, error )
+          CALL pair_potential_pp_release ( fist_nonbond_env%potparm14)
           IF (ASSOCIATED(fist_nonbond_env%r_last_update)) THEN
-             DEALLOCATE (fist_nonbond_env%r_last_update,STAT=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+             DEALLOCATE (fist_nonbond_env%r_last_update)
           ENDIF
           IF (ASSOCIATED(fist_nonbond_env%r_last_update_pbc)) THEN
-             DEALLOCATE (fist_nonbond_env%r_last_update_pbc,STAT=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+             DEALLOCATE (fist_nonbond_env%r_last_update_pbc)
           ENDIF
           IF (ASSOCIATED(fist_nonbond_env%charges)) THEN
-             DEALLOCATE (fist_nonbond_env%charges,STAT=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+             DEALLOCATE (fist_nonbond_env%charges)
           ENDIF
           IF (ASSOCIATED(fist_nonbond_env%eam_data)) THEN
-             DEALLOCATE (fist_nonbond_env%eam_data,STAT=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+             DEALLOCATE (fist_nonbond_env%eam_data)
           ENDIF
           IF (ASSOCIATED(fist_nonbond_env%quip_data)) THEN
              IF (ASSOCIATED(fist_nonbond_env%quip_data%force)) THEN
-                DEALLOCATE (fist_nonbond_env%quip_data%force,STAT=stat)
-                CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+                DEALLOCATE (fist_nonbond_env%quip_data%force)
              ENDIF
              IF (ASSOCIATED(fist_nonbond_env%quip_data%use_indices)) THEN
-                DEALLOCATE (fist_nonbond_env%quip_data%use_indices,STAT=stat)
-                CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+                DEALLOCATE (fist_nonbond_env%quip_data%use_indices)
              ENDIF
-             DEALLOCATE (fist_nonbond_env%quip_data,STAT=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+             DEALLOCATE (fist_nonbond_env%quip_data)
           ENDIF
           IF (ASSOCIATED(fist_nonbond_env%rshell_last_update_pbc)) THEN
-             DEALLOCATE (fist_nonbond_env%rshell_last_update_pbc,STAT=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+             DEALLOCATE (fist_nonbond_env%rshell_last_update_pbc)
           ENDIF
           IF (ASSOCIATED(fist_nonbond_env%rcore_last_update_pbc)) THEN
-             DEALLOCATE (fist_nonbond_env%rcore_last_update_pbc,STAT=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+             DEALLOCATE (fist_nonbond_env%rcore_last_update_pbc)
           ENDIF
           IF (ASSOCIATED(fist_nonbond_env%cell_last_update)) THEN
-             CALL cell_release(fist_nonbond_env%cell_last_update,error)
+             CALL cell_release(fist_nonbond_env%cell_last_update)
           ENDIF
           IF (ASSOCIATED(fist_nonbond_env%ij_kind_full_fac)) THEN
-             DEALLOCATE (fist_nonbond_env%ij_kind_full_fac,STAT=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+             DEALLOCATE (fist_nonbond_env%ij_kind_full_fac)
           ENDIF
           IF (ASSOCIATED(fist_nonbond_env%rlist_cut)) THEN
-             DEALLOCATE (fist_nonbond_env%rlist_cut,STAT=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+             DEALLOCATE (fist_nonbond_env%rlist_cut)
           ENDIF
           IF (ASSOCIATED(fist_nonbond_env%rlist_lowsq)) THEN
-             DEALLOCATE (fist_nonbond_env%rlist_lowsq,STAT=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+             DEALLOCATE (fist_nonbond_env%rlist_lowsq)
           ENDIF
-          DEALLOCATE(fist_nonbond_env, STAT=stat)
-          CPPrecondition(stat==0,cp_warning_level,routineP,error,failure)
+          DEALLOCATE(fist_nonbond_env)
        END IF
     END IF
   END SUBROUTINE fist_nonbond_env_release

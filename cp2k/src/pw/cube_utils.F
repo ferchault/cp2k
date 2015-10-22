@@ -20,11 +20,9 @@ MODULE cube_utils
                                              int_size
   USE mathlib,                         ONLY: matvec_3x3
   USE realspace_grid_types,            ONLY: realspace_grid_desc_type
-  USE termination,                     ONLY: stop_memory,&
-                                             stop_program
-  USE timings,                         ONLY: timeset,&
-                                             timestop
+  USE termination,                     ONLY: stop_memory
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -113,7 +111,7 @@ CONTAINS
             ! in the call to init_cube_info
             !
             WRITE(*,*) info%max_rad_ga,radius
-            CALL stop_program(routineN,moduleN,__LINE__,"Called with too large radius.")
+            CPABORT("Called with too large radius.")
     ENDIF
 
     ! get the min max indices that contain at least the cube that contains a sphere around rp of radius radius
@@ -165,7 +163,7 @@ CONTAINS
             ! This error can invariably be fixed by improving the computation of maxradius
             ! in the call to init_cube_info
             !
-            CALL stop_program(routineN,moduleN,__LINE__,"Called with too large radius.")
+            CPABORT("Called with too large radius.")
         ENDIF
         lb_cube(:)       = info%lb_cube(:,imr)
         ub_cube(:)       = info%ub_cube(:,imr)
@@ -197,26 +195,16 @@ CONTAINS
     CHARACTER(LEN=*), PARAMETER :: routineN = 'destroy_cube_info', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, istat
+    INTEGER                                  :: i
 
     IF (info%orthorhombic) THEN
-        DEALLOCATE (info%lb_cube,STAT=istat)
-        IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-                                         "info%lb_cube")
-        DEALLOCATE (info%ub_cube,STAT=istat)
-        IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-                                         "info%ub_cube")
-        DEALLOCATE (info%sphere_bounds_count,STAT=istat)
-        IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-                                         "info%sphere_bounds_count")
+        DEALLOCATE (info%lb_cube)
+        DEALLOCATE (info%ub_cube)
+        DEALLOCATE (info%sphere_bounds_count)
         DO i=1,info%max_radius
-          DEALLOCATE (info%sphere_bounds(i)%p,STAT=istat)
-          IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-                                           "info%sphere_bounds(i)%p")
+          DEALLOCATE (info%sphere_bounds(i)%p)
         END DO
-        DEALLOCATE (info%sphere_bounds,STAT=istat)
-        IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-                                         "info%sphere_bounds")
+        DEALLOCATE (info%sphere_bounds)
     ELSE
         ! no info to be deallocated
     ENDIF
@@ -338,8 +326,7 @@ CONTAINS
           info%ub_cube(:,i)=1-info%lb_cube(:,i)
         ENDDO
         IF (check_1.NE.check_2) THEN
-            CALL stop_program(routineN,moduleN,__LINE__,&
-                              "Irreproducible fp math caused memory corruption")
+            CPABORT("Irreproducible fp math caused memory corruption")
         END IF
 
     END IF

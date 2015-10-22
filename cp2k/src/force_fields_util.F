@@ -69,13 +69,11 @@ MODULE force_fields_util
                                              molecule_type
   USE pair_potential_types,            ONLY: pair_potential_pp_type
   USE particle_types,                  ONLY: particle_type
-  USE qmmm_types,                      ONLY: qmmm_env_mm_type
+  USE qmmm_types_low,                  ONLY: qmmm_env_mm_type
   USE shell_potential_types,           ONLY: shell_kind_type
   USE string_utilities,                ONLY: compress
-  USE termination,                     ONLY: stop_program
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -106,12 +104,11 @@ CONTAINS
 !> \param shell_particle_set ...
 !> \param core_particle_set ...
 !> \param cell ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE force_field_pack (particle_set,atomic_kind_set,molecule_kind_set, &
        molecule_set, ewald_env,fist_nonbond_env,ff_type,root_section, qmmm, &
        qmmm_env, mm_section, subsys_section, shell_particle_set,core_particle_set,&
-       cell, error)
+       cell)
 
     TYPE(particle_type), DIMENSION(:), &
       POINTER                                :: particle_set
@@ -133,7 +130,6 @@ CONTAINS
       POINTER                                :: shell_particle_set, &
                                                 core_particle_set
     TYPE(cell_type), POINTER                 :: cell
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'force_field_pack', &
       routineP = moduleN//':'//routineN
@@ -142,8 +138,8 @@ CONTAINS
       DIMENSION(:), POINTER                  :: Ainfo
     INTEGER                                  :: handle, iw, iw2, iw3, iw4, &
                                                 output_unit
-    LOGICAL                                  :: do_zbl, explicit, failure, &
-                                                fatal, ignore_fatal, my_qmmm
+    LOGICAL                                  :: do_zbl, explicit, fatal, &
+                                                ignore_fatal, my_qmmm
     REAL(KIND=dp)                            :: ewald_rcut, verlet_skin
     REAL(KIND=dp), DIMENSION(:), POINTER     :: charges
     TYPE(amber_info_type), POINTER           :: amb_info
@@ -156,22 +152,21 @@ CONTAINS
     TYPE(section_vals_type), POINTER         :: charges_section
 
     CALL timeset(routineN,handle)
-    failure = .FALSE.
     fatal   = .FALSE.
     ignore_fatal = ff_type%ignore_missing_critical
     NULLIFY(logger, Ainfo, charges_section, charges)
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
     ! Error unit
     output_unit= cp_logger_get_default_io_unit(logger)
 
     iw = cp_print_key_unit_nr(logger,mm_section,"PRINT%FF_INFO",&
-         extension=".mmLog",error=error)
+         extension=".mmLog")
     iw2= cp_print_key_unit_nr(logger,mm_section,"PRINT%FF_INFO/SPLINE_INFO",&
-         extension=".mmLog",error=error)
+         extension=".mmLog")
     iw3= cp_print_key_unit_nr(logger,mm_section,"PRINT%FF_INFO/SPLINE_DATA",&
-         extension=".mmLog",error=error)
+         extension=".mmLog")
     iw4= cp_print_key_unit_nr(logger,mm_section,"PRINT%PROGRAM_RUN_INFO",&
-         extension=".mmLog",error=error)
+         extension=".mmLog")
     NULLIFY(potparm_nonbond14, potparm_nonbond)
     my_qmmm = .FALSE.
     IF (PRESENT(qmmm).AND.PRESENT(qmmm_env)) my_qmmm = qmmm
@@ -184,81 +179,80 @@ CONTAINS
     ! 1. Determine the number of unique bond kind and allocate bond_kind_set
     !-----------------------------------------------------------------------------
     CALL  force_field_unique_bond (particle_set, molecule_kind_set, molecule_set, &
-         ff_type, error)
+         ff_type)
     !-----------------------------------------------------------------------------
     !-----------------------------------------------------------------------------
     ! 2. Determine the number of unique bend kind and allocate bend_kind_set
     !-----------------------------------------------------------------------------
     CALL force_field_unique_bend (particle_set, molecule_kind_set, molecule_set, &
-         ff_type, error)
+         ff_type)
     !-----------------------------------------------------------------------------
     !-----------------------------------------------------------------------------
     ! 3. Determine the number of unique Urey-Bradley kind and allocate ub_kind_set
     !-----------------------------------------------------------------------------
-    CALL force_field_unique_ub (particle_set, molecule_kind_set, molecule_set,   &
-         error)
+    CALL force_field_unique_ub (particle_set, molecule_kind_set, molecule_set)
     !-----------------------------------------------------------------------------
     !-----------------------------------------------------------------------------
     ! 4. Determine the number of unique torsion kind and allocate torsion_kind_set
     !-----------------------------------------------------------------------------
     CALL force_field_unique_tors (particle_set, molecule_kind_set, molecule_set, &
-         ff_type, error)
+         ff_type)
     !-----------------------------------------------------------------------------
     !-----------------------------------------------------------------------------
     ! 5. Determine the number of unique impr kind and allocate impr_kind_set
     !-----------------------------------------------------------------------------
     CALL force_field_unique_impr (particle_set, molecule_kind_set, molecule_set, &
-         ff_type, error)
+         ff_type)
     !-----------------------------------------------------------------------------
     !-----------------------------------------------------------------------------
     ! 6. Determine the number of unique opbend kind and allocate opbend_kind_set
     !-----------------------------------------------------------------------------
     CALL force_field_unique_opbend (particle_set, molecule_kind_set, molecule_set, &
-         ff_type, error)
+         ff_type)
     !-----------------------------------------------------------------------------
     !-----------------------------------------------------------------------------
     ! 7. Bonds
     !-----------------------------------------------------------------------------
     CALL force_field_pack_bond (particle_set, molecule_kind_set, molecule_set,   &
-         fatal, Ainfo, chm_info, inp_info, gro_info, amb_info, error)
+         fatal, Ainfo, chm_info, inp_info, gro_info, amb_info)
     !-----------------------------------------------------------------------------
     !-----------------------------------------------------------------------------
     ! 8. Bends
     !-----------------------------------------------------------------------------
     CALL force_field_pack_bend (particle_set, molecule_kind_set, molecule_set,   &
-         fatal, Ainfo, chm_info, inp_info, gro_info, amb_info, error)
+         fatal, Ainfo, chm_info, inp_info, gro_info, amb_info)
     ! Give information and abort if any bond or angle parameter is missing..
-    CALL release_FF_missing_par(fatal,ignore_fatal,AInfo,output_unit,iw,error)
+    CALL release_FF_missing_par(fatal,ignore_fatal,AInfo,output_unit,iw)
     !-----------------------------------------------------------------------------
     !-----------------------------------------------------------------------------
     ! 9. Urey-Bradley
     !-----------------------------------------------------------------------------
     CALL force_field_pack_ub (particle_set, molecule_kind_set, molecule_set,     &
-         Ainfo, chm_info, inp_info, iw, error)
+         Ainfo, chm_info, inp_info, iw)
     !-----------------------------------------------------------------------------
     !-----------------------------------------------------------------------------
     ! 10. Torsions
     !-----------------------------------------------------------------------------
     CALL force_field_pack_tors (particle_set, molecule_kind_set, molecule_set,   &
-         Ainfo, chm_info, inp_info, gro_info, amb_info, iw, error)
+         Ainfo, chm_info, inp_info, gro_info, amb_info, iw)
     !-----------------------------------------------------------------------------
     !-----------------------------------------------------------------------------
     ! 11. Impropers
     !-----------------------------------------------------------------------------
     CALL force_field_pack_impr (particle_set, molecule_kind_set, molecule_set,   &
-         Ainfo, chm_info, inp_info, gro_info, amb_info, error)
+         Ainfo, chm_info, inp_info, gro_info)
     !-----------------------------------------------------------------------------
     !-----------------------------------------------------------------------------
     ! 12. Out of plane bends
     !-----------------------------------------------------------------------------
     CALL force_field_pack_opbend (particle_set, molecule_kind_set, molecule_set, &
-       Ainfo, inp_info, error)
+       Ainfo, inp_info)
     ! Give information only if any Urey-Bradley, Torsion, improper or opbend is missing
     ! continue calculation..
-    CALL release_FF_missing_par(fatal,ignore_fatal,AInfo,output_unit,iw,error)
+    CALL release_FF_missing_par(fatal,ignore_fatal,AInfo,output_unit,iw)
 
-    charges_section => section_vals_get_subs_vals(mm_section,"FORCEFIELD%CHARGES",error=error)
-    CALL section_vals_get(charges_section, explicit=explicit, error=error)
+    charges_section => section_vals_get_subs_vals(mm_section,"FORCEFIELD%CHARGES")
+    CALL section_vals_get(charges_section, explicit=explicit)
     IF (.NOT.explicit) THEN
        !-----------------------------------------------------------------------------
        !-----------------------------------------------------------------------------
@@ -266,9 +260,9 @@ CONTAINS
        !      potential parameters
        !-----------------------------------------------------------------------------
        CALL force_field_pack_charge(atomic_kind_set, qmmm_env, fatal, iw, iw4,&
-            Ainfo, my_qmmm, inp_info, error)
+            Ainfo, my_qmmm, inp_info)
        ! Give information only if charge is missing and abort..
-       CALL release_FF_missing_par(fatal,ignore_fatal,AInfo,output_unit,iw,error)
+       CALL release_FF_missing_par(fatal,ignore_fatal,AInfo,output_unit,iw)
     ELSE
        !-----------------------------------------------------------------------------
        !-----------------------------------------------------------------------------
@@ -276,21 +270,21 @@ CONTAINS
        !      allows the usage of different charges for same atomic types
        !-----------------------------------------------------------------------------
        CALL force_field_pack_charges(charges, charges_section, particle_set, my_qmmm,&
-            qmmm_env, inp_info, iw4, error)
+            qmmm_env, inp_info, iw4)
     END IF
 
     !-----------------------------------------------------------------------------
     !-----------------------------------------------------------------------------
     ! 14. Set up the radius of the electrostatic multipole in Fist
     !-----------------------------------------------------------------------------
-    CALL force_field_pack_radius(atomic_kind_set, iw, subsys_section, error)
+    CALL force_field_pack_radius(atomic_kind_set, iw, subsys_section)
 
     !-----------------------------------------------------------------------------
     !-----------------------------------------------------------------------------
     ! 15. Set up the polarizable FF parameters
     !-----------------------------------------------------------------------------
-    CALL force_field_pack_pol(atomic_kind_set, iw, inp_info, error)
-    CALL force_field_pack_damp(atomic_kind_set, iw, inp_info, error)
+    CALL force_field_pack_pol(atomic_kind_set, iw, inp_info)
+    CALL force_field_pack_damp(atomic_kind_set, iw, inp_info)
 
     !-----------------------------------------------------------------------------
     !-----------------------------------------------------------------------------
@@ -298,7 +292,7 @@ CONTAINS
     !-----------------------------------------------------------------------------
     CALL force_field_pack_shell ( particle_set, atomic_kind_set,&
          molecule_kind_set, molecule_set, root_section, subsys_section,&
-         shell_particle_set, core_particle_set, cell, iw, inp_info, error)
+         shell_particle_set, core_particle_set, cell, iw, inp_info)
     IF (ff_type%do_nonbonded) THEN
        !-----------------------------------------------------------------------------
        !-----------------------------------------------------------------------------
@@ -306,14 +300,13 @@ CONTAINS
        !-----------------------------------------------------------------------------
        ! Move the data from the info structures to potparm_nonbond
        CALL force_field_pack_nonbond14(atomic_kind_set, ff_type, qmmm_env, iw, Ainfo,&
-            chm_info, inp_info, gro_info, amb_info, potparm_nonbond14, ewald_env, &
-            error)
+            chm_info, inp_info, gro_info, amb_info, potparm_nonbond14, ewald_env)
        ! Give information if any 1-4 is missing.. continue calculation..
-       CALL release_FF_missing_par(fatal,ignore_fatal,AInfo,output_unit,iw,error)
+       CALL release_FF_missing_par(fatal,ignore_fatal,AInfo,output_unit,iw)
        ! Create the spline data
-       CALL section_vals_val_get(mm_section,"FORCEFIELD%ZBL_SCATTERING",l_val=do_zbl,error=error)
+       CALL section_vals_val_get(mm_section,"FORCEFIELD%ZBL_SCATTERING",l_val=do_zbl)
        CALL force_field_pack_splines(atomic_kind_set, ff_type, iw2, iw3, iw4, &
-            potparm_nonbond14, do_zbl, nonbonded_type="NONBONDED14", error=error)
+            potparm_nonbond14, do_zbl, nonbonded_type="NONBONDED14")
        !-----------------------------------------------------------------------------
        !-----------------------------------------------------------------------------
        ! 18. Set up potparm_nonbond
@@ -321,34 +314,34 @@ CONTAINS
        ! Move the data from the info structures to potparm_nonbond
        CALL force_field_pack_nonbond(atomic_kind_set, ff_type, qmmm_env, &
             fatal, iw, Ainfo, chm_info, inp_info, gro_info, amb_info, &
-            potparm_nonbond, ewald_env, error)
+            potparm_nonbond, ewald_env)
        ! Give information and abort if any pair potential spline is missing..
-       CALL release_FF_missing_par(fatal,ignore_fatal,AInfo,output_unit,iw,error)
+       CALL release_FF_missing_par(fatal,ignore_fatal,AInfo,output_unit,iw)
        ! Create the spline data
-       CALL section_vals_val_get(mm_section,"FORCEFIELD%ZBL_SCATTERING",l_val=do_zbl,error=error)
+       CALL section_vals_val_get(mm_section,"FORCEFIELD%ZBL_SCATTERING",l_val=do_zbl)
        CALL force_field_pack_splines(atomic_kind_set, ff_type, iw2, iw3, iw4, &
-            potparm_nonbond, do_zbl, nonbonded_type="NONBONDED", error=error)
+            potparm_nonbond, do_zbl, nonbonded_type="NONBONDED")
     END IF
     !-----------------------------------------------------------------------------
     !-----------------------------------------------------------------------------
     ! 19. Create nonbond environment
     !-----------------------------------------------------------------------------
-    CALL ewald_env_get(ewald_env, rcut=ewald_rcut, error=error)
+    CALL ewald_env_get(ewald_env, rcut=ewald_rcut)
     CALL section_vals_val_get(mm_section,"NEIGHBOR_LISTS%VERLET_SKIN",&
-         r_val=verlet_skin,error=error)
+         r_val=verlet_skin)
     CALL fist_nonbond_env_create (fist_nonbond_env, atomic_kind_set, &
          potparm_nonbond14, potparm_nonbond, ff_type%do_nonbonded, &
          verlet_skin, ewald_rcut, ff_type%ei_scale14, &
-         ff_type%vdw_scale14, ff_type%shift_cutoff, error)
-    CALL fist_nonbond_env_set(fist_nonbond_env, charges=charges, error=error)
+         ff_type%vdw_scale14, ff_type%shift_cutoff)
+    CALL fist_nonbond_env_set(fist_nonbond_env, charges=charges)
     ! Compute the electrostatic interaction cutoffs.
     CALL force_field_pack_eicut(atomic_kind_set, ff_type, potparm_nonbond, &
-         ewald_env, error)
+         ewald_env)
 
-    CALL cp_print_key_finished_output(iw4,logger,mm_section,"PRINT%PROGRAM_RUN_INFO",error=error)
-    CALL cp_print_key_finished_output(iw3,logger,mm_section,"PRINT%FF_INFO/SPLINE_DATA",error=error)
-    CALL cp_print_key_finished_output(iw2,logger,mm_section,"PRINT%FF_INFO/SPLINE_INFO",error=error)
-    CALL cp_print_key_finished_output(iw,logger,mm_section,"PRINT%FF_INFO",error=error)
+    CALL cp_print_key_finished_output(iw4,logger,mm_section,"PRINT%PROGRAM_RUN_INFO")
+    CALL cp_print_key_finished_output(iw3,logger,mm_section,"PRINT%FF_INFO/SPLINE_DATA")
+    CALL cp_print_key_finished_output(iw2,logger,mm_section,"PRINT%FF_INFO/SPLINE_INFO")
+    CALL cp_print_key_finished_output(iw,logger,mm_section,"PRINT%FF_INFO")
     CALL timestop(handle)
 
   END SUBROUTINE force_field_pack
@@ -360,22 +353,18 @@ CONTAINS
 !> \param array ...
 !> \param output_unit ...
 !> \param iw ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE release_FF_missing_par(fatal, ignore_fatal, array, output_unit, iw, error)
+  SUBROUTINE release_FF_missing_par(fatal, ignore_fatal, array, output_unit, iw)
     LOGICAL, INTENT(INOUT)                   :: fatal, ignore_fatal
     CHARACTER(LEN=default_string_length), &
       DIMENSION(:), POINTER                  :: array
     INTEGER, INTENT(IN)                      :: output_unit, iw
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'release_FF_missing_par', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: i
 
-    failure = .FALSE.
     IF (ASSOCIATED(array)) THEN
        IF (output_unit>0) THEN
           WRITE(output_unit,*)
@@ -395,8 +384,7 @@ CONTAINS
              WRITE(output_unit,*)
           END IF
        END IF
-       DEALLOCATE(array,stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE(array)
     END IF
     IF (fatal) THEN
       IF (ignore_fatal) THEN
@@ -408,8 +396,7 @@ CONTAINS
                " All missing parameters will not contribute to the potential energy!"
         END IF
       ELSE
-        CALL stop_program(routineN,moduleN,__LINE__,&
-                          "Missing critical ForceField parameters!")
+        CPABORT("Missing critical ForceField parameters!")
       END IF
     END IF
   END SUBROUTINE release_FF_missing_par
@@ -421,10 +408,9 @@ CONTAINS
 !> \param molecule_set ...
 !> \param mm_section ...
 !> \param charges ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE force_field_qeff_output (particle_set,molecule_kind_set,&
-       molecule_set,mm_section,charges,error)
+       molecule_set,mm_section,charges)
 
     TYPE(particle_type), DIMENSION(:), &
       POINTER                                :: particle_set
@@ -434,7 +420,6 @@ CONTAINS
       POINTER                                :: molecule_set
     TYPE(section_vals_type), POINTER         :: mm_section
     REAL(KIND=dp), DIMENSION(:), POINTER     :: charges
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'force_field_qeff_output', &
       routineP = moduleN//':'//routineN
@@ -442,7 +427,7 @@ CONTAINS
     CHARACTER(LEN=default_string_length)     :: atmname, molname
     INTEGER                                  :: first, handle, iatom, imol, &
                                                 iw, j, jatom
-    LOGICAL                                  :: failure, shell_active
+    LOGICAL                                  :: shell_active
     REAL(KIND=dp)                            :: mass, mass_mol, mass_sum, &
                                                 qeff, qeff_mol, qeff_sum
     TYPE(atom_type), DIMENSION(:), POINTER   :: atom_list
@@ -453,11 +438,10 @@ CONTAINS
     TYPE(shell_kind_type), POINTER           :: shell
 
     CALL timeset(routineN,handle)
-    failure = .FALSE.
     NULLIFY(logger)
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
     iw = cp_print_key_unit_nr(logger,mm_section,"PRINT%FF_INFO",&
-         extension=".mmLog",error=error)
+         extension=".mmLog")
 
     qeff     = 0.0_dp
     qeff_mol = 0.0_dp
@@ -517,7 +501,7 @@ CONTAINS
     IF(iw>0) WRITE(iw,'(A,F20.10)') "    Total system mass   = ",mass_sum
 
     CALL cp_print_key_finished_output(iw,logger,mm_section,&
-         "PRINT%FF_INFO",error=error)
+         "PRINT%FF_INFO")
     CALL timestop(handle)
   END SUBROUTINE force_field_qeff_output
 
@@ -525,14 +509,12 @@ CONTAINS
 !> \brief Removes UNSET force field types
 !> \param molecule_kind_set ...
 !> \param mm_section ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE clean_intra_force_kind (molecule_kind_set,mm_section,error)
+  SUBROUTINE clean_intra_force_kind (molecule_kind_set,mm_section)
 
     TYPE(molecule_kind_type), DIMENSION(:), &
       POINTER                                :: molecule_kind_set
     TYPE(section_vals_type), POINTER         :: mm_section
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'clean_intra_force_kind', &
       routineP = moduleN//':'//routineN
@@ -540,9 +522,9 @@ CONTAINS
     INTEGER :: atm2_a, atm2_b, atm2_c, atm_a, atm_b, atm_c, atm_d, counter, &
       handle, i, ibend, ibond, icolv, ig3x3, ig4x6, iimpr, ikind, iopbend, &
       itorsion, iub, iw, j, k, nbend, nbond, newkind, ng3x3, ng4x6, nimpr, &
-      nopbend, ntorsion, nub, stat
+      nopbend, ntorsion, nub
     INTEGER, POINTER                         :: bad1(:), bad2(:)
-    LOGICAL                                  :: failure, unsetme, valid_kind
+    LOGICAL                                  :: unsetme, valid_kind
     TYPE(bend_kind_type), DIMENSION(:), &
       POINTER                                :: bend_kind_set, &
                                                 new_bend_kind_set
@@ -577,11 +559,10 @@ CONTAINS
     TYPE(ub_type), DIMENSION(:), POINTER     :: new_ub_list, ub_list
 
     CALL timeset(routineN,handle)
-    failure = .FALSE.
     NULLIFY(logger)
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
     iw = cp_print_key_unit_nr(logger,mm_section,"PRINT%FF_INFO",&
-         extension=".mmLog",error=error)
+         extension=".mmLog")
     !-----------------------------------------------------------------------------
     !-----------------------------------------------------------------------------
     ! 1. Lets Tag the unwanted bonds due to the use of distance constraint
@@ -768,8 +749,7 @@ CONTAINS
                SIZE(bond_list),SIZE(bond_kind_set)
           IF (iw>0) WRITE(iw,'(2I6)')(bond_list(ibond)%a,bond_list(ibond)%b,ibond=1,SIZE(bond_list))
           NULLIFY(bad1,bad2)
-          ALLOCATE(bad1(SIZE(bond_kind_set)),STAT=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          ALLOCATE(bad1(SIZE(bond_kind_set)))
           bad1(:)=0
           DO ibond=1,SIZE(bond_kind_set)
              unsetme=.FALSE.
@@ -787,7 +767,7 @@ CONTAINS
           END DO
           IF(SUM(bad1)/=0) THEN
              counter = SIZE(bond_kind_set)-SUM(bad1)
-             CALL allocate_bond_kind_set(new_bond_kind_set,counter,error)
+             CALL allocate_bond_kind_set(new_bond_kind_set,counter)
              counter=0
              DO ibond=1,SIZE(bond_kind_set)
                 IF(bad1(ibond)==0) THEN
@@ -796,8 +776,7 @@ CONTAINS
                 END IF
              END DO
              counter=0
-             ALLOCATE(bad2(SIZE(bond_list)),STAT=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+             ALLOCATE(bad2(SIZE(bond_list)))
              bad2(:)=0
              DO ibond=1,SIZE(bond_list)
                 unsetme = .FALSE.
@@ -807,8 +786,7 @@ CONTAINS
              END DO
              IF(SUM(bad2)/=0) THEN
                 counter = SIZE(bond_list)-SUM(bad2)
-                ALLOCATE(new_bond_list(counter),STAT=stat)
-                CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+                ALLOCATE(new_bond_list(counter))
                 counter=0
                 DO ibond=1,SIZE(bond_list)
                    IF(bad2(ibond)==0) THEN
@@ -827,18 +805,15 @@ CONTAINS
                    new_bond_kind_set(ibond)%kind_number=ibond
                 END DO
              END IF
-             DEALLOCATE(bad2,STAT=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-             CALL deallocate_bond_kind_set(bond_kind_set,error)
-             DEALLOCATE(bond_list,STAT=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+             DEALLOCATE(bad2)
+             CALL deallocate_bond_kind_set(bond_kind_set)
+             DEALLOCATE(bond_list)
              IF(iw>0) WRITE(iw,*) "    Mol(",ikind,") New BOND Count: ",&
                   SIZE(new_bond_list),SIZE(new_bond_kind_set)
              IF (iw>0) WRITE(iw,'(2I6)')(new_bond_list(ibond)%a,new_bond_list(ibond)%b,&
                   ibond=1,SIZE(new_bond_list))
           END IF
-          DEALLOCATE(bad1,STAT=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          DEALLOCATE(bad1)
        END IF
     END DO
     !-----------------------------------------------------------------------------
@@ -857,8 +832,7 @@ CONTAINS
           IF (iw>0) WRITE(iw,'(3I6)')(bend_list(ibend)%a,bend_list(ibend)%b,&
                bend_list(ibend)%c,ibend=1,SIZE(bend_list))
           NULLIFY(bad1,bad2)
-          ALLOCATE(bad1(SIZE(bend_kind_set)),STAT=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          ALLOCATE(bad1(SIZE(bend_kind_set)))
           bad1(:)=0
           DO ibend=1,SIZE(bend_kind_set)
              unsetme=.FALSE.
@@ -876,7 +850,7 @@ CONTAINS
           END DO
           IF(SUM(bad1)/=0) THEN
              counter = SIZE(bend_kind_set)-SUM(bad1)
-             CALL allocate_bend_kind_set(new_bend_kind_set,counter,error)
+             CALL allocate_bend_kind_set(new_bend_kind_set,counter)
              counter=0
              DO ibend=1,SIZE(bend_kind_set)
                 IF(bad1(ibend)==0) THEN
@@ -885,8 +859,7 @@ CONTAINS
                 END IF
              END DO
              counter=0
-             ALLOCATE(bad2(SIZE(bend_list)),STAT=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+             ALLOCATE(bad2(SIZE(bend_list)))
              bad2(:)=0
              DO ibend=1,SIZE(bend_list)
                 unsetme = .FALSE.
@@ -896,8 +869,7 @@ CONTAINS
              END DO
              IF(SUM(bad2)/=0) THEN
                 counter = SIZE(bend_list)-SUM(bad2)
-                ALLOCATE(new_bend_list(counter),STAT=stat)
-                CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+                ALLOCATE(new_bend_list(counter))
                 counter=0
                 DO ibend=1,SIZE(bend_list)
                    IF(bad2(ibend)==0) THEN
@@ -916,18 +888,15 @@ CONTAINS
                    new_bend_kind_set(ibend)%kind_number=ibend
                 END DO
              END IF
-             DEALLOCATE(bad2,STAT=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-             CALL deallocate_bend_kind_set(bend_kind_set,error)
-             DEALLOCATE(bend_list,STAT=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+             DEALLOCATE(bad2)
+             CALL deallocate_bend_kind_set(bend_kind_set)
+             DEALLOCATE(bend_list)
              IF(iw>0) WRITE(iw,*) "    Mol(",ikind,") New BEND Count: ",&
                   SIZE(new_bend_list),SIZE(new_bend_kind_set)
              IF (iw>0) WRITE(iw,'(3I6)')(new_bend_list(ibend)%a,new_bend_list(ibend)%b,&
                   new_bend_list(ibend)%c,ibend=1,SIZE(new_bend_list))
           END IF
-          DEALLOCATE(bad1,STAT=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          DEALLOCATE(bad1)
        END IF
     END DO
 
@@ -947,8 +916,7 @@ CONTAINS
           IF (iw>0) WRITE(iw,'(3I6)')(ub_list(iub)%a,ub_list(iub)%b,&
                ub_list(iub)%c,iub=1,SIZE(ub_list))
           NULLIFY(bad1,bad2)
-          ALLOCATE(bad1(SIZE(ub_kind_set)),STAT=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          ALLOCATE(bad1(SIZE(ub_kind_set)))
           bad1(:)=0
           DO iub=1,SIZE(ub_kind_set)
              unsetme=.FALSE.
@@ -966,7 +934,7 @@ CONTAINS
           END DO
           IF(SUM(bad1)/=0) THEN
              counter = SIZE(ub_kind_set)-SUM(bad1)
-             CALL allocate_ub_kind_set(new_ub_kind_set,counter,error)
+             CALL allocate_ub_kind_set(new_ub_kind_set,counter)
              counter=0
              DO iub=1,SIZE(ub_kind_set)
                 IF(bad1(iub)==0) THEN
@@ -975,8 +943,7 @@ CONTAINS
                 END IF
              END DO
              counter=0
-             ALLOCATE(bad2(SIZE(ub_list)),STAT=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+             ALLOCATE(bad2(SIZE(ub_list)))
              bad2(:)=0
              DO iub=1,SIZE(ub_list)
                 unsetme = .FALSE.
@@ -986,8 +953,7 @@ CONTAINS
              END DO
              IF(SUM(bad2)/=0) THEN
                 counter = SIZE(ub_list)-SUM(bad2)
-                ALLOCATE(new_ub_list(counter),STAT=stat)
-                CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+                ALLOCATE(new_ub_list(counter))
                 counter=0
                 DO iub=1,SIZE(ub_list)
                    IF(bad2(iub)==0) THEN
@@ -1006,18 +972,15 @@ CONTAINS
                    new_ub_kind_set(iub)%kind_number=iub
                 END DO
              END IF
-             DEALLOCATE(bad2,STAT=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-             CALL ub_kind_dealloc_ref(ub_kind_set,error=error)
-             DEALLOCATE(ub_list,STAT=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+             DEALLOCATE(bad2)
+             CALL ub_kind_dealloc_ref(ub_kind_set)
+             DEALLOCATE(ub_list)
              IF(iw>0) WRITE(iw,*) "    Mol(",ikind,") New UB Count: ",&
                   SIZE(new_ub_list),SIZE(new_ub_kind_set)
              IF (iw>0) WRITE(iw,'(3I6)')(new_ub_list(iub)%a,new_ub_list(iub)%b,&
                   new_ub_list(iub)%c,iub=1,SIZE(new_ub_list))
           END IF
-          DEALLOCATE(bad1,STAT=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          DEALLOCATE(bad1)
        END IF
     END DO
 
@@ -1037,8 +1000,7 @@ CONTAINS
           IF (iw>0) WRITE(iw,'(4I6)')(torsion_list(itorsion)%a,torsion_list(itorsion)%b,&
                torsion_list(itorsion)%c,torsion_list(itorsion)%d,itorsion=1,SIZE(torsion_list))
           NULLIFY(bad1,bad2)
-          ALLOCATE(bad1(SIZE(torsion_kind_set)),STAT=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          ALLOCATE(bad1(SIZE(torsion_kind_set)))
           bad1(:)=0
           DO itorsion=1,SIZE(torsion_kind_set)
              unsetme=.FALSE.
@@ -1056,7 +1018,7 @@ CONTAINS
           END DO
           IF(SUM(bad1)/=0) THEN
              counter = SIZE(torsion_kind_set)-SUM(bad1)
-             CALL allocate_torsion_kind_set(new_torsion_kind_set,counter,error)
+             CALL allocate_torsion_kind_set(new_torsion_kind_set,counter)
              counter=0
              DO itorsion=1,SIZE(torsion_kind_set)
                 IF(bad1(itorsion)==0) THEN
@@ -1065,20 +1027,16 @@ CONTAINS
                    i = SIZE(torsion_kind_set(itorsion)%m)
                    j = SIZE(torsion_kind_set(itorsion)%k)
                    k = SIZE(torsion_kind_set(itorsion)%phi0)
-                   ALLOCATE(new_torsion_kind_set(counter)%m(i),STAT=stat)
-                   CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-                   ALLOCATE(new_torsion_kind_set(counter)%k(i),STAT=stat)
-                   CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-                   ALLOCATE(new_torsion_kind_set(counter)%phi0(i),STAT=stat)
-                   CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+                   ALLOCATE(new_torsion_kind_set(counter)%m(i))
+                   ALLOCATE(new_torsion_kind_set(counter)%k(i))
+                   ALLOCATE(new_torsion_kind_set(counter)%phi0(i))
                    new_torsion_kind_set(counter)%m= torsion_kind_set(itorsion)%m
                    new_torsion_kind_set(counter)%k= torsion_kind_set(itorsion)%k
                    new_torsion_kind_set(counter)%phi0= torsion_kind_set(itorsion)%phi0
                 END IF
              END DO
              counter=0
-             ALLOCATE(bad2(SIZE(torsion_list)),STAT=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+             ALLOCATE(bad2(SIZE(torsion_list)))
              bad2(:)=0
              DO itorsion=1,SIZE(torsion_list)
                 unsetme = .FALSE.
@@ -1088,8 +1046,7 @@ CONTAINS
              END DO
              IF(SUM(bad2)/=0) THEN
                 counter = SIZE(torsion_list)-SUM(bad2)
-                ALLOCATE(new_torsion_list(counter),STAT=stat)
-                CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+                ALLOCATE(new_torsion_list(counter))
                 counter=0
                 DO itorsion=1,SIZE(torsion_list)
                    IF(bad2(itorsion)==0) THEN
@@ -1108,23 +1065,19 @@ CONTAINS
                    new_torsion_kind_set(itorsion)%kind_number=itorsion
                 END DO
              END IF
-             DEALLOCATE(bad2,STAT=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+             DEALLOCATE(bad2)
              DO itorsion=1,SIZE(torsion_kind_set)
-                CALL torsion_kind_dealloc_ref(torsion_kind_set(itorsion),error=error)
+                CALL torsion_kind_dealloc_ref(torsion_kind_set(itorsion))
              END DO
-             DEALLOCATE(torsion_kind_set,STAT=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-             DEALLOCATE(torsion_list,STAT=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+             DEALLOCATE(torsion_kind_set)
+             DEALLOCATE(torsion_list)
              IF(iw>0) WRITE(iw,*) "    Mol(",ikind,") New TORSION Count: ",&
                   SIZE(new_torsion_list),SIZE(new_torsion_kind_set)
              IF (iw>0) WRITE(iw,'(4I6)')(new_torsion_list(itorsion)%a,new_torsion_list(itorsion)%b,&
                   new_torsion_list(itorsion)%c,new_torsion_list(itorsion)%d,itorsion=1,&
                   SIZE(new_torsion_list))
           END IF
-          DEALLOCATE(bad1,STAT=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          DEALLOCATE(bad1)
        END IF
     END DO
 
@@ -1142,8 +1095,7 @@ CONTAINS
           IF(iw>0) WRITE(iw,*) "    Mol(",ikind,") Old IMPROPER Count: ",&
                SIZE(impr_list),SIZE(impr_kind_set)
           NULLIFY(bad1,bad2)
-          ALLOCATE(bad1(SIZE(impr_kind_set)),STAT=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          ALLOCATE(bad1(SIZE(impr_kind_set)))
           bad1(:)=0
           DO iimpr=1,SIZE(impr_kind_set)
              unsetme=.FALSE.
@@ -1161,7 +1113,7 @@ CONTAINS
           END DO
           IF(SUM(bad1)/=0) THEN
              counter = SIZE(impr_kind_set)-SUM(bad1)
-             CALL allocate_impr_kind_set(new_impr_kind_set,counter,error)
+             CALL allocate_impr_kind_set(new_impr_kind_set,counter)
              counter=0
              DO iimpr=1,SIZE(impr_kind_set)
                 IF(bad1(iimpr)==0) THEN
@@ -1170,8 +1122,7 @@ CONTAINS
                 END IF
              END DO
              counter=0
-             ALLOCATE(bad2(SIZE(impr_list)),STAT=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+             ALLOCATE(bad2(SIZE(impr_list)))
              bad2(:)=0
              DO iimpr=1,SIZE(impr_list)
                 unsetme = .FALSE.
@@ -1181,8 +1132,7 @@ CONTAINS
              END DO
              IF(SUM(bad2)/=0) THEN
                 counter = SIZE(impr_list)-SUM(bad2)
-                ALLOCATE(new_impr_list(counter),STAT=stat)
-                CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+                ALLOCATE(new_impr_list(counter))
                 counter=0
                 DO iimpr=1,SIZE(impr_list)
                    IF(bad2(iimpr)==0) THEN
@@ -1201,20 +1151,16 @@ CONTAINS
                    new_impr_kind_set(iimpr)%kind_number=iimpr
                 END DO
              END IF
-             DEALLOCATE(bad2,STAT=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+             DEALLOCATE(bad2)
              DO iimpr=1,SIZE(impr_kind_set)
-                CALL impr_kind_dealloc_ref(error=error) !This Subroutine doesn't deallocate anything, maybe needs to be implemented
+                CALL impr_kind_dealloc_ref() !This Subroutine doesn't deallocate anything, maybe needs to be implemented
              END DO
-             DEALLOCATE(impr_kind_set,STAT=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-             DEALLOCATE(impr_list,STAT=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+             DEALLOCATE(impr_kind_set)
+             DEALLOCATE(impr_list)
              IF(iw>0) WRITE(iw,*) "    Mol(",ikind,") New IMPROPER Count: ",&
                   SIZE(new_impr_list),SIZE(new_impr_kind_set)
           END IF
-          DEALLOCATE(bad1,STAT=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          DEALLOCATE(bad1)
        END IF
     END DO
 
@@ -1232,8 +1178,7 @@ CONTAINS
           IF(iw>0) WRITE(iw,*) "    Mol(",ikind,") Old OPBEND Count: ",&
                SIZE(opbend_list),SIZE(opbend_kind_set)
           NULLIFY(bad1,bad2)
-          ALLOCATE(bad1(SIZE(opbend_kind_set)),STAT=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          ALLOCATE(bad1(SIZE(opbend_kind_set)))
           bad1(:)=0
           DO iopbend=1,SIZE(opbend_kind_set)
              unsetme=.FALSE.
@@ -1251,7 +1196,7 @@ CONTAINS
           END DO
           IF(SUM(bad1)/=0) THEN
              counter = SIZE(opbend_kind_set)-SUM(bad1)
-             CALL allocate_opbend_kind_set(new_opbend_kind_set,counter,error)
+             CALL allocate_opbend_kind_set(new_opbend_kind_set,counter)
              counter=0
              DO iopbend=1,SIZE(opbend_kind_set)
                 IF(bad1(iopbend)==0) THEN
@@ -1260,8 +1205,7 @@ CONTAINS
                 END IF
              END DO
              counter=0
-             ALLOCATE(bad2(SIZE(opbend_list)),STAT=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+             ALLOCATE(bad2(SIZE(opbend_list)))
              bad2(:)=0
              DO iopbend=1,SIZE(opbend_list)
                 unsetme = .FALSE.
@@ -1271,8 +1215,7 @@ CONTAINS
              END DO
              IF(SUM(bad2)/=0) THEN
                 counter = SIZE(opbend_list)-SUM(bad2)
-                ALLOCATE(new_opbend_list(counter),STAT=stat)
-                CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+                ALLOCATE(new_opbend_list(counter))
                 counter=0
                 DO iopbend=1,SIZE(opbend_list)
                    IF(bad2(iopbend)==0) THEN
@@ -1291,17 +1234,13 @@ CONTAINS
                    new_opbend_kind_set(iopbend)%kind_number=iopbend
                 END DO
              END IF
-             DEALLOCATE(bad2,STAT=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-             DEALLOCATE(opbend_kind_set,STAT=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-             DEALLOCATE(opbend_list,STAT=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+             DEALLOCATE(bad2)
+             DEALLOCATE(opbend_kind_set)
+             DEALLOCATE(opbend_list)
              IF(iw>0) WRITE(iw,*) "    Mol(",ikind,") New OPBEND Count: ",&
                   SIZE(new_opbend_list),SIZE(new_opbend_kind_set)
           END IF
-          DEALLOCATE(bad1,STAT=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+          DEALLOCATE(bad1)
        END IF
     END DO
 
@@ -1311,7 +1250,7 @@ CONTAINS
     !-                NEED TO REMOVE EXTRAS HERE   - IKUO
     !---------------------------------------------------------------------------
     CALL cp_print_key_finished_output(iw,logger,mm_section,&
-         "PRINT%FF_INFO",error=error)
+         "PRINT%FF_INFO")
     CALL timestop(handle)
   END SUBROUTINE clean_intra_force_kind
 
@@ -1326,10 +1265,9 @@ CONTAINS
 !> \param size_variables ...
 !> \param i_rep_sec ...
 !> \param input_variables ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE get_generic_info(gen_section, func_name, xfunction, parameters, values,&
-       var_values, size_variables, i_rep_sec, input_variables, error)
+       var_values, size_variables, i_rep_sec, input_variables)
     TYPE(section_vals_type), POINTER         :: gen_section
     CHARACTER(LEN=*), INTENT(IN)             :: func_name
     CHARACTER(LEN=default_path_length), &
@@ -1341,7 +1279,6 @@ CONTAINS
       POINTER                                :: var_values
     INTEGER, INTENT(IN), OPTIONAL            :: size_variables, i_rep_sec
     CHARACTER(LEN=*), DIMENSION(:), OPTIONAL :: input_variables
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'get_generic_info', &
       routineP = moduleN//':'//routineN
@@ -1351,55 +1288,49 @@ CONTAINS
                                                 my_units_tmp, my_var
     INTEGER                                  :: i, ind, irep, isize, j, &
                                                 mydim, n_par, n_units, n_val, &
-                                                nblank, stat
-    LOGICAL                                  :: check, failure
+                                                nblank
+    LOGICAL                                  :: check
     REAL(KIND=dp), DIMENSION(:), POINTER     :: my_val, my_val_tmp
 
-    failure = .FALSE.
     NULLIFY(my_var, my_par, my_val, my_par_tmp, my_val_tmp)
     NULLIFY (my_units)
     NULLIFY (my_units_tmp)
     IF (ASSOCIATED(parameters)) THEN
-       DEALLOCATE(parameters,STAT=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE(parameters)
     END IF
     IF (ASSOCIATED(values)) THEN
-       DEALLOCATE(values,STAT=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE(values)
     END IF
     irep = 1
     IF (PRESENT(i_rep_sec)) irep = i_rep_sec
     mydim = 0
-    CALL section_vals_val_get(gen_section,TRIM(func_name),i_rep_section=irep,c_val=xfunction,error=error)
+    CALL section_vals_val_get(gen_section,TRIM(func_name),i_rep_section=irep,c_val=xfunction)
     CALL compress(xfunction, full=.TRUE.)
     IF (PRESENT(input_variables)) THEN
-       ALLOCATE(my_var(SIZE(input_variables)),stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       ALLOCATE(my_var(SIZE(input_variables)))
        my_var = input_variables
     ELSE
-       CALL section_vals_val_get(gen_section,"VARIABLES",i_rep_section=irep,c_vals=my_var,error=error)
+       CALL section_vals_val_get(gen_section,"VARIABLES",i_rep_section=irep,c_vals=my_var)
     END IF
     IF (ASSOCIATED(my_var)) THEN
        mydim = SIZE(my_var)
     END IF
     IF (PRESENT(size_variables)) THEN
-       CPPrecondition(mydim==size_variables,cp_failure_level,routineP,error,failure)
+       CPASSERT(mydim==size_variables)
     END IF
     ! Check for presence of Parameters
-    CALL section_vals_val_get(gen_section,"PARAMETERS",i_rep_section=irep,n_rep_val=n_par,error=error)
-    CALL section_vals_val_get(gen_section,"VALUES",i_rep_section=irep,n_rep_val=n_val,error=error)
+    CALL section_vals_val_get(gen_section,"PARAMETERS",i_rep_section=irep,n_rep_val=n_par)
+    CALL section_vals_val_get(gen_section,"VALUES",i_rep_section=irep,n_rep_val=n_val)
     check = (n_par>0).EQV.(n_val>0)
-    CPPrecondition(check,cp_failure_level,routineP,error,failure)
-    CALL section_vals_val_get(gen_section,"UNITS",i_rep_section=irep,n_rep_val=n_units,error=error)
+    CPASSERT(check)
+    CALL section_vals_val_get(gen_section,"UNITS",i_rep_section=irep,n_rep_val=n_units)
     IF (n_par>0) THEN
        ! Parameters
-       ALLOCATE(my_par(0),stat=stat)
-       CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
-       ALLOCATE(my_val(0),stat=stat)
-       CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+       ALLOCATE(my_par(0))
+       ALLOCATE(my_val(0))
        DO i = 1, n_par
           isize  = SIZE(my_par)
-          CALL section_vals_val_get(gen_section,"PARAMETERS",i_rep_section=irep,i_rep_val=i,c_vals=my_par_tmp,error=error)
+          CALL section_vals_val_get(gen_section,"PARAMETERS",i_rep_section=irep,i_rep_val=i,c_vals=my_par_tmp)
           nblank = COUNT(my_par_tmp=="")
           CALL reallocate(my_par, 1, isize+SIZE(my_par_tmp)-nblank)
           ind = 0
@@ -1411,18 +1342,17 @@ CONTAINS
        END DO
        DO i = 1, n_val
           isize = SIZE(my_val)
-          CALL section_vals_val_get(gen_section,"VALUES",i_rep_section=irep,i_rep_val=i,r_vals=my_val_tmp,error=error)
+          CALL section_vals_val_get(gen_section,"VALUES",i_rep_section=irep,i_rep_val=i,r_vals=my_val_tmp)
           CALL reallocate(my_val,1, isize+SIZE(my_val_tmp))
           my_val(isize+1:isize+SIZE(my_val_tmp))=my_val_tmp
        END DO
-       CPPrecondition(SIZE(my_par)==SIZE(my_val),cp_failure_level,routineP,error,failure)
+       CPASSERT(SIZE(my_par)==SIZE(my_val))
        ! Optionally read the units for each parameter value
-       ALLOCATE (my_units(0),stat=stat)
-       CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+       ALLOCATE (my_units(0))
        IF (n_units > 0) THEN
           DO i=1,n_units
              isize = SIZE(my_units)
-             CALL section_vals_val_get(gen_section,"UNITS",i_rep_section=irep,i_rep_val=i,c_vals=my_units_tmp,error=error)
+             CALL section_vals_val_get(gen_section,"UNITS",i_rep_section=irep,i_rep_val=i,c_vals=my_units_tmp)
              nblank = COUNT(my_units_tmp == "")
              CALL reallocate(my_units,1,isize+SIZE(my_units_tmp)-nblank)
              ind = 0
@@ -1432,35 +1362,30 @@ CONTAINS
                 my_units(isize+ind) = my_units_tmp(j)
              END DO
           END DO
-          CPPrecondition(SIZE(my_units)==SIZE(my_val),cp_failure_level,routineP,error,failure)
+          CPASSERT(SIZE(my_units)==SIZE(my_val))
        END IF
        mydim=mydim+SIZE(my_val)
        IF (SIZE(my_val)==0) THEN
-          DEALLOCATE(my_par,stat=stat)
-          CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
-          DEALLOCATE(my_val,stat=stat)
-          CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
-          DEALLOCATE(my_units,stat=stat)
-          CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+          DEALLOCATE(my_par)
+          DEALLOCATE(my_val)
+          DEALLOCATE(my_units)
        END IF
     END IF
     ! Handle trivial case of a null function defined
-    ALLOCATE(parameters(mydim),stat=stat)
-    CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(values(mydim),stat=stat)
-    CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(parameters(mydim))
+    ALLOCATE(values(mydim))
     IF (mydim>0) THEN
        parameters(1:SIZE(my_var)) = my_var
        values(1:SIZE(my_var))     = 0.0_dp
        IF (PRESENT(var_values)) THEN
-          CPPrecondition(SIZE(var_values)==SIZE(my_var),cp_failure_level,routineP,error,failure)
+          CPASSERT(SIZE(var_values)==SIZE(my_var))
           values(1:SIZE(my_var)) = var_values
        END IF
        IF (ASSOCIATED(my_val)) THEN
           DO i=1,SIZE(my_val)
              parameters(SIZE(my_var)+i) = my_par(i)
              IF (n_units > 0) THEN
-                values(SIZE(my_var)+i) = cp_unit_to_cp2k(my_val(i),TRIM(ADJUSTL(my_units(i))),error=error)
+                values(SIZE(my_var)+i) = cp_unit_to_cp2k(my_val(i),TRIM(ADJUSTL(my_units(i))))
              ELSE
                 values(SIZE(my_var)+i) = my_val(i)
              END IF
@@ -1468,20 +1393,16 @@ CONTAINS
        END IF
     END IF
     IF (ASSOCIATED(my_par)) THEN
-       DEALLOCATE(my_par,stat=stat)
-       CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE(my_par)
     END IF
     IF (ASSOCIATED(my_val)) THEN
-       DEALLOCATE(my_val,stat=stat)
-       CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE(my_val)
     END IF
     IF (ASSOCIATED(my_units)) THEN
-       DEALLOCATE(my_units,stat=stat)
-       CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE(my_units)
     END IF
     IF (PRESENT(input_variables)) THEN
-       DEALLOCATE(my_var,stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE(my_var)
     END IF
   END SUBROUTINE get_generic_info
 

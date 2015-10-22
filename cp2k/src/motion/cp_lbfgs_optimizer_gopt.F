@@ -33,9 +33,8 @@ MODULE cp_lbfgs_optimizer_gopt
   USE kinds,                           ONLY: dp
   USE machine,                         ONLY: m_walltime
   USE message_passing,                 ONLY: mp_bcast
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -184,8 +183,6 @@ CONTAINS
 !> \param master ...
 !> \param max_f_per_iter ...
 !> \param trust_radius ...
-!> \param error variable to control error logging, stopping,...
-!>             see module cp_error_handling
 !> \par History
 !>      02.2002 created [fawzi]
 !>      09.2003 refactored (retain/release,para_env) [fawzi]
@@ -195,7 +192,7 @@ CONTAINS
 ! *****************************************************************************
   SUBROUTINE cp_opt_gopt_create(optimizer, para_env, obj_funct, x0, m, print_every, &
        wanted_relative_f_delta, wanted_projected_gradient, lower_bound,upper_bound,&
-       kind_of_bound, master, max_f_per_iter, trust_radius, error)
+       kind_of_bound, master, max_f_per_iter, trust_radius)
     TYPE(cp_lbfgs_opt_gopt_type), POINTER    :: optimizer
     TYPE(cp_para_env_type), POINTER          :: para_env
     TYPE(gopt_f_type), POINTER               :: obj_funct
@@ -209,96 +206,86 @@ CONTAINS
       INTENT(in), OPTIONAL                   :: kind_of_bound
     INTEGER, INTENT(in), OPTIONAL            :: master, max_f_per_iter
     REAL(kind=dp), INTENT(in), OPTIONAL      :: trust_radius
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cp_opt_gopt_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: handle, lenwa, n, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: handle, lenwa, n
 
     CALL timeset(routineN,handle)
 
-    failure=.FALSE.
 
-    ALLOCATE(optimizer,stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    IF (.NOT. failure) THEN
-       NULLIFY(optimizer%kind_of_bound,&
-               optimizer%i_work_array,&
-               optimizer%isave,&
-               optimizer%x,&
-               optimizer%lower_bound,&
-               optimizer%upper_bound,&
-               optimizer%gradient,&
-               optimizer%dsave,&
-               optimizer%work_array,&
-               optimizer%para_env,&
-               optimizer%obj_funct)
-       optimizer%ref_count=0
-       last_lbfgs_optimizer_id=last_lbfgs_optimizer_id+1
-       optimizer%id_nr=last_lbfgs_optimizer_id
-       n=SIZE(x0)
-       optimizer%m=4
-       IF (PRESENT(m)) optimizer%m=m
-       optimizer%master= para_env%source
-       optimizer%para_env => para_env
-       CALL cp_para_env_retain(para_env,error=error)
-       optimizer%obj_funct => obj_funct
-       CALL gopt_f_retain(obj_funct, error=error)
-       optimizer%max_f_per_iter=20
-       IF(PRESENT(max_f_per_iter)) optimizer%max_f_per_iter=max_f_per_iter
-       optimizer%print_every=-1
-       optimizer%n_iter=0
-       optimizer%f=-1.0_dp
-       optimizer%last_f=-1.0_dp
-       optimizer%projected_gradient=-1.0_dp
-       IF(PRESENT(print_every)) optimizer%print_every=print_every
-       IF (PRESENT(master)) optimizer%master=master
-       IF (optimizer%master==optimizer%para_env%mepos) THEN
-          !MK This has to be adapted for a new L-BFGS version possibly
-          lenwa = 2*optimizer%m*n + 5*n + 11*optimizer%m*optimizer%m + 8*optimizer%m
-          ALLOCATE (optimizer%kind_of_bound(n), optimizer%i_work_array(3*n),&
-                    optimizer%isave(44), STAT=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-          ALLOCATE (optimizer%x(n), optimizer%lower_bound(n), &
-                    optimizer%upper_bound(n), optimizer%gradient(n), &
-                    optimizer%dsave(29), optimizer%work_array(lenwa), STAT=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-          optimizer%x=x0
-          optimizer%task='START'
-          optimizer%wanted_relative_f_delta=wanted_relative_f_delta
-          optimizer%wanted_projected_gradient=wanted_projected_gradient
-          optimizer%kind_of_bound=0
-          IF (PRESENT(kind_of_bound)) optimizer%kind_of_bound=kind_of_bound
-          IF (PRESENT(lower_bound)) optimizer%lower_bound=lower_bound
-          IF (PRESENT(upper_bound)) optimizer%upper_bound=upper_bound
-          IF (PRESENT(trust_radius)) optimizer%trust_radius=trust_radius
+    ALLOCATE(optimizer)
+    NULLIFY(optimizer%kind_of_bound,&
+            optimizer%i_work_array,&
+            optimizer%isave,&
+            optimizer%x,&
+            optimizer%lower_bound,&
+            optimizer%upper_bound,&
+            optimizer%gradient,&
+            optimizer%dsave,&
+            optimizer%work_array,&
+            optimizer%para_env,&
+            optimizer%obj_funct)
+    optimizer%ref_count=0
+    last_lbfgs_optimizer_id=last_lbfgs_optimizer_id+1
+    optimizer%id_nr=last_lbfgs_optimizer_id
+    n=SIZE(x0)
+    optimizer%m=4
+    IF (PRESENT(m)) optimizer%m=m
+    optimizer%master= para_env%source
+    optimizer%para_env => para_env
+    CALL cp_para_env_retain(para_env)
+    optimizer%obj_funct => obj_funct
+    CALL gopt_f_retain(obj_funct)
+    optimizer%max_f_per_iter=20
+    IF(PRESENT(max_f_per_iter)) optimizer%max_f_per_iter=max_f_per_iter
+    optimizer%print_every=-1
+    optimizer%n_iter=0
+    optimizer%f=-1.0_dp
+    optimizer%last_f=-1.0_dp
+    optimizer%projected_gradient=-1.0_dp
+    IF(PRESENT(print_every)) optimizer%print_every=print_every
+    IF (PRESENT(master)) optimizer%master=master
+    IF (optimizer%master==optimizer%para_env%mepos) THEN
+       !MK This has to be adapted for a new L-BFGS version possibly
+       lenwa = 2*optimizer%m*n + 5*n + 11*optimizer%m*optimizer%m + 8*optimizer%m
+       ALLOCATE (optimizer%kind_of_bound(n), optimizer%i_work_array(3*n),&
+                 optimizer%isave(44))
+       ALLOCATE (optimizer%x(n), optimizer%lower_bound(n), &
+                 optimizer%upper_bound(n), optimizer%gradient(n), &
+                 optimizer%dsave(29), optimizer%work_array(lenwa))
+       optimizer%x=x0
+       optimizer%task='START'
+       optimizer%wanted_relative_f_delta=wanted_relative_f_delta
+       optimizer%wanted_projected_gradient=wanted_projected_gradient
+       optimizer%kind_of_bound=0
+       IF (PRESENT(kind_of_bound)) optimizer%kind_of_bound=kind_of_bound
+       IF (PRESENT(lower_bound)) optimizer%lower_bound=lower_bound
+       IF (PRESENT(upper_bound)) optimizer%upper_bound=upper_bound
+       IF (PRESENT(trust_radius)) optimizer%trust_radius=trust_radius
 
-          CALL setulb (SIZE(optimizer%x), optimizer%m, optimizer%x, &
-               optimizer%lower_bound, optimizer%upper_bound, &
-               optimizer%kind_of_bound, optimizer%f, optimizer%gradient, &
-               optimizer%wanted_relative_f_delta, &
-               optimizer%wanted_projected_gradient, optimizer%work_array, &
-               optimizer%i_work_array, optimizer%task, optimizer%print_every,&
-               optimizer%csave, optimizer%lsave, optimizer%isave, &
-               optimizer%dsave, optimizer%trust_radius)
-       ELSE
-          NULLIFY(&
-               optimizer%kind_of_bound, optimizer%i_work_array, optimizer%isave,&
-               optimizer%lower_bound, optimizer%upper_bound, optimizer%gradient,&
-               optimizer%dsave, optimizer%work_array)
-          ALLOCATE (optimizer%x(n),STAT=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-          optimizer%x(:) = 0.0_dp
-          ALLOCATE (optimizer%gradient(n),STAT=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-          optimizer%gradient(:) = 0.0_dp
-       END IF
-       CALL mp_bcast(optimizer%x,optimizer%master,optimizer%para_env%group)
-       optimizer%status = 0
-       optimizer%ref_count = 1
+       CALL setulb (SIZE(optimizer%x), optimizer%m, optimizer%x, &
+            optimizer%lower_bound, optimizer%upper_bound, &
+            optimizer%kind_of_bound, optimizer%f, optimizer%gradient, &
+            optimizer%wanted_relative_f_delta, &
+            optimizer%wanted_projected_gradient, optimizer%work_array, &
+            optimizer%i_work_array, optimizer%task, optimizer%print_every,&
+            optimizer%csave, optimizer%lsave, optimizer%isave, &
+            optimizer%dsave, optimizer%trust_radius)
+    ELSE
+       NULLIFY(&
+            optimizer%kind_of_bound, optimizer%i_work_array, optimizer%isave,&
+            optimizer%lower_bound, optimizer%upper_bound, optimizer%gradient,&
+            optimizer%dsave, optimizer%work_array)
+       ALLOCATE (optimizer%x(n))
+       optimizer%x(:) = 0.0_dp
+       ALLOCATE (optimizer%gradient(n))
+       optimizer%gradient(:) = 0.0_dp
     END IF
+    CALL mp_bcast(optimizer%x,optimizer%master,optimizer%para_env%group)
+    optimizer%status = 0
+    optimizer%ref_count = 1
 
     CALL timestop(handle)
 
@@ -307,99 +294,75 @@ CONTAINS
 ! *****************************************************************************
 !> \brief retains the given optimizer (see doc/ReferenceCounting.html)
 !> \param optimizer the optimizer to retain
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      08.2003 created [fawzi]
 !> \author Fawzi Mohamed
 ! *****************************************************************************
-SUBROUTINE cp_opt_gopt_retain(optimizer,error)
+SUBROUTINE cp_opt_gopt_retain(optimizer)
     TYPE(cp_lbfgs_opt_gopt_type), POINTER    :: optimizer
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cp_opt_gopt_retain', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-  failure=.FALSE.
-
-  CPPrecondition(ASSOCIATED(optimizer),cp_failure_level,routineP,error,failure)
-  IF (.NOT. failure) THEN
-     CPPreconditionNoFail(optimizer%ref_count>0,cp_failure_level,routineP,error)
-     optimizer%ref_count=optimizer%ref_count+1
-  END IF
+  CPASSERT(ASSOCIATED(optimizer))
+  CPASSERT(optimizer%ref_count>0)
+  optimizer%ref_count=optimizer%ref_count+1
 END SUBROUTINE cp_opt_gopt_retain
 
 ! *****************************************************************************
 !> \brief releases the optimizer (see doc/ReferenceCounting.html)
 !> \param optimizer the object that should be released
-!> \param error variable to control error logging, stopping,...
-!>             see module cp_error_handling
 !> \par History
 !>      02.2002 created [fawzi]
 !>      09.2003 dealloc_ref->release [fawzi]
 !> \author Fawzi Mohamed
 ! *****************************************************************************
-SUBROUTINE cp_opt_gopt_release(optimizer,error)
+SUBROUTINE cp_opt_gopt_release(optimizer)
     TYPE(cp_lbfgs_opt_gopt_type), POINTER    :: optimizer
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cp_opt_gopt_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: handle, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: handle
 
   CALL timeset(routineN,handle)
-  failure=.FALSE.
 
   IF (ASSOCIATED(optimizer)) THEN
-     CPPreconditionNoFail(optimizer%ref_count>0,cp_failure_level,routineP,error)
+     CPASSERT(optimizer%ref_count>0)
      optimizer%ref_count=optimizer%ref_count-1
      IF (optimizer%ref_count==0) THEN
         optimizer%status=6
         IF (ASSOCIATED(optimizer%kind_of_bound)) THEN
-           DEALLOCATE(optimizer%kind_of_bound, stat=stat)
-           CPPostcondition(stat==0,cp_warning_level,routineP,error,failure)
+           DEALLOCATE(optimizer%kind_of_bound)
         END IF
         IF (ASSOCIATED(optimizer%i_work_array)) THEN
-           DEALLOCATE(optimizer%i_work_array, stat=stat)
-           CPPostcondition(stat==0,cp_warning_level,routineP,error,failure)
+           DEALLOCATE(optimizer%i_work_array)
         END IF
         IF (ASSOCIATED(optimizer%isave)) THEN
-           DEALLOCATE(optimizer%isave, stat=stat)
-           CPPostcondition(stat==0,cp_warning_level,routineP,error,failure)
+           DEALLOCATE(optimizer%isave)
         END IF
         IF (ASSOCIATED(optimizer%x)) THEN
-           DEALLOCATE(optimizer%x, stat=stat)
-           CPPostcondition(stat==0,cp_warning_level,routineP,error,failure)
+           DEALLOCATE(optimizer%x)
         END IF
         IF (ASSOCIATED(optimizer%lower_bound)) THEN
-           DEALLOCATE(optimizer%lower_bound, stat=stat)
-           CPPostcondition(stat==0,cp_warning_level,routineP,error,failure)
+           DEALLOCATE(optimizer%lower_bound)
         END IF
         IF (ASSOCIATED(optimizer%upper_bound)) THEN
-           DEALLOCATE(optimizer%upper_bound, stat=stat)
-           CPPostcondition(stat==0,cp_warning_level,routineP,error,failure)
+           DEALLOCATE(optimizer%upper_bound)
         END IF
         IF (ASSOCIATED(optimizer%gradient)) THEN
-           DEALLOCATE(optimizer%gradient, stat=stat)
-           CPPostcondition(stat==0,cp_warning_level,routineP,error,failure)
+           DEALLOCATE(optimizer%gradient)
         END IF
         IF (ASSOCIATED(optimizer%dsave)) THEN
-           DEALLOCATE(optimizer%dsave, stat=stat)
-           CPPostcondition(stat==0,cp_warning_level,routineP,error,failure)
+           DEALLOCATE(optimizer%dsave)
         END IF
         IF (ASSOCIATED(optimizer%work_array)) THEN
-           DEALLOCATE(optimizer%work_array, stat=stat)
-           CPPostcondition(stat==0,cp_warning_level,routineP,error,failure)
+           DEALLOCATE(optimizer%work_array)
         END IF
-        CALL cp_para_env_release(optimizer%para_env,error=error)
-        CALL gopt_f_release(optimizer%obj_funct,error=error)
+        CALL cp_para_env_release(optimizer%para_env)
+        CALL gopt_f_release(optimizer%obj_funct)
         NULLIFY(optimizer%obj_funct)
-        DEALLOCATE(optimizer, stat=stat)
-        CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+        DEALLOCATE(optimizer)
      END IF
   END IF
   NULLIFY(optimizer)
@@ -430,8 +393,6 @@ END SUBROUTINE cp_opt_gopt_release
 !> \param is_master ...
 !> \param last_f ...
 !> \param f ...
-!> \param error variable to control error logging, stopping,...
-!>             see module cp_error_handling
 !> \par History
 !>      none
 !> \author Fawzi Mohamed
@@ -443,7 +404,7 @@ END SUBROUTINE cp_opt_gopt_release
        x, lower_bound, upper_bound, kind_of_bound, master,&
        actual_projected_gradient, &
        n_var, n_iter, status, max_f_per_iter,at_end,&
-       is_master, last_f, f, error)
+       is_master, last_f, f)
     TYPE(cp_lbfgs_opt_gopt_type), POINTER    :: optimizer
     TYPE(cp_para_env_type), OPTIONAL, &
       POINTER                                :: para_env
@@ -460,17 +421,14 @@ END SUBROUTINE cp_opt_gopt_release
                                                 max_f_per_iter
     LOGICAL, INTENT(out), OPTIONAL           :: at_end, is_master
     REAL(kind=dp), INTENT(out), OPTIONAL     :: last_f, f
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cp_opt_gopt_get', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
 !  call timeset(routineN,handle)
 
-    CPPrecondition(ASSOCIATED(optimizer),cp_failure_level,routineP,error,failure)
-    CPPrecondition(optimizer%ref_count>0,cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(optimizer))
+    CPASSERT(optimizer%ref_count>0)
 
     IF (PRESENT(is_master)) is_master=optimizer%master==optimizer%para_env%mepos
     IF (PRESENT(master)) master=optimizer%master
@@ -504,16 +462,12 @@ END SUBROUTINE cp_opt_gopt_release
           IF (PRESENT(actual_projected_gradient))&
                actual_projected_gradient=optimizer%dsave(13)
        ELSE
-          CPPrecondition(.NOT.PRESENT(last_f),cp_warning_level,routineP,error,failure)
-          CPPrecondition(.NOT.PRESENT(actual_projected_gradient),cp_warning_level,routineP,error,failure)
+          CPASSERT(.NOT.PRESENT(last_f))
+          CPASSERT(.NOT.PRESENT(actual_projected_gradient))
        END IF
     ELSE
-       CALL cp_assert(.NOT.(PRESENT(lower_bound).OR.&
-            PRESENT(upper_bound).OR.PRESENT(kind_of_bound)),&
-            cp_warning_level,cp_assertion_failed,&
-            routineP, "asked undefined types in "//&
-CPSourceFileRef,&
-            error,failure)
+       IF(PRESENT(lower_bound).OR.PRESENT(upper_bound).OR.PRESENT(kind_of_bound))&
+          CPWARN("asked undefined types")
     END IF
 
     !  call timestop(handle)
@@ -530,8 +484,6 @@ CPSourceFileRef,&
 !> \param geo_section ...
 !> \param force_env ...
 !> \param gopt_param ...
-!> \param error variable to control error logging, stopping,...
-!>             see module cp_error_handling
 !> \par History
 !>      none
 !> \author Fawzi Mohamed
@@ -541,7 +493,7 @@ CPSourceFileRef,&
 ! *****************************************************************************
   RECURSIVE SUBROUTINE cp_opt_gopt_step(optimizer,n_iter,f,last_f,&
        projected_gradient, converged, geo_section, force_env,&
-       gopt_param, error)
+       gopt_param)
     TYPE(cp_lbfgs_opt_gopt_type), POINTER    :: optimizer
     INTEGER, INTENT(out), OPTIONAL           :: n_iter
     REAL(kind=dp), INTENT(out), OPTIONAL     :: f, last_f, projected_gradient
@@ -549,40 +501,32 @@ CPSourceFileRef,&
     TYPE(section_vals_type), POINTER         :: geo_section
     TYPE(force_env_type), POINTER            :: force_env
     TYPE(gopt_param_type), POINTER           :: gopt_param
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cp_opt_gopt_step', &
       routineP = moduleN//':'//routineN
 
     CHARACTER(LEN=5)                         :: wildcard
-    INTEGER                                  :: dataunit, handle, its, stat
-    LOGICAL                                  :: conv, failure, is_master, &
-                                                justEntred
+    INTEGER                                  :: dataunit, handle, its
+    LOGICAL                                  :: conv, is_master, justEntred
     REAL(KIND=dp)                            :: t_diff, t_now, t_old
     REAL(KIND=dp), DIMENSION(:), POINTER     :: xold
     TYPE(cp_logger_type), POINTER            :: logger
 
     NULLIFY(logger,xold)
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
     CALL timeset(routineN,handle)
-    failure=.FALSE.
     justEntred=.TRUE.
     is_master=optimizer%master==optimizer%para_env%mepos
     IF (PRESENT(converged)) converged = optimizer%status==4
-    ALLOCATE(xold(SIZE(optimizer%x)),stat=stat)
-    CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(xold(SIZE(optimizer%x)))
     xold = optimizer%x
     t_old = m_walltime()
 
-    CPPrecondition(ASSOCIATED(optimizer),cp_failure_level,routineP,error,failure)
-    CPPrecondition(optimizer%ref_count>0,cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(optimizer))
+    CPASSERT(optimizer%ref_count>0)
 
     IF (optimizer%status>=4) THEN
-       CALL cp_assert(.FALSE.,level=cp_warning_level,&
-            error_nr=cp_assertion_failed,fromWhere=routineP,&
-            message="status>=4, trying to restart in "//&
-CPSourceFileRef,&
-            error=error)
+       CPWARN("status>=4, trying to restart")
        optimizer%status=0
        IF (is_master) THEN
           optimizer%task='START'
@@ -645,17 +589,11 @@ CPSourceFileRef,&
              optimizer%status=4
           ELSE IF (optimizer%task(1:4)=='STOP') THEN
              optimizer%status=5
-             CALL cp_assert(.FALSE.,cp_warning_level,cp_assertion_failed,&
-                  routineP,"task became stop in an unknown way in "//&
-CPSourceFileRef,&
-                  error)
+             CPWARN("task became stop in an unknown way")
           ELSE IF (optimizer%task(1:5)=='ERROR') THEN
              optimizer%status=5
           ELSE
-             CALL cp_assert(.FALSE.,cp_warning_level,cp_assertion_failed,&
-                  routineP,"unknown task '"//optimizer%task//"' in "//&
-CPSourceFileRef,&
-                  error)
+             CPWARN("unknown task '"//optimizer%task//"'")
           END IF
        END IF ifMaster
        CALL mp_bcast(optimizer%status,optimizer%master, optimizer%para_env%group)
@@ -675,8 +613,8 @@ CPSourceFileRef,&
                f=optimizer%f,&
                gradient=optimizer%gradient,&
                final_evaluation=.FALSE.,&
-               master=optimizer%master,para_env=optimizer%para_env,&
-               error=error) ! do not use keywords?
+               master=optimizer%master,para_env=optimizer%para_env)
+               ! do not use keywords?
           IF (is_master) THEN
              CALL setulb (SIZE(optimizer%x), optimizer%m, optimizer%x, &
                   optimizer%lower_bound, optimizer%upper_bound, &
@@ -696,7 +634,7 @@ CPSourceFileRef,&
           !op=3 ended iter
           wildcard = "LBFGS"
           dataunit = cp_print_key_unit_nr(logger,geo_section,&
-               "PRINT%PROGRAM_RUN_INFO",extension=".geoLog",error=error)
+               "PRINT%PROGRAM_RUN_INFO",extension=".geoLog")
           IF (is_master) its = optimizer%isave(30)
           CALL mp_bcast(its,optimizer%master,optimizer%para_env%group)
 
@@ -706,11 +644,10 @@ CPSourceFileRef,&
           t_old  = t_now
           CALL gopt_f_io(optimizer%obj_funct, force_env, force_env%root_section, &
                its, optimizer%f, dataunit, optimizer%eold, optimizer%emin, wildcard, gopt_param,&
-               SIZE(optimizer%x), optimizer%x-xold, optimizer%gradient, conv, used_time=t_diff,&
-               error=error)
+               SIZE(optimizer%x), optimizer%x-xold, optimizer%gradient, conv, used_time=t_diff)
           CALL mp_bcast(conv,optimizer%master,optimizer%para_env%group)
           CALL cp_print_key_finished_output(dataunit,logger,geo_section,&
-               "PRINT%PROGRAM_RUN_INFO", error=error)
+               "PRINT%PROGRAM_RUN_INFO")
           optimizer%eold = optimizer%f
           optimizer%emin = MIN(optimizer%emin,optimizer%eold)
           xold = optimizer%x
@@ -721,7 +658,7 @@ CPSourceFileRef,&
           ! Specific L-BFGS convergence criteria.. overrides the convergence criteria on
           ! stepsize and gradients
           dataunit = cp_print_key_unit_nr(logger,geo_section,&
-               "PRINT%PROGRAM_RUN_INFO",extension=".geoLog",error=error)
+               "PRINT%PROGRAM_RUN_INFO",extension=".geoLog")
           IF (dataunit>0) THEN
              WRITE(dataunit,'(T2,A)')""
              WRITE(dataunit,'(T2,A)')"***********************************************"
@@ -732,25 +669,19 @@ CPSourceFileRef,&
              WRITE(dataunit,'(T2,A)')""
           END IF
           CALL cp_print_key_finished_output(dataunit,logger,geo_section,&
-               "PRINT%PROGRAM_RUN_INFO", error=error)
+               "PRINT%PROGRAM_RUN_INFO")
           IF (PRESENT(converged)) converged=.TRUE.
           EXIT
        CASE (5)
-          ! op=5 abnormal exit (error)
+          ! op=5 abnormal exit ()
           CALL mp_bcast(optimizer%task,optimizer%master,&
                optimizer%para_env%group)
        CASE (6)
           ! deallocated
-          CALL cp_assert(.FALSE.,cp_failure_level,cp_assertion_failed,&
-               routineP,"step on a deallocated opt structure "//&
-CPSourceFileRef,&
-               error,failure)
+          CPABORT("step on a deallocated opt structure ")
        CASE default
-          CALL cp_assert(.FALSE.,cp_failure_level,cp_assertion_failed,&
-               routineP,"unknown status "//cp_to_string(optimizer%status)//&
-               " in "//&
-CPSourceFileRef,&
-               error,failure)
+          CALL cp_abort(__LOCATION__,&
+               "unknown status "//cp_to_string(optimizer%status))
           optimizer%status=5
           EXIT
        END SELECT
@@ -765,10 +696,9 @@ CPSourceFileRef,&
     CALL cp_opt_gopt_bcast_res(optimizer,&
          n_iter=optimizer%n_iter,&
          f=optimizer%f, last_f=optimizer%last_f,&
-         projected_gradient=optimizer%projected_gradient,error=error)
+         projected_gradient=optimizer%projected_gradient)
 
-    DEALLOCATE(xold,stat=stat)
-    CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(xold)
     IF (PRESENT(f)) f=optimizer%f
     IF (PRESENT(last_f)) last_f=optimizer%last_f
     IF (PRESENT(projected_gradient)) &
@@ -785,8 +715,6 @@ CPSourceFileRef,&
 !> \param f the actual value of the objective function (f)
 !> \param last_f the last value of f
 !> \param projected_gradient the infinity norm of the projected gradient
-!> \param error variable to control error logging, stopping,...
-!>             see module cp_error_handling
 !> \par History
 !>      none
 !> \author Fawzi Mohamed
@@ -795,22 +723,20 @@ CPSourceFileRef,&
 !>      private routine
 ! *****************************************************************************
   SUBROUTINE cp_opt_gopt_bcast_res(optimizer, n_iter,f,last_f,&
-       projected_gradient,error)
+       projected_gradient)
     TYPE(cp_lbfgs_opt_gopt_type), POINTER    :: optimizer
     INTEGER, INTENT(out), OPTIONAL           :: n_iter
     REAL(kind=dp), INTENT(inout), OPTIONAL   :: f, last_f, projected_gradient
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cp_opt_gopt_bcast_res', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
     REAL(kind=dp), DIMENSION(4)              :: results
 
 !  call timeset(routineN,handle)
 
-    CPPrecondition(ASSOCIATED(optimizer),cp_failure_level,routineP,error,failure)
-    CPPrecondition(optimizer%ref_count>0,cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(optimizer))
+    CPASSERT(optimizer%ref_count>0)
 
     IF (optimizer%master==optimizer%para_env%mepos) THEN
        results=(/ REAL(optimizer%isave(30), kind=dp), &
@@ -839,8 +765,6 @@ CPSourceFileRef,&
 !> \param geo_section ...
 !> \param force_env ...
 !> \param gopt_param ...
-!> \param error variable to control error logging, stopping,...
-!>             see module cp_error_handling
 !> \retval res ...
 !> \par History
 !>      none
@@ -851,7 +775,7 @@ CPSourceFileRef,&
 ! *****************************************************************************
   RECURSIVE FUNCTION cp_opt_gopt_next(optimizer,n_iter,f,last_f,&
        projected_gradient, converged, geo_section,force_env,&
-       gopt_param, error) RESULT(res)
+       gopt_param) RESULT(res)
     TYPE(cp_lbfgs_opt_gopt_type), POINTER    :: optimizer
     INTEGER, INTENT(out), OPTIONAL           :: n_iter
     REAL(kind=dp), INTENT(out), OPTIONAL     :: f, last_f, projected_gradient
@@ -859,37 +783,26 @@ CPSourceFileRef,&
     TYPE(section_vals_type), POINTER         :: geo_section
     TYPE(force_env_type), POINTER            :: force_env
     TYPE(gopt_param_type), POINTER           :: gopt_param
-    TYPE(cp_error_type), INTENT(inout)       :: error
     LOGICAL                                  :: res
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cp_opt_gopt_next', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
+!call timeset(routineN,handle)
 
-    failure=.FALSE.
-
-    !call timeset(routineN,handle)
-    CPPrecondition(ASSOCIATED(optimizer),cp_failure_level,routineP,error,failure)
-    CPPrecondition(optimizer%ref_count>0,cp_failure_level,routineP,error,failure)
-    IF (.NOT. failure) THEN
-       CALL cp_opt_gopt_step(optimizer,n_iter=n_iter,f=f,&
-            last_f=last_f, projected_gradient=projected_gradient,&
-            converged=converged,geo_section=geo_section,&
-            force_env=force_env,gopt_param=gopt_param,&
-            error=error)
-       res= (optimizer%status<40) .AND. .NOT. converged
-    ELSE
-       res=.FALSE.
-    END IF
+    CPASSERT(ASSOCIATED(optimizer))
+    CPASSERT(optimizer%ref_count>0)
+    CALL cp_opt_gopt_step(optimizer,n_iter=n_iter,f=f,&
+         last_f=last_f, projected_gradient=projected_gradient,&
+         converged=converged,geo_section=geo_section,&
+         force_env=force_env,gopt_param=gopt_param)
+    res= (optimizer%status<40) .AND. .NOT. converged
     !call timestop(handle)
   END FUNCTION cp_opt_gopt_next
 
 ! *****************************************************************************
 !> \brief stops the optimization
 !> \param optimizer ...
-!> \param error variable to control error logging, stopping,...
-!>             see module cp_error_handling
 !> \par History
 !>      none
 !> \author Fawzi Mohamed
@@ -897,20 +810,16 @@ CPSourceFileRef,&
 !> \note
 !>      necessary???
 ! *****************************************************************************
-  SUBROUTINE cp_opt_gopt_stop(optimizer, error)
+  SUBROUTINE cp_opt_gopt_stop(optimizer)
     TYPE(cp_lbfgs_opt_gopt_type), POINTER    :: optimizer
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cp_opt_gopt_stop', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
+!  call timeset(routineN,handle)
 
-    failure=.FALSE.
-
-    !  call timeset(routineN,handle)
-    CPPrecondition(ASSOCIATED(optimizer),cp_failure_level,routineP,error,failure)
-    CPPrecondition(optimizer%ref_count>0,cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(optimizer))
+    CPASSERT(optimizer%ref_count>0)
 
     optimizer%task='STOPPED on user request'
     optimizer%status=4 ! normal exit

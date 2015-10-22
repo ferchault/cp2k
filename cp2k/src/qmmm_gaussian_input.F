@@ -110,8 +110,8 @@ MODULE qmmm_gaussian_input
        s9_b7, s9_b8, s9_b9, s9_rc
   USE qmmm_gaussian_types,             ONLY: qmmm_gaussian_p_type
   USE string_utilities,                ONLY: uppercase
-  USE termination,                     ONLY: stop_program
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -131,20 +131,17 @@ CONTAINS
 !> \param qmmm_gaussian_fns ...
 !> \param compatibility ...
 !> \param qmmm_section ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      06.2004 created [tlaino]
 !> \author Teodoro Laino
 ! *****************************************************************************
   SUBROUTINE read_mm_potential(para_env, qmmm_gaussian_fns,&
-                               compatibility, qmmm_section, error)
+                               compatibility, qmmm_section)
     TYPE(cp_para_env_type), POINTER          :: para_env
     TYPE(qmmm_gaussian_p_type), &
       DIMENSION(:), POINTER                  :: qmmm_gaussian_fns
     LOGICAL, INTENT(IN)                      :: compatibility
     TYPE(section_vals_type), POINTER         :: qmmm_section
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'read_mm_potential', &
       routineP = moduleN//':'//routineN
@@ -153,26 +150,24 @@ CONTAINS
     CHARACTER(LEN=default_string_length)     :: Ftarget, &
                                                 mm_potential_file_name, Units
     INTEGER                                  :: IRad, istart, Ival, j, Nog, &
-                                                Nval, output_unit, stat
-    LOGICAL                                  :: failure, Found, Found_Radius
+                                                Nval, output_unit
+    LOGICAL                                  :: Found, Found_Radius
     REAL(KIND=dp)                            :: fconv, my_radius, Radius
-    TYPE(cp_logger_type), POINTER            :: logger
     TYPE(cp_parser_type), POINTER            :: parser
 
-    logger => cp_error_get_logger(error)
-    output_unit= cp_logger_get_default_io_unit(logger)
+    output_unit= cp_logger_get_default_io_unit()
     Nval = SIZE(qmmm_gaussian_fns)
     Ival = 0
     CALL section_vals_val_get(qmmm_section,"MM_POTENTIAL_FILE_NAME",&
-         c_val=mm_potential_file_name,error=error)
+         c_val=mm_potential_file_name)
 
     NULLIFY(parser)
-    CALL parser_create(parser,mm_potential_file_name,para_env=para_env,error=error)
+    CALL parser_create(parser,mm_potential_file_name,para_env=para_env)
 
     search_loop: DO
        Ftarget = "&MM_FIT_POT"
        IF (Ival.EQ.Nval) EXIT search_loop
-       CALL parser_search_string(parser,Ftarget,.TRUE.,found,line,error=error)
+       CALL parser_search_string(parser,Ftarget,.TRUE.,found,line)
        IF (Found) THEN
 !
 ! Structure example of the MM fit potential file:
@@ -189,10 +184,10 @@ CONTAINS
 !           0.0790169  4.82046   Bohr
 !           &END
 !
-          CALL parser_get_object  (parser,Ftarget,newline=.TRUE.,error=error)
-          CPPostcondition(TRIM(Ftarget)=="RADIUS",cp_failure_level,routineP,error,Failure)
-          CALL parser_get_object  (parser,radius,error=error)
-          CALL parser_get_object  (parser,units,error=error)
+          CALL parser_get_object  (parser,Ftarget,newline=.TRUE.)
+          CPASSERT(TRIM(Ftarget)=="RADIUS")
+          CALL parser_get_object  (parser,radius)
+          CALL parser_get_object  (parser,units)
           CALL uppercase (units)
           fconv = 1.0_dp
           IF (TRIM(units).EQ."ANGSTROM") fconv = bohr
@@ -210,7 +205,7 @@ CONTAINS
           Ival = Ival + 1
           IRad = J
           ! Read  Rmin, Rmax
-          CALL parser_get_object(parser,qmmm_gaussian_fns(J)%pgf%Number_of_Gaussians,newline=.TRUE.,error=error)
+          CALL parser_get_object(parser,qmmm_gaussian_fns(J)%pgf%Number_of_Gaussians,newline=.TRUE.)
           ! Allocate Vectors
           istart = 1
           IF (compatibility) THEN
@@ -218,19 +213,17 @@ CONTAINS
              istart = 2
           END IF
           NOG = qmmm_gaussian_fns(IRad)%pgf%Number_of_Gaussians
-          ALLOCATE(qmmm_gaussian_fns(IRad)%pgf%Ak(NOG),stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,Failure)
-          ALLOCATE(qmmm_gaussian_fns(IRad)%pgf%Gk(NOG),stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,Failure)
+          ALLOCATE(qmmm_gaussian_fns(IRad)%pgf%Ak(NOG))
+          ALLOCATE(qmmm_gaussian_fns(IRad)%pgf%Gk(NOG))
           IF (compatibility) THEN
              my_radius = qmmm_gaussian_fns(J)%pgf%Elp_Radius_corr
              qmmm_gaussian_fns(IRad)%pgf%Ak(1) = 1.0_dp/radius - 2.0_dp/(rootpi*radius)
              qmmm_gaussian_fns(IRad)%pgf%Gk(1) = my_radius
           END IF
           DO J = istart, qmmm_gaussian_fns(IRad)%pgf%Number_of_Gaussians
-             CALL parser_get_object(parser,qmmm_gaussian_fns(IRad)%pgf%Ak(J),newline=.TRUE.,error=error)
-             CALL parser_get_object(parser,qmmm_gaussian_fns(IRad)%pgf%Gk(J),error=error)
-             CALL parser_get_object(parser,units,error=error)
+             CALL parser_get_object(parser,qmmm_gaussian_fns(IRad)%pgf%Ak(J),newline=.TRUE.)
+             CALL parser_get_object(parser,qmmm_gaussian_fns(IRad)%pgf%Gk(J))
+             CALL parser_get_object(parser,units)
              CALL uppercase (units)
              fconv = 1.0_dp
              IF (TRIM(units).EQ."ANGSTROM") fconv = bohr
@@ -240,12 +233,12 @@ CONTAINS
        ELSE
 !       *** Stop program, if the end of file is reached ***
           IF (output_unit>0) WRITE(output_unit,'(A,F12.6,A)')"Discrepancies in Radius: ",Radius," definition."
-          CALL stop_program(routineN,moduleN,__LINE__,"Radius Value not found in MM_POTENTIAL file",para_env)
+          CPABORT("Radius Value not found in MM_POTENTIAL file")
        END IF
 
     END DO search_loop
 
-    CALL parser_release(parser,error=error)
+    CALL parser_release(parser)
 
   END SUBROUTINE read_mm_potential
 
@@ -254,28 +247,23 @@ CONTAINS
 !> \param qmmm_gaussian_fns ...
 !> \param compatibility ...
 !> \param num_geep_gauss ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      07.2005 created [tlaino]
 !> \author Teodoro Laino
 ! *****************************************************************************
   SUBROUTINE set_mm_potential_erf(qmmm_gaussian_fns, &
-                               compatibility, num_geep_gauss, error)
+                               compatibility, num_geep_gauss)
     TYPE(qmmm_gaussian_p_type), &
       DIMENSION(:), POINTER                  :: qmmm_gaussian_fns
     LOGICAL, INTENT(IN)                      :: compatibility
     INTEGER, INTENT(IN)                      :: num_geep_gauss
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'set_mm_potential_erf', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: IRad, istart, Nog, Nval, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: IRad, istart, Nog, Nval
     REAL(KIND=dp)                            :: my_radius, radius, rc
 
-    failure = .FALSE.
     Nval = SIZE(qmmm_gaussian_fns)
     DO IRad = 1, Nval
        qmmm_gaussian_fns(IRad)%pgf%Number_of_Gaussians = num_geep_gauss
@@ -323,10 +311,8 @@ CONTAINS
           rc  = qmmm_gaussian_fns(Irad)%pgf%Elp_Radius / (g16_rc*bohr)
        END SELECT
        NOG = qmmm_gaussian_fns(IRad)%pgf%Number_of_Gaussians
-       ALLOCATE(qmmm_gaussian_fns(IRad)%pgf%Ak(NOG),stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,Failure)
-       ALLOCATE(qmmm_gaussian_fns(IRad)%pgf%Gk(NOG),stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,Failure)
+       ALLOCATE(qmmm_gaussian_fns(IRad)%pgf%Ak(NOG))
+       ALLOCATE(qmmm_gaussian_fns(IRad)%pgf%Gk(NOG))
        IF (compatibility) THEN
           my_radius = qmmm_gaussian_fns(IRad)%pgf%Elp_Radius_corr
           qmmm_gaussian_fns(IRad)%pgf%Ak(1) = 1.0_dp/radius - 2.0_dp/(rootpi*radius)
@@ -700,27 +686,22 @@ CONTAINS
 !> \brief set the GEEP information for the S-WAVE expansion
 !> \param qmmm_gaussian_fns ...
 !> \param num_geep_gauss ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      02.2007 created [tlaino]
 !> \author Teodoro Laino
 ! *****************************************************************************
   SUBROUTINE set_mm_potential_swave(qmmm_gaussian_fns, &
-                                    num_geep_gauss, error)
+                                    num_geep_gauss)
     TYPE(qmmm_gaussian_p_type), &
       DIMENSION(:), POINTER                  :: qmmm_gaussian_fns
     INTEGER, INTENT(IN)                      :: num_geep_gauss
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'set_mm_potential_swave', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: IRad, istart, Nog, Nval, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: IRad, istart, Nog, Nval
     REAL(KIND=dp)                            :: radius, rc
 
-    failure = .FALSE.
     Nval = SIZE(qmmm_gaussian_fns)
     DO IRad = 1, Nval
        qmmm_gaussian_fns(IRad)%pgf%Number_of_Gaussians = num_geep_gauss
@@ -764,10 +745,8 @@ CONTAINS
           rc  = qmmm_gaussian_fns(Irad)%pgf%Elp_Radius / (s18_rc*bohr)
        END SELECT
        NOG = qmmm_gaussian_fns(IRad)%pgf%Number_of_Gaussians
-       ALLOCATE(qmmm_gaussian_fns(IRad)%pgf%Ak(NOG),stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,Failure)
-       ALLOCATE(qmmm_gaussian_fns(IRad)%pgf%Gk(NOG),stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,Failure)
+       ALLOCATE(qmmm_gaussian_fns(IRad)%pgf%Ak(NOG))
+       ALLOCATE(qmmm_gaussian_fns(IRad)%pgf%Gk(NOG))
        SELECT CASE(num_geep_gauss)
        CASE(2)
           qmmm_gaussian_fns(IRad)%pgf%Ak(istart+1) = s2_a1

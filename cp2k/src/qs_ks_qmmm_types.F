@@ -21,6 +21,7 @@ MODULE qs_ks_qmmm_types
                                              pw_pool_type
   USE pw_types,                        ONLY: pw_p_type
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -70,45 +71,37 @@ CONTAINS
 ! *****************************************************************************
 !> \brief releases the ks_qmmm_env (see doc/ReferenceCounting.html)
 !> \param ks_qmmm_env the ks_qmmm_env to be released
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      05.2004 created [tlaino]
 !> \author Teodoro Laino
 ! *****************************************************************************
-  SUBROUTINE qs_ks_qmmm_release(ks_qmmm_env,error)
+  SUBROUTINE qs_ks_qmmm_release(ks_qmmm_env)
     TYPE(qs_ks_qmmm_env_type), POINTER       :: ks_qmmm_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'qs_ks_qmmm_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: i
     TYPE(pw_pool_type), POINTER              :: pool
 
-    failure=.FALSE.
-
     IF (ASSOCIATED(ks_qmmm_env)) THEN
-       CPPrecondition(ks_qmmm_env%ref_count>0,cp_failure_level,routineP,error,failure)
+       CPASSERT(ks_qmmm_env%ref_count>0)
        ks_qmmm_env%ref_count=ks_qmmm_env%ref_count-1
 
        IF (ks_qmmm_env%ref_count<1) THEN
-          CALL pw_env_get(ks_qmmm_env%pw_env,auxbas_pw_pool=pool,error=error)
-          CALL pw_pool_give_back_pw(pool,ks_qmmm_env%v_qmmm_rspace%pw,error=error)
-          CALL pw_env_release(ks_qmmm_env%pw_env,error=error)
+          CALL pw_env_get(ks_qmmm_env%pw_env,auxbas_pw_pool=pool)
+          CALL pw_pool_give_back_pw(pool,ks_qmmm_env%v_qmmm_rspace%pw)
+          CALL pw_env_release(ks_qmmm_env%pw_env)
           IF (ASSOCIATED(ks_qmmm_env%cube_info))THEN
              DO i=1,SIZE(ks_qmmm_env%cube_info)
                 CALL destroy_cube_info(ks_qmmm_env%cube_info(i))
              END DO
-             DEALLOCATE(ks_qmmm_env%cube_info, stat=stat)
-             CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+             DEALLOCATE(ks_qmmm_env%cube_info)
           END IF
           IF (ASSOCIATED(ks_qmmm_env%matrix_h)) THEN
-             CALL cp_dbcsr_deallocate_matrix_set(ks_qmmm_env%matrix_h,error)
+             CALL cp_dbcsr_deallocate_matrix_set(ks_qmmm_env%matrix_h)
           END IF
-          DEALLOCATE(ks_qmmm_env, stat=stat)
-          CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+          DEALLOCATE(ks_qmmm_env)
        END IF
     END IF
     NULLIFY(ks_qmmm_env)
@@ -117,28 +110,19 @@ CONTAINS
 ! *****************************************************************************
 !> \brief retains the given ks_environment
 !> \param ks_qmmm_env the KohnSham QM/MM environment to retain
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      05.2004 created [tlaino]
 !> \author Teodoro Laino
 ! *****************************************************************************
-SUBROUTINE qs_ks_qmmm_retain(ks_qmmm_env, error)
+SUBROUTINE qs_ks_qmmm_retain(ks_qmmm_env)
     TYPE(qs_ks_qmmm_env_type), POINTER       :: ks_qmmm_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'qs_ks_qmmm_retain', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-  failure=.FALSE.
-
-  CPPrecondition(ASSOCIATED(ks_qmmm_env),cp_failure_level,routineP,error,failure)
-  IF (.NOT. failure) THEN
-     CPPrecondition(ks_qmmm_env%ref_count>0,cp_failure_level,routineP,error,failure)
-     ks_qmmm_env%ref_count=ks_qmmm_env%ref_count+1
-  END IF
+  CPASSERT(ASSOCIATED(ks_qmmm_env))
+  CPASSERT(ks_qmmm_env%ref_count>0)
+  ks_qmmm_env%ref_count=ks_qmmm_env%ref_count+1
 END SUBROUTINE qs_ks_qmmm_retain
 
 END MODULE qs_ks_qmmm_types

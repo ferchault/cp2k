@@ -14,9 +14,8 @@ MODULE cp_fm_cholesky
   USE cp_fm_types,                     ONLY: cp_fm_type
   USE kinds,                           ONLY: dp,&
                                              sp
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -37,24 +36,20 @@ CONTAINS
 !> \param n the number of row (and columns) of the matrix &
 !>        (defaults to the min(size(matrix)))
 !> \param info_out ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      05.2002 created [JVdV]
 !>      12.2002 updated, added n optional parm [fawzi]
 !> \author Joost
 ! *****************************************************************************
-  SUBROUTINE cp_fm_cholesky_decompose(matrix,n,info_out,error)
+  SUBROUTINE cp_fm_cholesky_decompose(matrix,n,info_out)
     TYPE(cp_fm_type), POINTER                :: matrix
     INTEGER, INTENT(in), OPTIONAL            :: n
     INTEGER, INTENT(out), OPTIONAL           :: info_out
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cp_fm_cholesky_decompose', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, info, my_n
-    LOGICAL                                  :: failure
     REAL(KIND=dp), DIMENSION(:, :), POINTER  :: a
     REAL(KIND=sp), DIMENSION(:, :), POINTER  :: a_sp
 #if defined(__SCALAPACK)
@@ -63,12 +58,11 @@ CONTAINS
 
     CALL timeset(routineN,handle)
 
-    failure = .FALSE.
 
     my_n = MIN(matrix%matrix_struct%nrow_global,&
          matrix%matrix_struct%ncol_global)
     IF (PRESENT(n)) THEN
-       CPPrecondition(n<=my_n,cp_failure_level,routineP,error,failure)
+       CPASSERT(n<=my_n)
        my_n=n
     END IF
 
@@ -97,7 +91,7 @@ CONTAINS
     IF (PRESENT(info_out)) THEN
       info_out = info
     ELSE
-      CPPostcondition(info==0,cp_failure_level,routineP,error,failure)
+      CPASSERT(info==0)
     END IF
 
     CALL timestop(handle)
@@ -108,16 +102,13 @@ CONTAINS
 !> \brief used to replace the cholesky decomposition by the inverse
 !> \param matrix the matrix to invert (must be an upper triangular matrix)
 !> \param n size of the matrix to invert (defaults to the min(size(matrix)))
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      05.2002 created [JVdV]
 !> \author Joost VandeVondele
 ! *****************************************************************************
-  SUBROUTINE cp_fm_cholesky_invert(matrix,n, error)
+  SUBROUTINE cp_fm_cholesky_invert(matrix,n)
     TYPE(cp_fm_type), POINTER           :: matrix
     INTEGER, INTENT(in), OPTIONAL                :: n
-    TYPE(cp_error_type), INTENT(inout)  :: error
 
     CHARACTER(len=*), PARAMETER :: routineN='cp_fm_cholesky_invert',&
          routineP=moduleN//':'//routineN
@@ -125,19 +116,17 @@ CONTAINS
     REAL(KIND = sp), DIMENSION(:,:), POINTER  :: a_sp
     INTEGER                                   :: info,handle
     INTEGER                                   :: my_n
-    LOGICAL                                   :: failure
 #if defined(__SCALAPACK)
     INTEGER, DIMENSION(9)                     :: desca
 #endif
 
     CALL timeset(routineN,handle)
 
-    failure = .FALSE.
 
     my_n = MIN(matrix%matrix_struct%nrow_global,&
          matrix%matrix_struct%ncol_global)
     IF (PRESENT(n)) THEN
-       CPPrecondition(n<=my_n,cp_failure_level,routineP,error,failure)
+       CPASSERT(n<=my_n)
        my_n=n
     END IF
 
@@ -164,7 +153,7 @@ CONTAINS
 
 #endif
 
-    CPPostcondition(info==0,cp_failure_level,routineP,error,failure)
+    CPASSERT(info==0)
 
     CALL timestop(handle)
 
@@ -179,23 +168,19 @@ CONTAINS
 !> \param matrix the symmetric matrix A
 !> \param matrixb the cholesky decomposition of matrix B
 !> \param itype ...
-!> \param error variable to control error logging, stopping,...
-!>              see module cp_error_handling
 !> \par History
 !>      05.2002 created [JVdV]
 !> \author Joost VandeVondele
 ! *****************************************************************************
-  SUBROUTINE cp_fm_cholesky_reduce(matrix,matrixb, itype, error)
+  SUBROUTINE cp_fm_cholesky_reduce(matrix,matrixb, itype)
    TYPE(cp_fm_type), POINTER           :: matrix, matrixb
    INTEGER, OPTIONAL                   :: itype
-   TYPE(cp_error_type), INTENT(inout)  :: error
 
     CHARACTER(len=*), PARAMETER :: routineN='cp_fm_cholesky_reduce',&
          routineP=moduleN//':'//routineN
     REAL(KIND = dp), DIMENSION(:,:), POINTER  :: a, b
     INTEGER                                   :: info, handle
     INTEGER                                   :: n, my_itype
-    LOGICAL                                   :: failure
 #if defined(__SCALAPACK)
     REAL(KIND=dp)                             :: scale
     INTEGER, DIMENSION(9)                     :: desca, descb
@@ -203,7 +188,6 @@ CONTAINS
 
     CALL timeset(routineN,handle)
 
-    failure=.FALSE.
     n = matrix%matrix_struct%nrow_global
 
     my_itype =1
@@ -221,18 +205,15 @@ CONTAINS
 
     ! this is supposed to be one in current version of lapack
     ! if not, eigenvalues have to be scaled by this number
-    CALL cp_assert(scale == 1.0_dp, cp_failure_level,cp_assertion_failed,&
-         routineP,&
-         "scale not equal 1 (scale="//cp_to_string(scale)//")"//&
-CPSourceFileRef,&
-         error,failure)
+    IF(scale /= 1.0_dp)&
+       CPABORT("scale not equal 1 (scale="//cp_to_string(scale)//")")
 #else
 
     CALL dsygst(my_itype,'U',n,a(1,1),n,b(1,1),n,info)
 
 #endif
 
-    CPPostcondition(info==0,cp_failure_level,routineP,error,failure)
+    CPASSERT(info==0)
 
     CALL timestop(handle)
 
@@ -253,16 +234,13 @@ CPSourceFileRef,&
 !> \param op ...
 !> \param pos ...
 !> \param transa ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE cp_fm_cholesky_restore(matrix,neig,matrixb,matrixout,op,pos,transa,&
-       error)
+  SUBROUTINE cp_fm_cholesky_restore(matrix,neig,matrixb,matrixout,op,pos,transa)
     TYPE(cp_fm_type), POINTER          :: matrix,matrixb,matrixout
     INTEGER, INTENT(IN)                         :: neig
     CHARACTER ( LEN = * ), INTENT ( IN )        :: op
     CHARACTER ( LEN = * ), INTENT ( IN ), OPTIONAL :: pos
     CHARACTER ( LEN = * ), INTENT ( IN ), OPTIONAL :: transa
-    TYPE(cp_error_type), INTENT(inout)  :: error
 
     CHARACTER(len=*), PARAMETER :: routineN='cp_fm_cholesky_restore',&
          routineP=moduleN//':'//routineN
@@ -270,7 +248,6 @@ CPSourceFileRef,&
     REAL(KIND = sp), DIMENSION(:,:), POINTER         :: a_sp,b_sp,out_sp
     INTEGER                                   :: itype, handle
     INTEGER                                   :: n
-    LOGICAL                                   :: failure
     REAL(KIND = dp)                           :: alpha
     INTEGER                                   :: myprow, mypcol
     TYPE(cp_blacs_env_type), POINTER          :: context
@@ -282,17 +259,13 @@ CPSourceFileRef,&
 
     CALL timeset(routineN,handle)
 
-    failure=.FALSE.
     context => matrix%matrix_struct%context
     myprow = context%mepos(1)
     mypcol = context%mepos(2)
     n = matrix%matrix_struct%nrow_global
     itype = 1
-    CALL cp_assert(op == "SOLVE" .OR. op == "MULTIPLY",&
-         cp_failure_level,cp_assertion_failed,routineP,&
-         "wrong argument op"//&
-CPSourceFileRef,&
-         error,failure)
+    IF(op /= "SOLVE" .AND. op /= "MULTIPLY")&
+       CPABORT("wrong argument op")
 
     IF (PRESENT(pos)) THEN
        SELECT CASE(pos)
@@ -301,11 +274,7 @@ CPSourceFileRef,&
        CASE("RIGHT")
          chol_pos='R'
        CASE DEFAULT
-          CALL cp_assert(.FALSE.,&
-               cp_failure_level,cp_assertion_failed,routineP,&
-               "wrong argument pos"//&
-CPSourceFileRef,&
-               error,failure)
+          CPABORT("wrong argument pos")
        END SELECT
     ELSE
        chol_pos='L'
@@ -314,12 +283,8 @@ CPSourceFileRef,&
     chol_transa='N'
     IF (PRESENT(transa)) chol_transa=transa
 
-    CALL cp_assert((matrix%use_sp.EQV.matrixb%use_sp).AND.(matrix%use_sp.EQV.matrixout%use_sp), &
-         cp_failure_level,cp_assertion_failed,&
-         routineP,&
-         "not the same precision"//&
-CPSourceFileRef,&
-         error,failure)
+    IF((matrix%use_sp.NEQV.matrixb%use_sp).OR.(matrix%use_sp.NEQV.matrixout%use_sp))&
+       CPABORT("not the same precision")
 
     ! notice b is the cholesky guy
     a => matrix%local_data

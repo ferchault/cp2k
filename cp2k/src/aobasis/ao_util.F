@@ -24,9 +24,9 @@ MODULE ao_util
                                              nso,&
                                              nsoset
   USE orbital_transformation_matrices, ONLY: orbtramat
-  USE termination,                     ONLY: stop_memory,&
-                                             stop_program
+  USE termination,                     ONLY: stop_memory
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -186,20 +186,17 @@ CONTAINS
     ! Load and check parameter values
 
     IF (l < 0) THEN
-       CALL stop_program(routineN,moduleN,__LINE__,&
-                         "The angular momentum quantum number is negative")
+       CPABORT("The angular momentum quantum number is negative")
     END IF
 
     IF (alpha == 0.0_dp) THEN
-       CALL stop_program(routineN,moduleN,__LINE__,&
-                        "The Gaussian function exponent is zero")
+       CPABORT("The Gaussian function exponent is zero")
     ELSE
        a = ABS(alpha)
     END IF
 
     IF (threshold == 0.0_dp) THEN
-       CALL stop_program(routineN,moduleN,__LINE__,&
-                         "The requested threshold is zero")
+       CPABORT("The requested threshold is zero")
     ELSE
        t = ABS(threshold)
     END IF
@@ -230,8 +227,7 @@ CONTAINS
     DO
        iter=iter+1
        IF (iter.gt.maxiter) THEN
-          CALL stop_program(routineN,moduleN,__LINE__,&
-                            "Maximum number of iterations exceeded")
+          CPABORT("Maximum number of iterations exceeded")
        END IF
        g = d*rhigh**l*EXP(-a*rhigh**2)
        IF (g < t) EXIT
@@ -253,8 +249,7 @@ CONTAINS
           RETURN
        ENDIF
     ENDDO
-    CALL stop_program(routineN,moduleN,__LINE__,&
-                      "Maximum number of iterations exceeded")
+    CPABORT("Maximum number of iterations exceeded")
 
   END FUNCTION exp_radius
 
@@ -478,88 +473,6 @@ CONTAINS
 
 ! *****************************************************************************
 !> \brief ...
-!> \param A ...
-!> \param lda ...
-!> \param ia ...
-!> \param ja ...
-!> \param B ...
-!> \param ldb ...
-!> \param ib ...
-!> \param jb ...
-!> \param m ...
-!> \param n ...
-!> \retval trace_r_AxB_new ...
-! *****************************************************************************
-  FUNCTION trace_r_AxB_new(A,lda,ia,ja,B,ldb,ib,jb,m,n)
-
-    INTEGER, INTENT(in)                      :: lda
-    REAL(dp), INTENT(in)                     :: A(lda,*)
-    INTEGER, INTENT(in)                      :: ia, ja, ldb
-    REAL(dp), INTENT(in)                     :: B(ldb,*)
-    INTEGER, INTENT(in)                      :: ib, jb, m, n
-    REAL(dp)                                 :: trace_r_AxB_new
-
-    INTEGER                                  :: i1, i2, imod, mminus3
-    REAL(dp)                                 :: t1, t2, t3, t4
-
-    t1=0._dp
-    t2=0._dp
-    t3=0._dp
-    t4=0._dp
-    imod=MODULO(m,4)
-    SELECT CASE (imod)
-    CASE (0)
-       DO i2=1,n
-          DO i1=1,m,4
-             t1=t1+A(i1+ia,i2+ja)*B(i1+ib,i2+jb)
-             t2=t2+A(i1+ia+1,i2+ja)*B(i1+ib+1,i2+jb)
-             t3=t3+A(i1+ia+2,i2+ja)*B(i1+ib+2,i2+jb)
-             t4=t4+A(i1+ia+3,i2+ja)*B(i1+ib+3,i2+jb)
-          ENDDO
-       ENDDO
-    CASE (1)
-       mminus3=m-3
-       DO i2=1,n
-          DO i1=1,mminus3,4
-             t1=t1+A(i1+ia,i2+ja)*B(i1+ib,i2+jb)
-             t2=t2+A(i1+ia+1,i2+ja)*B(i1+ib+1,i2+jb)
-             t3=t3+A(i1+ia+2,i2+ja)*B(i1+ib+2,i2+jb)
-             t4=t4+A(i1+ia+3,i2+ja)*B(i1+ib+3,i2+jb)
-          ENDDO
-          t1=t1+A(m+ia,i2+ja)*B(m+ib,i2+jb)
-       ENDDO
-    CASE (2)
-       mminus3=m-3
-       DO i2=1,n
-          DO i1=1,mminus3,4
-             t1=t1+A(i1+ia,i2+ja)*B(i1+ib,i2+jb)
-             t2=t2+A(i1+ia+1,i2+ja)*B(i1+ib+1,i2+jb)
-             t3=t3+A(i1+ia+2,i2+ja)*B(i1+ib+2,i2+jb)
-             t4=t4+A(i1+ia+3,i2+ja)*B(i1+ib+3,i2+jb)
-          ENDDO
-          t1=t1+A(m-1+ia,i2+ja)*B(m-1+ib,i2+jb)
-          t2=t2+A(m+ia,i2+ja)*B(m+ib,i2+jb)
-       ENDDO
-    CASE (3)
-       mminus3=m-3
-       DO i2=1,n
-          DO i1=1,mminus3,4
-             t1=t1+A(i1+ia,i2+ja)*B(i1+ib,i2+jb)
-             t2=t2+A(i1+ia+1,i2+ja)*B(i1+ib+1,i2+jb)
-             t3=t3+A(i1+ia+2,i2+ja)*B(i1+ib+2,i2+jb)
-             t4=t4+A(i1+ia+3,i2+ja)*B(i1+ib+3,i2+jb)
-          ENDDO
-          t1=t1+A(m-2+ia,i2+ja)*B(m-2+ib,i2+jb)
-          t2=t2+A(m-1+ia,i2+ja)*B(m-1+ib,i2+jb)
-          t3=t3+A(m+ia,i2+ja)*B(m+ib,i2+jb)
-       ENDDO
-    END SELECT
-    trace_r_AxB_new=t1+t2+t3+t4
-
-  END FUNCTION trace_r_AxB_new
-
-! *****************************************************************************
-!> \brief ...
 !> \param CPC_co ...
 !> \param CPC_so ...
 !> \param maxl ...
@@ -659,10 +572,7 @@ CONTAINS
        ENDDO
     ENDDO
 
-    DEALLOCATE (work,STAT=istat)
-    IF (istat /= 0) THEN
-       CALL stop_memory(routineN,moduleN,__LINE__,"work")
-    END IF
+    DEALLOCATE (work)
 
   END SUBROUTINE transform_c2s
 
@@ -703,10 +613,7 @@ CONTAINS
        CPC_so(1:nsoset(maxl),iso) = work(1:nsoset(maxl),iso,1)
     END DO
 
-    DEALLOCATE (work,STAT=istat)
-    IF (istat /= 0) THEN
-       CALL stop_memory(routineN,moduleN,__LINE__,"work")
-    END IF
+    DEALLOCATE (work)
 
   END SUBROUTINE transform_c2s_new
 
@@ -787,10 +694,7 @@ CONTAINS
        ENDDO ! l
     ENDDO ! ic2
 
-    DEALLOCATE (matsc,STAT=istat)
-    IF (istat /= 0) THEN
-       CALL stop_memory(routineN,moduleN,__LINE__,"matsc")
-    END IF
+    DEALLOCATE (matsc)
 
   END SUBROUTINE transform_s2c
   !------------------------------------------------------------------------------!
@@ -815,8 +719,7 @@ CONTAINS
     REAL(dp) :: mat_aux(ncoset(lmax1),nsoset(lmax2),n)
 
     IF (lmax1>3.or.lmax2>3) THEN
-       CALL stop_program(routineN,moduleN,__LINE__,&
-                         "l>3 not implemented")
+       CPABORT("l>3 not implemented")
     END IF
     DO idx_l2=1,nsoset(lmax2)
 
@@ -999,8 +902,7 @@ CONTAINS
     REAL(dp) :: mat_aux(nsoset(lmax1),ncoset(lmax2),n)
 
     IF ((lmax1 > 3).OR.(lmax2 > 3)) THEN
-       CALL stop_program(routineN,moduleN,__LINE__,&
-                         "l > 3 not implemented")
+       CPABORT("l > 3 not implemented")
     END IF
 
     DO idx_l2=1,ncoset(lmax2)

@@ -45,11 +45,9 @@ MODULE  hartree_local_methods
   USE qs_rho_atom_types,               ONLY: get_rho_atom,&
                                              rho_atom_coeff,&
                                              rho_atom_type
-  USE termination,                     ONLY: stop_program
-  USE timings,                         ONLY: timeset,&
-                                             timestop
   USE util,                            ONLY: get_limit
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -67,13 +65,11 @@ CONTAINS
 !> \brief ...
 !> \param hartree_local ...
 !> \param natom ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE init_coulomb_local(hartree_local,natom,error)
+  SUBROUTINE init_coulomb_local(hartree_local,natom)
 
     TYPE(hartree_local_type), POINTER        :: hartree_local
     INTEGER, INTENT(IN)                      :: natom
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'init_coulomb_local', &
       routineP = moduleN//':'//routineN
@@ -86,7 +82,7 @@ CONTAINS
 
     NULLIFY(ecoul_1c)
     !   Allocate and Initialize 1-center Potentials and Integrals
-    CALL allocate_ecoul_1center(ecoul_1c,natom, error)
+    CALL allocate_ecoul_1center(ecoul_1c,natom)
     hartree_local%ecoul_1c => ecoul_1c
 
     CALL timestop(handle)
@@ -212,32 +208,30 @@ CONTAINS
 !> \param tddft ...
 !> \param do_triplet ...
 !> \param p_env ...
-!> \param error ...
 !> \par History
 !>      05.2012 JGH refactoring
 !> \author ??
 ! *****************************************************************************
-  SUBROUTINE Vh_1c_gg_integrals(qs_env,energy_hartree_1c,tddft,do_triplet,p_env,error)
+  SUBROUTINE Vh_1c_gg_integrals(qs_env,energy_hartree_1c,tddft,do_triplet,p_env)
 
     TYPE(qs_environment_type), POINTER       :: qs_env
     REAL(kind=dp), INTENT(out)               :: energy_hartree_1c
     LOGICAL, INTENT(IN), OPTIONAL            :: tddft, do_triplet
     TYPE(qs_p_env_type), OPTIONAL, POINTER   :: p_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'Vh_1c_gg_integrals', &
       routineP = moduleN//':'//routineN
 
     INTEGER :: bo(2), handle, iat, iatom, ikind, ipgf1, is1, iset1, iso, &
-      istat, l_ang, llmax, lmax0, lmax_0, m1, max_iso, max_iso_not0, &
-      max_s_harm, maxl, maxso, mepos, n1, nat, natom, nchan_0, nkind, nr, &
-      nset, nsotot, nspins, num_pe
+      l_ang, llmax, lmax0, lmax_0, m1, max_iso, max_iso_not0, max_s_harm, &
+      maxl, maxso, mepos, n1, nat, natom, nchan_0, nkind, nr, nset, nsotot, &
+      nspins, num_pe
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: cg_n_list
     INTEGER, ALLOCATABLE, DIMENSION(:, :, :) :: cg_list
     INTEGER, DIMENSION(:), POINTER           :: atom_list, lmax, lmin, npgf
     LOGICAL                                  :: atenergy, core_charge, &
-                                                failure, my_periodic, &
-                                                my_tddft, paw_atom
+                                                my_periodic, my_tddft, &
+                                                paw_atom
     REAL(dp)                                 :: back_ch, factor
     REAL(dp), ALLOCATABLE, DIMENSION(:)      :: gexp, sqrtwr
     REAL(dp), ALLOCATABLE, DIMENSION(:, :)   :: aVh1b_00, aVh1b_hh, aVh1b_ss, &
@@ -272,7 +266,6 @@ CONTAINS
 
     CALL timeset(routineN,handle)
 
-    failure = .FALSE.
     NULLIFY(cell,dft_control,para_env,poisson_env,pw_env,qs_charges)
     NULLIFY(atomic_kind_set, qs_kind_set, rho_atom_set, rho0_atom_set)
     NULLIFY(rho0_mpole,rhoz_set,ecoul_1c)
@@ -289,9 +282,9 @@ CONTAINS
          para_env=para_env,&
          atomic_kind_set=atomic_kind_set,&
          qs_kind_set=qs_kind_set,atprop=atprop,&
-         pw_env=pw_env,qs_charges=qs_charges,error=error)
+         pw_env=pw_env,qs_charges=qs_charges)
 
-    CALL pw_env_get(pw_env,poisson_env=poisson_env,error=error)
+    CALL pw_env_get(pw_env,poisson_env=poisson_env)
     my_periodic= (poisson_env%method==pw_poisson_periodic)
 
     back_ch = qs_charges%background*cell%deth
@@ -307,7 +300,7 @@ CONTAINS
             rho0_atom_set=rho0_atom_set, &
             rho0_mpole=rho0_mpole,&
             rhoz_set=rhoz_set,&
-            ecoul_1c=ecoul_1c,error=error)
+            ecoul_1c=ecoul_1c)
     END IF
 
     nkind = SIZE(atomic_kind_set,1)
@@ -321,15 +314,15 @@ CONTAINS
        ENDIF
     END IF
 
-    CALL get_qs_kind_set(qs_kind_set, maxg_iso_not0=max_iso)
+    CALL get_qs_kind_set(qs_kind_set,maxg_iso_not0=max_iso)
     CALL get_rho0_mpole(rho0_mpole=rho0_mpole,lmax_0=lmax_0)
 
     atenergy=.FALSE.
     IF (ASSOCIATED(atprop)) THEN
       atenergy = atprop%energy
       IF (atenergy) THEN
-        CALL get_qs_env(qs_env=qs_env,natom=natom,error=error)
-        CALL atprop_array_init(atprop%ate1c,natom,error)
+        CALL get_qs_env(qs_env=qs_env,natom=natom)
+        CALL atprop_array_init(atprop%ate1c,natom)
       END IF
     END IF
 
@@ -341,7 +334,7 @@ CONTAINS
 
       CALL get_atomic_kind(atomic_kind_set(ikind), atom_list=atom_list, natom=nat)
       CALL get_qs_kind(qs_kind_set(ikind),&
-            orb_basis_set=orb_basis,&
+            basis_set=orb_basis,&
             grid_atom=grid_atom,&
             harmonics=harmonics,ngrid_rad=nr,&
             max_iso_not0=max_iso_not0,paw_atom=paw_atom)
@@ -356,27 +349,18 @@ CONTAINS
          llmax = harmonics%llmax
 
          nsotot = maxso*nset
-         ALLOCATE(gsph(nr,nsotot),STAT=istat)
-         CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
-         ALLOCATE(gexp(nr),STAT=istat)
-         CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
-         ALLOCATE(sqrtwr(nr),g0_h_w(nr,0:lmax_0),STAT=istat)
-         CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+         ALLOCATE(gsph(nr,nsotot))
+         ALLOCATE(gexp(nr))
+         ALLOCATE(sqrtwr(nr),g0_h_w(nr,0:lmax_0))
 
          NULLIFY(Vh1_h,Vh1_s)
-         ALLOCATE(Vh1_h(nr,max_iso_not0),STAT=istat)
-         CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
-         ALLOCATE(Vh1_s(nr,max_iso_not0),STAT=istat)
-         CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+         ALLOCATE(Vh1_h(nr,max_iso_not0))
+         ALLOCATE(Vh1_s(nr,max_iso_not0))
 
-         ALLOCATE(aVh1b_hh(nsotot,nsotot),STAT=istat)
-         CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
-         ALLOCATE(aVh1b_ss(nsotot,nsotot),STAT=istat)
-         CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
-         ALLOCATE(aVh1b_00(nsotot,nsotot),STAT=istat)
-         CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
-         ALLOCATE(cg_list(2,nsoset(maxl)**2,max_s_harm),cg_n_list(max_s_harm),STAT=istat)
-         CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+         ALLOCATE(aVh1b_hh(nsotot,nsotot))
+         ALLOCATE(aVh1b_ss(nsotot,nsotot))
+         ALLOCATE(aVh1b_00(nsotot,nsotot))
+         ALLOCATE(cg_list(2,nsoset(maxl)**2,max_s_harm),cg_n_list(max_s_harm))
 
          NULLIFY(Qlm_gg,g0_h)
          CALL get_rho0_mpole(rho0_mpole=rho0_mpole, ikind=ikind, &
@@ -385,8 +369,7 @@ CONTAINS
 
          nchan_0 = nsoset(lmax0)
 
-         IF(nchan_0 > max_iso_not0) CALL stop_program(routineN,moduleN,__LINE__,&
-            "channels for rho0 > # max of spherical harmonics",para_env)
+         IF(nchan_0 > max_iso_not0) CPABORT("channels for rho0 > # max of spherical harmonics")
 
          NULLIFY(rrad_z,my_CG)
          my_CG  => harmonics%my_CG
@@ -440,35 +423,27 @@ CONTAINS
 
             CALL Vh_1c_atom_potential(rho_atom,vrrad_0,&
                  grid_atom,core_charge,vrrad_z,Vh1_h,Vh1_s,&
-                 nchan_0,nspins,max_iso_not0,factor,error)
+                 nchan_0,nspins,max_iso_not0,factor)
 
             CALL Vh_1c_atom_energy(energy_hartree_1c,ecoul_1c,rho_atom,rrad_0,&
                  grid_atom,iatom,core_charge,rrad_z,Vh1_h,Vh1_s,&
-                 nchan_0,nspins,max_iso_not0,atenergy,atprop%ate1c,error)
+                 nchan_0,nspins,max_iso_not0,atenergy,atprop%ate1c)
 
             CALL Vh_1c_atom_integrals(rho_atom,&
                  aVh1b_hh,aVh1b_ss,aVh1b_00,Vh1_h,Vh1_s,max_iso_not0,&
                  max_s_harm,llmax,cg_list,cg_n_list,&
-                 nset,npgf,lmin,lmax,nsotot,maxso,nspins,nchan_0,gsph,g0_h_w,my_CG,Qlm_gg,error)
+                 nset,npgf,lmin,lmax,nsotot,maxso,nspins,nchan_0,gsph,g0_h_w,my_CG,Qlm_gg)
 
          END DO  ! iat
 
-         DEALLOCATE(aVh1b_hh,STAT=istat)
-           CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
-         DEALLOCATE(aVh1b_ss,STAT=istat)
-           CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
-         DEALLOCATE(aVh1b_00,STAT=istat)
-           CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
-         DEALLOCATE(Vh1_h,Vh1_s, STAT=istat)
-           CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
-         DEALLOCATE(cg_list,cg_n_list,STAT=istat)
-           CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
-         DEALLOCATE(gsph,STAT=istat)
-           CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
-         DEALLOCATE(gexp,STAT=istat)
-           CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
-         DEALLOCATE(sqrtwr,g0_h_w,STAT=istat)
-           CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+         DEALLOCATE(aVh1b_hh)
+         DEALLOCATE(aVh1b_ss)
+         DEALLOCATE(aVh1b_00)
+         DEALLOCATE(Vh1_h,Vh1_s)
+         DEALLOCATE(cg_list,cg_n_list)
+         DEALLOCATE(gsph)
+         DEALLOCATE(gexp)
+         DEALLOCATE(sqrtwr,g0_h_w)
 
       ELSE
 !===========   NO  PAW   ===============
@@ -498,11 +473,10 @@ CONTAINS
 !> \param nspins ...
 !> \param max_iso_not0 ...
 !> \param bfactor ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE Vh_1c_atom_potential(rho_atom,vrrad_0,&
              grid_atom,core_charge,vrrad_z,Vh1_h,Vh1_s,&
-             nchan_0,nspins,max_iso_not0,bfactor,error)
+             nchan_0,nspins,max_iso_not0,bfactor)
 
     TYPE(rho_atom_type), POINTER             :: rho_atom
     REAL(dp), DIMENSION(:, :), POINTER       :: vrrad_0
@@ -512,7 +486,6 @@ CONTAINS
     REAL(dp), DIMENSION(:, :), POINTER       :: Vh1_h, Vh1_s
     INTEGER, INTENT(IN)                      :: nchan_0, nspins, max_iso_not0
     REAL(dp), INTENT(IN)                     :: bfactor
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'Vh_1c_atom_potential', &
       routineP = moduleN//':'//routineN
@@ -570,11 +543,10 @@ CONTAINS
 !> \param max_iso_not0 ...
 !> \param atenergy ...
 !> \param ate1c ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE Vh_1c_atom_energy(energy_hartree_1c,ecoul_1c,rho_atom,rrad_0,&
              grid_atom,iatom,core_charge,rrad_z,Vh1_h,Vh1_s,&
-             nchan_0,nspins,max_iso_not0,atenergy,ate1c,error)
+             nchan_0,nspins,max_iso_not0,atenergy,ate1c)
 
     REAL(dp), INTENT(INOUT)                  :: energy_hartree_1c
     TYPE(ecoul_1center_type), DIMENSION(:), &
@@ -589,7 +561,6 @@ CONTAINS
     INTEGER, INTENT(IN)                      :: nchan_0, nspins, max_iso_not0
     LOGICAL, INTENT(IN)                      :: atenergy
     REAL(dp), DIMENSION(:), POINTER          :: ate1c
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'Vh_1c_atom_energy', &
       routineP = moduleN//':'//routineN
@@ -667,12 +638,11 @@ CONTAINS
 !> \param g0_h_w ...
 !> \param my_CG ...
 !> \param Qlm_gg ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE Vh_1c_atom_integrals(rho_atom,&
              aVh1b_hh,aVh1b_ss,aVh1b_00,Vh1_h,Vh1_s,max_iso_not0,&
              max_s_harm,llmax,cg_list,cg_n_list,&
-             nset,npgf,lmin,lmax,nsotot,maxso,nspins,nchan_0,gsph,g0_h_w,my_CG,Qlm_gg,error)
+             nset,npgf,lmin,lmax,nsotot,maxso,nspins,nchan_0,gsph,g0_h_w,my_CG,Qlm_gg)
 
     TYPE(rho_atom_type), POINTER             :: rho_atom
     REAL(dp), DIMENSION(:, :)                :: aVh1b_hh, aVh1b_ss, aVh1b_00
@@ -687,7 +657,6 @@ CONTAINS
     REAL(dp), DIMENSION(:, :), POINTER       :: gsph
     REAL(dp), DIMENSION(:, 0:)               :: g0_h_w
     REAL(dp), DIMENSION(:, :, :), POINTER    :: my_CG, Qlm_gg
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'Vh_1c_atom_integrals', &
       routineP = moduleN//':'//routineN
@@ -715,7 +684,7 @@ CONTAINS
        m2 = 0
        DO iset2 = 1,nset
           CALL get_none0_cg_list(my_CG,lmin(iset1),lmax(iset1),lmin(iset2),lmax(iset2),&
-                                 max_s_harm,llmax,cg_list,cg_n_list,max_iso_not0_local,error)
+                                 max_s_harm,llmax,cg_list,cg_n_list,max_iso_not0_local)
 
           n1 = nsoset(lmax(iset1))
           DO ipgf1  = 1,npgf(iset1)

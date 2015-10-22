@@ -18,10 +18,8 @@ MODULE particle_types
   USE atomic_kind_types,               ONLY: atomic_kind_type
   USE kinds,                           ONLY: dp
   USE message_passing,                 ONLY: mp_sum
-  USE termination,                     ONLY: stop_program
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -60,29 +58,24 @@ CONTAINS
 !> \brief   Allocate a particle set.
 !> \param particle_set ...
 !> \param nparticle ...
-!> \param error ...
 !> \date    14.01.2002
 !> \author  MK
 !> \version 1.0
 ! *****************************************************************************
-  SUBROUTINE allocate_particle_set(particle_set,nparticle,error)
+  SUBROUTINE allocate_particle_set(particle_set,nparticle)
     TYPE(particle_type), DIMENSION(:), &
       POINTER                                :: particle_set
     INTEGER, INTENT(IN)                      :: nparticle
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'allocate_particle_set', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: iparticle, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: iparticle
 
-    failure = .FALSE.
     IF (ASSOCIATED(particle_set)) THEN
-       CALL deallocate_particle_set(particle_set,error=error)
+       CALL deallocate_particle_set(particle_set)
     END IF
-    ALLOCATE (particle_set(nparticle),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (particle_set(nparticle))
 
     DO iparticle=1,nparticle
       NULLIFY (particle_set(iparticle)%atomic_kind)
@@ -99,30 +92,23 @@ CONTAINS
 ! *****************************************************************************
 !> \brief   Deallocate a particle set.
 !> \param particle_set ...
-!> \param error ...
 !> \date    14.01.2002
 !> \author  MK
 !> \version 1.0
 ! *****************************************************************************
-  SUBROUTINE deallocate_particle_set(particle_set,error)
+  SUBROUTINE deallocate_particle_set(particle_set)
     TYPE(particle_type), DIMENSION(:), &
       POINTER                                :: particle_set
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'deallocate_particle_set', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
     IF (ASSOCIATED(particle_set)) THEN
-      DEALLOCATE (particle_set,STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      DEALLOCATE (particle_set)
     ELSE
-      CALL stop_program(routineN,moduleN,__LINE__,&
-                        "The pointer particle_set is not associated and "//&
-                        "cannot be deallocated")
+      CALL cp_abort(__LOCATION__,&
+           "The pointer particle_set is not associated and "//&
+           "cannot be deallocated")
     END IF
 
   END SUBROUTINE deallocate_particle_set
@@ -135,27 +121,24 @@ CONTAINS
 !> \param vel ...
 !> \param for ...
 !> \param add ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE update_particle_set ( particle_set, int_group,  pos, vel, for, add, error )
+  SUBROUTINE update_particle_set ( particle_set, int_group,  pos, vel, for, add)
 
     TYPE(particle_type), POINTER             :: particle_set( : )
     INTEGER, INTENT(IN)                      :: int_group
     REAL(KIND=dp), INTENT(INOUT), OPTIONAL   :: pos( :, : ), vel( :, : ), &
                                                 for(:,:)
     LOGICAL, INTENT(IN), OPTIONAL            :: add
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'update_particle_set', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, iparticle, nparticle
-    LOGICAL                                  :: failure, my_add, update_for, &
+    LOGICAL                                  :: my_add, update_for, &
                                                 update_pos, update_vel
 
     CALL timeset(routineN,handle)
 
-    failure = .FALSE.
     nparticle  = SIZE ( particle_set )
     update_pos = PRESENT(pos)
     update_vel = PRESENT(vel)

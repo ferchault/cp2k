@@ -18,6 +18,7 @@ MODULE lri_optimize_ri_basis_types
   USE kinds,                           ONLY: dp
   USE mathconstants,                   ONLY: pi
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -71,22 +72,15 @@ CONTAINS
 ! *****************************************************************************
 !> \brief creates lri_opt
 !> \param lri_opt optimization environment
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 ! *****************************************************************************
- SUBROUTINE create_lri_opt(lri_opt,error)
+ SUBROUTINE create_lri_opt(lri_opt)
 
     TYPE(lri_opt_type), POINTER              :: lri_opt
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'create_lri_opt', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-   ALLOCATE(lri_opt,STAT=stat)
-   CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+   ALLOCATE(lri_opt)
 
    NULLIFY(lri_opt%ri_gcc_orig)
    NULLIFY(lri_opt%subset)
@@ -107,49 +101,36 @@ CONTAINS
 ! *****************************************************************************
 !> \brief deallocates lri_opt
 !> \param lri_opt optimization environment
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 ! *****************************************************************************
- SUBROUTINE deallocate_lri_opt(lri_opt,error)
+ SUBROUTINE deallocate_lri_opt(lri_opt)
 
     TYPE(lri_opt_type), POINTER              :: lri_opt
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'deallocate_lri_opt', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, stat
-    LOGICAL                                  :: failure
-
-   failure=.FALSE.
+    INTEGER                                  :: i
 
    IF(ASSOCIATED(lri_opt)) THEN
      IF(ASSOCIATED(lri_opt%subset)) THEN
        DO i=1,SIZE(lri_opt%subset) 
-         DEALLOCATE(lri_opt%subset(i)%ncont_l,STAT=stat)
-         CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+         DEALLOCATE(lri_opt%subset(i)%ncont_l)
        ENDDO 
-       DEALLOCATE(lri_opt%subset,STAT=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE(lri_opt%subset)
      ENDIF
      IF(ASSOCIATED(lri_opt%x)) THEN
-       DEALLOCATE(lri_opt%x,STAT=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE(lri_opt%x)
      ENDIF
      IF(ASSOCIATED(lri_opt%zet_init)) THEN
-       DEALLOCATE(lri_opt%zet_init,STAT=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE(lri_opt%zet_init)
      ENDIF
      IF(ASSOCIATED(lri_opt%ri_gcc_orig)) THEN
        DO i=1,SIZE(lri_opt%ri_gcc_orig) 
-         DEALLOCATE(lri_opt%ri_gcc_orig(i)%gcc_orig,STAT=stat)
-         CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+         DEALLOCATE(lri_opt%ri_gcc_orig(i)%gcc_orig)
        ENDDO
-       DEALLOCATE(lri_opt%ri_gcc_orig,STAT=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       DEALLOCATE(lri_opt%ri_gcc_orig)
      ENDIF
-     DEALLOCATE(lri_opt,STAT=stat)
-     CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+     DEALLOCATE(lri_opt)
    ENDIF
  END SUBROUTINE deallocate_lri_opt
 
@@ -160,34 +141,27 @@ CONTAINS
 !> \param gcc_orig original contraction coefficient
 !> \param gto_basis_set gaussian type basis set
 !> \param lri_opt optimization environment
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 ! *****************************************************************************
-  SUBROUTINE get_original_gcc(gcc_orig,gto_basis_set,lri_opt,error)
+  SUBROUTINE get_original_gcc(gcc_orig,gto_basis_set,lri_opt)
  
     REAL(KIND=dp), DIMENSION(:, :, :), &
       POINTER                                :: gcc_orig
     TYPE(gto_basis_set_type), POINTER        :: gto_basis_set
     TYPE(lri_opt_type), POINTER              :: lri_opt
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'get_original_gcc', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: il, ipgf, iset, ishell, l, &
-                                                maxpgf, maxshell, nl, nset, &
-                                                stat
+                                                maxpgf, maxshell, nl, nset
     INTEGER, DIMENSION(:), POINTER           :: lmax, lmin, ncont_l
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: expzet, gcca, prefac, zeta
 
-    failure  = .FALSE.
     maxpgf   = SIZE(gto_basis_set%gcc,1)
     maxshell = SIZE(gto_basis_set%gcc,2)
     nset     = SIZE(gto_basis_set%gcc,3)
 
-    ALLOCATE(gcc_orig(maxpgf,maxshell,nset),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(gcc_orig(maxpgf,maxshell,nset))
     gcc_orig = 0.0_dp
 
     DO iset=1,gto_basis_set%nset
@@ -207,14 +181,12 @@ CONTAINS
      ! **** get number of contractions per quantum number
      CALL get_gto_basis_set(gto_basis_set=gto_basis_set,&
                             lmax=lmax,lmin=lmin) 
-     ALLOCATE(lri_opt%subset(nset),STAT=stat)
-     CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+     ALLOCATE(lri_opt%subset(nset))
      DO iset=1,gto_basis_set%nset
         nl=lmax(iset)-lmin(iset)+1
         lri_opt%subset(iset)%nl=nl
         il=1
-        ALLOCATE(lri_opt%subset(iset)%ncont_l(nl),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(lri_opt%subset(iset)%ncont_l(nl))
         ncont_l => lri_opt%subset(iset)%ncont_l
         ncont_l=1
         DO ishell=2,gto_basis_set%nshell(iset)
@@ -236,16 +208,13 @@ CONTAINS
 !> \param gcc contraction coefficient
 !> \param gto_basis_set gaussian type basis set
 !> \param lri_opt optimization environment
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 ! *****************************************************************************
-  SUBROUTINE orthonormalize_gcc(gcc,gto_basis_set,lri_opt,error)
+  SUBROUTINE orthonormalize_gcc(gcc,gto_basis_set,lri_opt)
  
     REAL(KIND=dp), DIMENSION(:, :, :), &
       POINTER                                :: gcc
     TYPE(gto_basis_set_type), POINTER        :: gto_basis_set
     TYPE(lri_opt_type), POINTER              :: lri_opt
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'orthonormalize_gcc', &
       routineP = moduleN//':'//routineN
@@ -253,10 +222,7 @@ CONTAINS
     INTEGER                                  :: il, iset, ishell, ishell1, &
                                                 ishell2, istart, nset
     INTEGER, DIMENSION(:), POINTER           :: nshell
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: gs_scale
-
-    failure  = .FALSE.
 
     CALL get_gto_basis_set(gto_basis_set=gto_basis_set,nset=nset,nshell=nshell)
  

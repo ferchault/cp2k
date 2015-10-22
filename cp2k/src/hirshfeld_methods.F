@@ -56,9 +56,8 @@ MODULE hirshfeld_methods
                                              rs_grid_retain,&
                                              rs_grid_zero,&
                                              rs_pw_transfer
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -79,10 +78,9 @@ CONTAINS
 !> \param particle_set ...
 !> \param qs_kind_set ...
 !> \param unit_nr ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE write_hirshfeld_charges(charges,hirshfeld_env,particle_set,&
-             qs_kind_set,unit_nr,error)
+             qs_kind_set,unit_nr)
     REAL(KIND=dp), DIMENSION(:, :), &
       INTENT(inout)                          :: charges
     TYPE(hirshfeld_type), POINTER            :: hirshfeld_env
@@ -91,7 +89,6 @@ CONTAINS
     TYPE(qs_kind_type), DIMENSION(:), &
       POINTER                                :: qs_kind_set
     INTEGER, INTENT(IN)                      :: unit_nr
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'write_hirshfeld_charges', &
       routineP = moduleN//':'//routineN
@@ -137,43 +134,37 @@ CONTAINS
 !> \param hirshfeld_env ...
 !> \param qs_kind_set ...
 !> \param atomic_kind_set ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE create_shape_function(hirshfeld_env,qs_kind_set,atomic_kind_set,error)
+  SUBROUTINE create_shape_function(hirshfeld_env,qs_kind_set,atomic_kind_set)
     TYPE(hirshfeld_type), POINTER            :: hirshfeld_env
     TYPE(qs_kind_type), DIMENSION(:), &
       POINTER                                :: qs_kind_set
     TYPE(atomic_kind_type), DIMENSION(:), &
       POINTER                                :: atomic_kind_set
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'create_shape_function', &
       routineP = moduleN//':'//routineN
     INTEGER, PARAMETER                       :: ngto = 8
 
     CHARACTER(len=2)                         :: esym
-    INTEGER                                  :: ikind, nkind, stat
-    LOGICAL                                  :: failure, found
+    INTEGER                                  :: ikind, nkind
+    LOGICAL                                  :: found
     REAL(KIND=dp)                            :: al, rco, zeff
     REAL(KIND=dp), DIMENSION(ngto, 2)        :: ppdens
     TYPE(atomic_kind_type), POINTER          :: atomic_kind
     TYPE(qs_kind_type), POINTER              :: qs_kind
 
-    failure = .FALSE.
-    CPPrecondition(ASSOCIATED(hirshfeld_env),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(hirshfeld_env))
 
     nkind = SIZE(qs_kind_set)
-    ALLOCATE(hirshfeld_env%kind_shape_fn(nkind), stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(hirshfeld_env%kind_shape_fn(nkind))
 
     SELECT CASE(hirshfeld_env%shape_function_type)
        CASE (shape_function_gaussian)
           DO ikind=1,nkind
              hirshfeld_env%kind_shape_fn(ikind)%numexp = 1
-             ALLOCATE(hirshfeld_env%kind_shape_fn(ikind)%zet(1), stat=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-             ALLOCATE(hirshfeld_env%kind_shape_fn(ikind)%coef(1), stat=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+             ALLOCATE(hirshfeld_env%kind_shape_fn(ikind)%zet(1))
+             ALLOCATE(hirshfeld_env%kind_shape_fn(ikind)%coef(1))
              CALL get_qs_kind(qs_kind_set(ikind),element_symbol=esym)
              rco = 2.0_dp
              CALL get_ptable_info(symbol=esym,covalent_radius=rco,found=found)
@@ -188,21 +179,17 @@ CONTAINS
              atomic_kind => atomic_kind_set(ikind)
              qs_kind     => qs_kind_set(ikind)
              CALL calculate_atomic_density(ppdens(:,:),atomic_kind,qs_kind,ngto,&
-                                           confine=.FALSE.,error=error)
+                                           confine=.FALSE.)
              hirshfeld_env%kind_shape_fn(ikind)%numexp = ngto
-             ALLOCATE(hirshfeld_env%kind_shape_fn(ikind)%zet(ngto), stat=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-             ALLOCATE(hirshfeld_env%kind_shape_fn(ikind)%coef(ngto), stat=stat)
-             CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+             ALLOCATE(hirshfeld_env%kind_shape_fn(ikind)%zet(ngto))
+             ALLOCATE(hirshfeld_env%kind_shape_fn(ikind)%coef(ngto))
              hirshfeld_env%kind_shape_fn(ikind)%zet(:) = ppdens(:,1)
              CALL get_qs_kind(qs_kind,zeff=zeff)
              hirshfeld_env%kind_shape_fn(ikind)%coef(:) = ppdens(:,2)/zeff
           END DO
 
        CASE DEFAULT
-          CALL cp_unimplemented_error(fromWhere=routineP, &
-               message="Unknown shape function", &
-               error=error, error_level=cp_failure_level)
+          CPABORT("Unknown shape function")
     END SELECT
 
   END SUBROUTINE create_shape_function
@@ -212,20 +199,18 @@ CONTAINS
 !> \param qs_env ...
 !> \param hirshfeld_env ...
 !> \param charges ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE comp_hirshfeld_charges(qs_env,hirshfeld_env,charges,error)
+  SUBROUTINE comp_hirshfeld_charges(qs_env,hirshfeld_env,charges)
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(hirshfeld_type), POINTER            :: hirshfeld_env
     REAL(KIND=dp), DIMENSION(:, :), &
       INTENT(inout)                          :: charges
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'comp_hirshfeld_charges', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: is, stat
-    LOGICAL                                  :: failure, rho_r_valid
+    INTEGER                                  :: is
+    LOGICAL                                  :: rho_r_valid
     REAL(KIND=dp)                            :: tnfun
     TYPE(pw_env_type), POINTER               :: pw_env
     TYPE(pw_p_type), DIMENSION(:), POINTER   :: rho_r
@@ -234,36 +219,32 @@ CONTAINS
     TYPE(qs_rho_type), POINTER               :: rho
 
     NULLIFY(rho_r)
-    failure = .FALSE.
     ! normalization function on grid
-    CALL calculate_hirshfeld_normalization(qs_env,hirshfeld_env,error)
+    CALL calculate_hirshfeld_normalization(qs_env,hirshfeld_env)
     ! check normalization
-    tnfun = pw_integrate_function(hirshfeld_env%fnorm%pw,error=error)
+    tnfun = pw_integrate_function(hirshfeld_env%fnorm%pw)
     tnfun = ABS(tnfun - SUM(hirshfeld_env%charges))
     ! 
-    ALLOCATE(rhonorm, stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(rhonorm)
     !
-    CALL get_qs_env(qs_env=qs_env,pw_env=pw_env,rho=rho,error=error)
-    CALL qs_rho_get(rho, rho_r=rho_r, rho_r_valid=rho_r_valid, error=error)
-    CALL pw_env_get(pw_env=pw_env,auxbas_pw_pool=auxbas_pw_pool,error=error)
-    CALL pw_pool_create_pw(auxbas_pw_pool,rhonorm%pw,use_data=REALDATA3D,error=error)
+    CALL get_qs_env(qs_env=qs_env,pw_env=pw_env,rho=rho)
+    CALL qs_rho_get(rho, rho_r=rho_r, rho_r_valid=rho_r_valid)
+    CALL pw_env_get(pw_env=pw_env,auxbas_pw_pool=auxbas_pw_pool)
+    CALL pw_pool_create_pw(auxbas_pw_pool,rhonorm%pw,use_data=REALDATA3D)
     ! loop over spins
     DO is=1,SIZE(rho_r)
       IF(rho_r_valid) THEN
         CALL hfun_scale(rhonorm%pw%cr3d,rho_r(is)%pw%cr3d,&
-                        hirshfeld_env%fnorm%pw%cr3d,error)
+                        hirshfeld_env%fnorm%pw%cr3d)
       ELSE
-        CALL cp_unimplemented_error(fromWhere=routineP, &
-             message="We need rho in real space",error=error,error_level=cp_failure_level)
+        CPABORT("We need rho in real space")
       END IF
-      CALL hirshfeld_integration(qs_env,hirshfeld_env,rhonorm,charges(:,is),error=error)
+      CALL hirshfeld_integration(qs_env,hirshfeld_env,rhonorm,charges(:,is))
       charges(:,is) = charges(:,is)*hirshfeld_env%charges(:)
     END DO
-    CALL pw_pool_give_back_pw(auxbas_pw_pool,rhonorm%pw,error=error)
+    CALL pw_pool_give_back_pw(auxbas_pw_pool,rhonorm%pw)
     !
-    DEALLOCATE(rhonorm, stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(rhonorm)
 
   END SUBROUTINE comp_hirshfeld_charges
 ! *****************************************************************************
@@ -271,32 +252,28 @@ CONTAINS
 !> \param fout ...
 !> \param fun1 ...
 !> \param fun2 ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE hfun_scale(fout,fun1,fun2,error)
+  SUBROUTINE hfun_scale(fout,fun1,fun2)
     REAL(KIND=dp), DIMENSION(:, :, :), &
       INTENT(OUT)                            :: fout
     REAL(KIND=dp), DIMENSION(:, :, :), &
       INTENT(IN)                             :: fun1, fun2
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'hfun_scale', &
       routineP = moduleN//':'//routineN
     REAL(KIND=dp), PARAMETER                 :: small = 1.0e-12_dp
 
     INTEGER                                  :: i1, i2, i3, n1, n2, n3
-    LOGICAL                                  :: failure
 
-    failure = .FALSE.
     n1 = SIZE(fout,1)
     n2 = SIZE(fout,2)
     n3 = SIZE(fout,3)
-    CPPrecondition(n1==SIZE(fun1,1),cp_failure_level,routineP,error,failure)
-    CPPrecondition(n2==SIZE(fun1,2),cp_failure_level,routineP,error,failure)
-    CPPrecondition(n3==SIZE(fun1,3),cp_failure_level,routineP,error,failure)
-    CPPrecondition(n1==SIZE(fun2,1),cp_failure_level,routineP,error,failure)
-    CPPrecondition(n2==SIZE(fun2,2),cp_failure_level,routineP,error,failure)
-    CPPrecondition(n3==SIZE(fun2,3),cp_failure_level,routineP,error,failure)
+    CPASSERT(n1==SIZE(fun1,1))
+    CPASSERT(n2==SIZE(fun1,2))
+    CPASSERT(n3==SIZE(fun1,3))
+    CPASSERT(n1==SIZE(fun2,1))
+    CPASSERT(n2==SIZE(fun2,2))
+    CPASSERT(n3==SIZE(fun2,3))
 
     DO i3=1,n3
       DO i2=1,n2
@@ -318,15 +295,13 @@ CONTAINS
 !> \param hirshfeld_env ...
 !> \param charges ...
 !> \param ounit ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE comp_hirshfeld_i_charges(qs_env,hirshfeld_env,charges,ounit,error)
+  SUBROUTINE comp_hirshfeld_i_charges(qs_env,hirshfeld_env,charges,ounit)
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(hirshfeld_type), POINTER            :: hirshfeld_env
     REAL(KIND=dp), DIMENSION(:, :), &
       INTENT(inout)                          :: charges
     INTEGER, INTENT(IN)                      :: ounit
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'comp_hirshfeld_i_charges', &
       routineP = moduleN//':'//routineN
@@ -334,8 +309,8 @@ CONTAINS
     REAL(KIND=dp), PARAMETER                 :: maxres = 1.0e-2_dp
 
     CHARACTER(len=3)                         :: yesno
-    INTEGER                                  :: iat, iloop, is, natom, stat
-    LOGICAL                                  :: failure, rho_r_valid
+    INTEGER                                  :: iat, iloop, is, natom
+    LOGICAL                                  :: rho_r_valid
     REAL(KIND=dp)                            :: res, tnfun
     TYPE(pw_env_type), POINTER               :: pw_env
     TYPE(pw_p_type), DIMENSION(:), POINTER   :: rho_r
@@ -344,37 +319,34 @@ CONTAINS
     TYPE(qs_rho_type), POINTER               :: rho
 
     NULLIFY(rho_r)
-    failure = .FALSE.
 
     natom = SIZE(charges,1)
 
     IF(ounit>0) WRITE(ounit,"(/,T2,A)") "Hirshfeld charge iterations: Residuals ..."
     !
-    ALLOCATE(rhonorm, stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(rhonorm)
     !
-    CALL get_qs_env(qs_env=qs_env,pw_env=pw_env,rho=rho,error=error)
-    CALL qs_rho_get(rho, rho_r=rho_r, rho_r_valid=rho_r_valid, error=error)
-    CALL pw_env_get(pw_env=pw_env,auxbas_pw_pool=auxbas_pw_pool,error=error)
-    CALL pw_pool_create_pw(auxbas_pw_pool,rhonorm%pw,use_data=REALDATA3D,error=error)
+    CALL get_qs_env(qs_env=qs_env,pw_env=pw_env,rho=rho)
+    CALL qs_rho_get(rho, rho_r=rho_r, rho_r_valid=rho_r_valid)
+    CALL pw_env_get(pw_env=pw_env,auxbas_pw_pool=auxbas_pw_pool)
+    CALL pw_pool_create_pw(auxbas_pw_pool,rhonorm%pw,use_data=REALDATA3D)
     !
     DO iloop=1,maxloop
 
        ! normalization function on grid
-       CALL calculate_hirshfeld_normalization(qs_env,hirshfeld_env,error)
+       CALL calculate_hirshfeld_normalization(qs_env,hirshfeld_env)
        ! check normalization
-       tnfun = pw_integrate_function(hirshfeld_env%fnorm%pw,error=error)
+       tnfun = pw_integrate_function(hirshfeld_env%fnorm%pw)
        tnfun = ABS(tnfun - SUM(hirshfeld_env%charges))
        ! loop over spins
        DO is=1,SIZE(rho_r)
          IF(rho_r_valid) THEN
            CALL hfun_scale(rhonorm%pw%cr3d,rho_r(is)%pw%cr3d,&
-                           hirshfeld_env%fnorm%pw%cr3d,error)
+                           hirshfeld_env%fnorm%pw%cr3d)
          ELSE
-           CALL cp_unimplemented_error(fromWhere=routineP, &
-                message="We need rho in real space",error=error,error_level=cp_failure_level)
+           CPABORT("We need rho in real space")
          END IF
-         CALL hirshfeld_integration(qs_env,hirshfeld_env,rhonorm,charges(:,is),error=error)
+         CALL hirshfeld_integration(qs_env,hirshfeld_env,rhonorm,charges(:,is))
          charges(:,is) = charges(:,is)*hirshfeld_env%charges(:)
        END DO
        ! residual
@@ -396,10 +368,9 @@ CONTAINS
 
     END DO
     !
-    CALL pw_pool_give_back_pw(auxbas_pw_pool,rhonorm%pw,error=error)
+    CALL pw_pool_give_back_pw(auxbas_pw_pool,rhonorm%pw)
     !
-    DEALLOCATE(rhonorm, stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(rhonorm)
 
   END SUBROUTINE comp_hirshfeld_i_charges
 
@@ -407,24 +378,21 @@ CONTAINS
 !> \brief 
 !> \param qs_env ...
 !> \param hirshfeld_env ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE calculate_hirshfeld_normalization(qs_env,hirshfeld_env,error)
+  SUBROUTINE calculate_hirshfeld_normalization(qs_env,hirshfeld_env)
 
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(hirshfeld_type), POINTER            :: hirshfeld_env
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: &
       routineN = 'calculate_hirshfeld_normalization', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: atom_a, handle, iatom, ierr, &
-                                                iex, ikind, ithread, j, &
-                                                natom, npme, nthread, numexp
+    INTEGER                                  :: atom_a, handle, iatom, iex, &
+                                                ikind, ithread, j, natom, &
+                                                npme, nthread, numexp
     INTEGER(KIND=int_8)                      :: subpatch_pattern
     INTEGER, DIMENSION(:), POINTER           :: atom_list, cores
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: alpha, coef, eps_rho_rspace
     REAL(KIND=dp), DIMENSION(3)              :: ra
     REAL(KIND=dp), DIMENSION(:, :), POINTER  :: pab
@@ -442,20 +410,18 @@ CONTAINS
     TYPE(realspace_grid_type), POINTER       :: rs_rho
 
     CALL timeset(routineN,handle)
-    failure = .FALSE.
 
     CALL get_qs_env(qs_env=qs_env,atomic_kind_set=atomic_kind_set,cell=cell,&
-         dft_control=dft_control,particle_set=particle_set,pw_env=pw_env,error=error)
+         dft_control=dft_control,particle_set=particle_set,pw_env=pw_env)
     CALL pw_env_get(pw_env,auxbas_rs_desc=auxbas_rs_desc,auxbas_rs_grid=rs_rho,&
-         auxbas_pw_pool=auxbas_pw_pool,error=error)
+         auxbas_pw_pool=auxbas_pw_pool)
     cube_info=pw_env%cube_info(1)
     ! be careful in parallel nsmax is choosen with multigrid in mind!
-    CALL rs_grid_retain(rs_rho,error=error)
+    CALL rs_grid_retain(rs_rho)
     CALL rs_grid_zero(rs_rho)
 
     eps_rho_rspace = dft_control%qs_control%eps_rho_rspace
-    ALLOCATE(pab(1,1),STAT=ierr)
-    CPPostcondition(ierr==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(pab(1,1))
     nthread = 1
     ithread = 0
 
@@ -463,8 +429,7 @@ CONTAINS
       numexp = hirshfeld_env%kind_shape_fn(ikind)%numexp
       IF ( numexp <= 0 ) CYCLE
       CALL get_atomic_kind(atomic_kind_set(ikind), natom=natom, atom_list=atom_list)
-      ALLOCATE(cores(natom),STAT=ierr)
-      CPPostcondition(ierr==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(cores(natom))
 
       DO iex=1,numexp
          alpha=hirshfeld_env%kind_shape_fn(ikind)%zet(iex)
@@ -494,31 +459,27 @@ CONTAINS
             CALL collocate_pgf_product_rspace(0,alpha,0,0,0.0_dp,0,ra,&
                (/0.0_dp,0.0_dp,0.0_dp/),0.0_dp,1.0_dp,pab,0,0,rs_rho,&
                cell,cube_info,eps_rho_rspace,ga_gb_function=FUNC_AB,&
-               ithread=ithread,use_subpatch=.TRUE.,subpatch_pattern=subpatch_pattern,error=error)
+               ithread=ithread,use_subpatch=.TRUE.,subpatch_pattern=subpatch_pattern)
          END DO
       END DO
 
-      DEALLOCATE(cores,STAT=ierr)
-      CPPostcondition(ierr==0,cp_failure_level,routineP,error,failure)
+      DEALLOCATE(cores)
     END DO
-    DEALLOCATE (pab,STAT=ierr)
-    CPPostcondition(ierr==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE (pab)
 
     NULLIFY(fnorm)
-    CALL get_hirshfeld_info(hirshfeld_env,fnorm=fnorm,error=error)
+    CALL get_hirshfeld_info(hirshfeld_env,fnorm=fnorm)
     IF (ASSOCIATED(fnorm)) THEN
-       CALL pw_release(fnorm%pw,error=error)
-       DEALLOCATE(fnorm,stat=ierr)
-       CPPostconditionNoFail(ierr==0,cp_failure_level,routineP,error)
+       CALL pw_release(fnorm%pw)
+       DEALLOCATE(fnorm)
     ENDIF
-    ALLOCATE(fnorm,stat=ierr)
-    CPPostcondition(ierr==0,cp_failure_level,routineP,error,failure)
-    CALL pw_pool_create_pw(auxbas_pw_pool,fnorm%pw,use_data=REALDATA3D,error=error)
+    ALLOCATE(fnorm)
+    CALL pw_pool_create_pw(auxbas_pw_pool,fnorm%pw,use_data=REALDATA3D)
     fnorm%pw%in_space=REALSPACE
-    CALL set_hirshfeld_info(hirshfeld_env,fnorm=fnorm,error=error)
+    CALL set_hirshfeld_info(hirshfeld_env,fnorm=fnorm)
 
-    CALL rs_pw_transfer(rs_rho,fnorm%pw,rs2pw,error=error)
-    CALL rs_grid_release(rs_rho,error=error)
+    CALL rs_pw_transfer(rs_rho,fnorm%pw,rs2pw)
+    CALL rs_grid_release(rs_rho)
 
     CALL timestop(handle)
 
@@ -531,9 +492,8 @@ CONTAINS
 !> \param rfun ...
 !> \param fval ...
 !> \param fderiv ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE hirshfeld_integration(qs_env,hirshfeld_env,rfun,fval,fderiv,error)
+  SUBROUTINE hirshfeld_integration(qs_env,hirshfeld_env,rfun,fval,fderiv)
 
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(hirshfeld_type), POINTER            :: hirshfeld_env
@@ -542,17 +502,16 @@ CONTAINS
       INTENT(inout)                          :: fval
     REAL(KIND=dp), DIMENSION(:, :), &
       INTENT(inout), OPTIONAL                :: fderiv
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'hirshfeld_integration', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: atom_a, handle, iatom, iex, &
                                                 ikind, ithread, j, natom, &
-                                                npme, nthread, numexp, stat
+                                                npme, nthread, numexp
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: cores
     INTEGER, DIMENSION(:), POINTER           :: atom_list
-    LOGICAL                                  :: do_force, failure
+    LOGICAL                                  :: do_force
     REAL(KIND=dp)                            :: alpha, coef, dvol, &
                                                 eps_rho_rspace
     REAL(KIND=dp), DIMENSION(3)              :: force_a, force_b, ra
@@ -570,33 +529,30 @@ CONTAINS
 
     CALL timeset(routineN,handle)
 
-    failure=.FALSE.
     do_force = PRESENT(fderiv)
     fval = 0.0_dp
     dvol = rfun%pw%pw_grid%dvol
 
     NULLIFY(pw_env,auxbas_rs_desc)
-    CALL get_qs_env(qs_env=qs_env,pw_env=pw_env,error=error)
+    CALL get_qs_env(qs_env=qs_env,pw_env=pw_env)
     CALL pw_env_get(pw_env=pw_env,auxbas_rs_desc=auxbas_rs_desc, &
-                    auxbas_rs_grid=rs_v,error=error)
-    CALL rs_grid_retain(rs_v,error=error)
-    CALL rs_pw_transfer(rs_v,rfun%pw,pw2rs,error=error)
+                    auxbas_rs_grid=rs_v)
+    CALL rs_grid_retain(rs_v)
+    CALL rs_pw_transfer(rs_v,rfun%pw,pw2rs)
 
     CALL get_qs_env(qs_env=qs_env,atomic_kind_set=atomic_kind_set,cell=cell,&
-         dft_control=dft_control,particle_set=particle_set,error=error)
+         dft_control=dft_control,particle_set=particle_set)
     eps_rho_rspace = dft_control%qs_control%eps_rho_rspace
 
     nthread = 1
     ithread = 0
-    ALLOCATE(hab(1,1),pab(1,1),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(hab(1,1),pab(1,1))
 
     DO ikind=1,SIZE(atomic_kind_set)
       numexp = hirshfeld_env%kind_shape_fn(ikind)%numexp
       IF ( numexp <= 0 ) CYCLE
       CALL get_atomic_kind(atomic_kind_set(ikind),natom=natom,atom_list=atom_list)
-      ALLOCATE(cores(natom),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(cores(natom))
 
       DO iex=1,numexp
          alpha=hirshfeld_env%kind_shape_fn(ikind)%zet(iex)
@@ -632,7 +588,7 @@ CONTAINS
                 rs_v,cell,pw_env%cube_info(1),hab,pab=pab,o1=0,o2=0,&
                 eps_gvg_rspace=eps_rho_rspace,calculate_forces=do_force,&
                 force_a=force_a,force_b=force_b,use_virial=.FALSE.,&
-                use_subpatch=.TRUE.,subpatch_pattern=0_int_8,error=error)
+                use_subpatch=.TRUE.,subpatch_pattern=0_int_8)
            fval(atom_a) = fval(atom_a) + hab(1,1)*dvol*coef
            IF(do_force) THEN
               fderiv(:,atom_a) = fderiv(:,atom_a) + force_a(:)*dvol
@@ -640,16 +596,14 @@ CONTAINS
          END DO
 
       END DO
-      DEALLOCATE(cores,STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      DEALLOCATE(cores)
 
     END DO
 
-    CALL rs_grid_release(rs_v, error=error)
-    DEALLOCATE(hab,pab,STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    CALL rs_grid_release(rs_v)
+    DEALLOCATE(hab,pab)
 
-    CALL get_qs_env(qs_env=qs_env,para_env=para_env,error=error)
+    CALL get_qs_env(qs_env=qs_env,para_env=para_env)
     CALL mp_sum(fval,para_env%group)
 
     CALL timestop(handle)

@@ -38,9 +38,8 @@ MODULE qs_external_potential
                                              qs_kind_type
   USE realspace_grid_cube,             ONLY: cube_to_pw
   USE string_utilities,                ONLY: compress
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -57,21 +56,19 @@ CONTAINS
 ! *****************************************************************************
 !> \brief  Computes the external potential on the grid
 !> \param qs_env ...
-!> \param error ...
 !> \date   12.2009
 !> \author Teodoro Laino [tlaino]
 ! *****************************************************************************
-  SUBROUTINE external_e_potential(qs_env,error)
+  SUBROUTINE external_e_potential(qs_env)
 
     TYPE(qs_environment_type), POINTER       :: qs_env
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'external_e_potential', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, i, j, k
     INTEGER, DIMENSION(2, 3)                 :: bo_global, bo_local
-    LOGICAL                                  :: failure, read_from_cube, &
+    LOGICAL                                  :: read_from_cube, &
                                                 static_potential
     REAL(kind=dp)                            :: dvol, efunc, scaling_factor
     REAL(kind=dp), DIMENSION(3)              :: dr, grid_p
@@ -79,23 +76,21 @@ CONTAINS
     TYPE(pw_p_type), POINTER                 :: v_ee
     TYPE(section_vals_type), POINTER         :: ext_pot_section, input
 
-    failure=.FALSE.
     CALL timeset(routineN,handle)
     NULLIFY(v_ee, input, ext_pot_section, dft_control)
     CALL get_qs_env(qs_env,&
                     vee=v_ee,&
                     input=input,&
-                    dft_control=dft_control,&
-                    error=error)
+                    dft_control=dft_control)
     IF(dft_control%apply_external_potential)THEN
-       ext_pot_section => section_vals_get_subs_vals(input,"DFT%EXTERNAL_POTENTIAL",error=error)
-       CALL section_vals_val_get(ext_pot_section,"STATIC",l_val=static_potential,error=error)
-       CALL section_vals_val_get(ext_pot_section,"READ_FROM_CUBE",l_val=read_from_cube,error=error)
+       ext_pot_section => section_vals_get_subs_vals(input,"DFT%EXTERNAL_POTENTIAL")
+       CALL section_vals_val_get(ext_pot_section,"STATIC",l_val=static_potential)
+       CALL section_vals_val_get(ext_pot_section,"READ_FROM_CUBE",l_val=read_from_cube)
 
        IF ((.NOT.static_potential).OR.dft_control%eval_external_potential) THEN
           IF (read_from_cube) THEN
-             CALL section_vals_val_get(ext_pot_section,"SCALING_FACTOR",r_val=scaling_factor,error=error)
-             CALL cube_to_pw(v_ee%pw, 'pot.cube', scaling_factor, error)
+             CALL section_vals_val_get(ext_pot_section,"SCALING_FACTOR",r_val=scaling_factor)
+             CALL cube_to_pw(v_ee%pw, 'pot.cube', scaling_factor)
              dft_control%eval_external_potential = .FALSE.
           ELSE
              dr=v_ee%pw%pw_grid%dr
@@ -111,7 +106,7 @@ CONTAINS
                       grid_p(1)=(i-bo_global(1,1))*dr(1)
                       grid_p(2)=(j-bo_global(1,2))*dr(2)
                       grid_p(3)=(k-bo_global(1,3))*dr(3)
-                      CALL get_external_potential(grid_p, ext_pot_section, func=efunc, error=error)
+                      CALL get_external_potential(grid_p, ext_pot_section, func=efunc)
                       v_ee%pw%cr3d(i,j,k)= v_ee%pw%cr3d(i,j,k)+efunc
                    END DO
                 END DO
@@ -127,15 +122,13 @@ CONTAINS
 !> \brief  Computes the force and the energy due to the external potential on the cores
 !> \param qs_env ...
 !> \param calculate_forces ...
-!> \param error ...
 !> \date   12.2009
 !> \author Teodoro Laino [tlaino]
 ! *****************************************************************************
-  SUBROUTINE external_c_potential(qs_env,calculate_forces,error)
+  SUBROUTINE external_c_potential(qs_env,calculate_forces)
 
     TYPE(qs_environment_type), POINTER       :: qs_env
     LOGICAL, OPTIONAL                        :: calculate_forces
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'external_c_potential', &
       routineP = moduleN//':'//routineN
@@ -143,7 +136,7 @@ CONTAINS
     INTEGER                                  :: atom_a, handle, iatom, ikind, &
                                                 natom, nkind
     INTEGER, DIMENSION(:), POINTER           :: list
-    LOGICAL                                  :: failure, my_force, pot_on_grid
+    LOGICAL                                  :: my_force, pot_on_grid
     REAL(KIND=dp)                            :: ee_core_ener, efunc, zeff
     REAL(KIND=dp), DIMENSION(3)              :: dfunc, r
     TYPE(atomic_kind_type), DIMENSION(:), &
@@ -160,7 +153,6 @@ CONTAINS
       POINTER                                :: qs_kind_set
     TYPE(section_vals_type), POINTER         :: ext_pot_section, input
 
-    failure=.FALSE.
     CALL timeset(routineN,handle)
     NULLIFY(dft_control)
 
@@ -171,22 +163,21 @@ CONTAINS
                     particle_set=particle_set,&
                     input=input,&
                     cell=cell,&
-                    dft_control=dft_control,&
-                    error=error)
+                    dft_control=dft_control)
 
     IF(dft_control%apply_external_potential)THEN
        IF (dft_control%eval_external_potential) THEN !ensure that external potential is loaded to grid
-          CALL external_e_potential(qs_env,error)
+          CALL external_e_potential(qs_env)
        END IF
        my_force=.FALSE.
        IF(PRESENT(calculate_forces)) my_force=calculate_forces
-       ext_pot_section => section_vals_get_subs_vals(input,"DFT%EXTERNAL_POTENTIAL",error=error)
+       ext_pot_section => section_vals_get_subs_vals(input,"DFT%EXTERNAL_POTENTIAL")
        ee_core_ener=0.0_dp
        nkind = SIZE(atomic_kind_set)
        
        !check if external potential on grid has been loaded from a file instead of giving a function
-       CALL section_vals_val_get(ext_pot_section,"READ_FROM_CUBE",l_val=pot_on_grid,error=error)
-       IF(pot_on_grid) CALL get_qs_env(qs_env,vee=v_ee,input=input,error=error)
+       CALL section_vals_val_get(ext_pot_section,"READ_FROM_CUBE",l_val=pot_on_grid)
+       IF(pot_on_grid) CALL get_qs_env(qs_env,vee=v_ee,input=input)
 
        DO ikind=1,SIZE(atomic_kind_set)
           CALL get_atomic_kind(atomic_kind_set(ikind), atom_list=list,natom=natom)
@@ -205,14 +196,14 @@ CONTAINS
              !otherwise evaluate the given function
              IF(pot_on_grid) THEN
                 CALL interpolate_external_potential(r, v_ee%pw, func=efunc, &
-                      dfunc=dfunc, calc_derivatives=my_force, error=error)
+                      dfunc=dfunc, calc_derivatives=my_force)
              ELSE
                 CALL get_external_potential(r, ext_pot_section, func=efunc, &
-                      dfunc=dfunc, calc_derivatives=my_force, error=error)
+                      dfunc=dfunc, calc_derivatives=my_force)
              END IF
              ee_core_ener=ee_core_ener+zeff*efunc
              IF(my_force)THEN
-                CALL get_qs_env(qs_env=qs_env,force=force,error=error)
+                CALL get_qs_env(qs_env=qs_env,force=force)
                 force(ikind)%eev(:,iatom)=dfunc*zeff
              END IF
           END DO
@@ -229,19 +220,17 @@ CONTAINS
 !> \param func             external potential at r
 !> \param dfunc            derivative of the external potential at r
 !> \param calc_derivatives Whether to calulate dfunc
-!> \param error ...
 !> \date   12.2009
 !> \par History
 !>      12.2009            created [tlaino] 
 !>      11.2014            reading external cube file added [Juha Ritala & Matt Watkins]
 !> \author Teodoro Laino [tlaino]
 ! *****************************************************************************
-  SUBROUTINE get_external_potential(r, ext_pot_section, func, dfunc, calc_derivatives, error)
+  SUBROUTINE get_external_potential(r, ext_pot_section, func, dfunc, calc_derivatives)
     REAL(KIND=dp), DIMENSION(3), INTENT(IN)  :: r
     TYPE(section_vals_type), POINTER         :: ext_pot_section
     REAL(KIND=dp), INTENT(OUT), OPTIONAL     :: func, dfunc(3)
     LOGICAL, INTENT(IN), OPTIONAL            :: calc_derivatives
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'get_external_potential', &
       routineP = moduleN//':'//routineN
@@ -250,22 +239,21 @@ CONTAINS
     CHARACTER(LEN=default_string_length)     :: def_error, this_error
     CHARACTER(LEN=default_string_length), &
       DIMENSION(:), POINTER                  :: my_par
-    INTEGER                                  :: handle, j, stat
-    LOGICAL                                  :: check, failure, my_force
+    INTEGER                                  :: handle, j
+    LOGICAL                                  :: check, my_force
     REAL(KIND=dp)                            :: dedf, dx, err, lerr
     REAL(KIND=dp), DIMENSION(:), POINTER     :: my_val
 
-    failure = .FALSE.
     CALL timeset(routineN,handle)
     NULLIFY(my_par, my_val)
     my_force = .FALSE.
     IF (PRESENT(calc_derivatives)) my_force=calc_derivatives
     check=PRESENT(dfunc).EQV.PRESENT(calc_derivatives)
-    CPPrecondition(check,cp_failure_level,routineP,error,failure)
-    CALL section_vals_val_get(ext_pot_section,"DX",r_val=dx,error=error)
-    CALL section_vals_val_get(ext_pot_section,"ERROR_LIMIT",r_val=lerr,error=error)
+    CPASSERT(check)
+    CALL section_vals_val_get(ext_pot_section,"DX",r_val=dx)
+    CALL section_vals_val_get(ext_pot_section,"ERROR_LIMIT",r_val=lerr)
     CALL get_generic_info(ext_pot_section, "FUNCTION", coupling_function, my_par, my_val,&
-         input_variables=(/"X","Y","Z"/), i_rep_sec=1,error=error)
+         input_variables=(/"X","Y","Z"/), i_rep_sec=1)
     CALL initf(1)
     CALL parsef(1,TRIM(coupling_function),my_par)
 
@@ -282,18 +270,16 @@ CONTAINS
              WRITE(def_error,"(A,G12.6,A)")"(",lerr,")"
              CALL compress(this_error,.TRUE.)
              CALL compress(def_error,.TRUE.)
-             CALL cp_assert(.FALSE.,cp_warning_level,-300,routineP,&
+             CALL cp_warn(__LOCATION__,&
                   'ASSERTION (cond) failed at line '//cp_to_string(__LINE__)//&
                   ' Error '//TRIM(this_error)//' in computing numerical derivatives larger then'//&
-                  TRIM(def_error)//' .',error=error,only_ionode=.TRUE.)
+                  TRIM(def_error)//' .')
           END IF
           dfunc(j)=dedf
        END DO
     END IF
-    DEALLOCATE(my_par,stat=stat)
-    CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
-    DEALLOCATE(my_val,stat=stat)
-    CPPrecondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(my_par)
+    DEALLOCATE(my_val)
     CALL finalizef()
     CALL timestop(handle)
   END SUBROUTINE get_external_potential
@@ -306,14 +292,12 @@ CONTAINS
 !> \param func             value of vee at r
 !> \param dfunc            derivatives of vee at r
 !> \param calc_derivatives calc dfunc
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE interpolate_external_potential(r, grid, func, dfunc, calc_derivatives, error)
+  SUBROUTINE interpolate_external_potential(r, grid, func, dfunc, calc_derivatives)
     REAL(KIND=dp), DIMENSION(3), INTENT(IN)  :: r
     TYPE(pw_type), POINTER                   :: grid
     REAL(KIND=dp), INTENT(OUT), OPTIONAL     :: func, dfunc(3)
     LOGICAL, INTENT(IN), OPTIONAL            :: calc_derivatives
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: &
       routineN = 'interpolate_external_potential', &
@@ -324,7 +308,7 @@ CONTAINS
     INTEGER, DIMENSION(3)                    :: lbounds, lbounds_local, &
                                                 lower_inds, ubounds, &
                                                 ubounds_local, upper_inds
-    LOGICAL                                  :: check, failure, my_force
+    LOGICAL                                  :: check, my_force
     REAL(KIND=dp), ALLOCATABLE, DIMENSION(:) :: bcast_buffer
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :, :)                     :: grid_buffer
@@ -332,12 +316,11 @@ CONTAINS
       DIMENSION(:, :, :, :)                  :: dgrid
     REAL(KIND=dp), DIMENSION(3)              :: dr, subgrid_origin
 
-    failure = .FALSE.
     CALL timeset(routineN,handle)
     my_force = .FALSE.
     IF (PRESENT(calc_derivatives)) my_force=calc_derivatives
     check=PRESENT(dfunc).EQV.PRESENT(calc_derivatives)
-    CPPrecondition(check,cp_failure_level,routineP,error,failure)
+    CPASSERT(check)
     
     IF (my_force) THEN
       ALLOCATE(grid_buffer(0:3,0:3,0:3))

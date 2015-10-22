@@ -26,6 +26,8 @@
 MODULE t_sh_p_s_c
   USE kinds,                           ONLY: dp
   USE message_passing,                 ONLY: mp_bcast
+#include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
  IMPLICIT NONE
  PRIVATE
@@ -1101,11 +1103,13 @@ SUBROUTINE INIT(Nder,iunit,mepos,group)
     REAL(KIND=dp), ALLOCATABLE, DIMENSION(:) :: chunk
 
   patches=170
-  IF (Nder>nderiv_max) STOP "Reading data for initialization of C0 failed"
+  IF (Nder>nderiv_max) CPABORT("Reading data for initialization of C0 failed")
   nderiv_init=Nder
   IF(ALLOCATED(C0)) DEALLOCATE(C0)
   ! round up to a multiple of 32 to give some generous alignment for each C0
   ALLOCATE(C0(32*((31+(Nder+1)*(degree+1)*(degree+2)/2)/32),patches))
+  ! valgrind workaround
+  C0=HUGE(0.0_dp)
   IF( mepos == 0 ) THEN
     ALLOCATE(chunk((nderiv_max+1)*(degree+1)*(degree+2)/2))
     DO I=1,patches

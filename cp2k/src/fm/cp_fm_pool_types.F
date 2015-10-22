@@ -20,11 +20,11 @@ MODULE cp_fm_pool_types
   USE cp_linked_list_fm,               ONLY: cp_sll_fm_dealloc,&
                                              cp_sll_fm_get_first_el,&
                                              cp_sll_fm_insert_el,&
-                                             cp_sll_fm_insert_ordered,&
                                              cp_sll_fm_next,&
                                              cp_sll_fm_rm_first_el,&
                                              cp_sll_fm_type
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -38,7 +38,7 @@ MODULE cp_fm_pool_types
             fm_pool_release,&
             fm_pool_create_fm, fm_pool_give_back_fm,&
             fm_pool_get_el_struct
-  PUBLIC :: fm_pools_copy, fm_pools_dealloc,&
+  PUBLIC :: fm_pools_dealloc,&
             fm_pools_create_fm_vect,&
             fm_pools_give_back_fm_vect
 !***
@@ -78,133 +78,95 @@ CONTAINS
 !> \param pool the pool to create
 !> \param el_struct the structure of the elements that are stored in
 !>        this pool
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      08.2002 created [fawzi]
 !> \author Fawzi Mohamed
 ! *****************************************************************************
-  SUBROUTINE fm_pool_create(pool, el_struct,&
-        error)
+  SUBROUTINE fm_pool_create(pool, el_struct)
     TYPE(cp_fm_pool_type), POINTER           :: pool
     TYPE(cp_fm_struct_type), POINTER         :: el_struct
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fm_pool_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
-
-    ALLOCATE(pool, stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    IF (.NOT.failure) THEN
-       pool%el_struct=> el_struct
-       CALL cp_fm_struct_retain(pool%el_struct,error=error)
-       last_fm_pool_id_nr=last_fm_pool_id_nr+1
-       pool%id_nr=last_fm_pool_id_nr
-       pool%ref_count=1
-       NULLIFY(pool%cache)
-       
-    END IF
+    ALLOCATE(pool)
+    pool%el_struct=> el_struct
+    CALL cp_fm_struct_retain(pool%el_struct)
+    last_fm_pool_id_nr=last_fm_pool_id_nr+1
+    pool%id_nr=last_fm_pool_id_nr
+    pool%ref_count=1
+    NULLIFY(pool%cache)
+    
   END SUBROUTINE fm_pool_create
 
 ! *****************************************************************************
 !> \brief retains the pool (see cp2k/doc/ReferenceCounting.html)
 !> \param pool the pool to retain
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      08.2002 created [fawzi]
 !> \author Fawzi Mohamed
 ! *****************************************************************************
-  SUBROUTINE fm_pool_retain(pool,error)
+  SUBROUTINE fm_pool_retain(pool)
     TYPE(cp_fm_pool_type), POINTER           :: pool
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fm_pool_retain', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
+    CPASSERT(ASSOCIATED(pool))
+    CPASSERT(pool%ref_count>0)
 
-    failure=.FALSE.
-
-    CPPrecondition(ASSOCIATED(pool),cp_failure_level,routineP,error,failure)
-    IF (.NOT. failure) THEN
-       CPPrecondition(pool%ref_count>0,cp_failure_level,routineP,error,failure)
-
-       pool%ref_count=pool%ref_count+1
-    END IF
+    pool%ref_count=pool%ref_count+1
   END SUBROUTINE fm_pool_retain
 
 ! *****************************************************************************
 !> \brief deallocates all the cached elements
 !> \param pool the pool to flush
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      08.2002 created [fawzi]
 !> \author Fawzi Mohamed
 ! *****************************************************************************
-  SUBROUTINE fm_pool_flush_cache(pool,error)
+  SUBROUTINE fm_pool_flush_cache(pool)
     TYPE(cp_fm_pool_type), POINTER           :: pool
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fm_pool_flush_cache', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
     TYPE(cp_fm_type), POINTER                :: el_att
     TYPE(cp_sll_fm_type), POINTER            :: iterator
 
-    failure=.FALSE.
-
-    CPPrecondition(ASSOCIATED(pool),cp_failure_level,routineP,error,failure)
-    CPPrecondition(pool%ref_count>0,cp_failure_level,routineP,error,failure)
-    IF (.NOT. failure) THEN
-       iterator => pool%cache
-       DO
-          IF (.NOT.cp_sll_fm_next(iterator,el_att=el_att,error=error)) EXIT
-          CALL cp_fm_release(el_att,error=error)
-       END DO
-       CALL cp_sll_fm_dealloc(pool%cache,error=error)
-    END IF
+    CPASSERT(ASSOCIATED(pool))
+    CPASSERT(pool%ref_count>0)
+    iterator => pool%cache
+    DO
+       IF (.NOT.cp_sll_fm_next(iterator,el_att=el_att)) EXIT
+       CALL cp_fm_release(el_att)
+    END DO
+    CALL cp_sll_fm_dealloc(pool%cache)
   END SUBROUTINE fm_pool_flush_cache
 
 ! *****************************************************************************
 !> \brief releases the given pool (see cp2k/doc/ReferenceCounting.html)
 !> \param pool the pool to release
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      08.2002 created [fawzi]
 !> \author Fawzi Mohamed
 ! *****************************************************************************
-  SUBROUTINE fm_pool_release(pool,error)
+  SUBROUTINE fm_pool_release(pool)
     TYPE(cp_fm_pool_type), POINTER           :: pool
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fm_pool_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
-
     IF (ASSOCIATED(pool)) THEN
-       CPPrecondition(pool%ref_count>0,cp_failure_level,routineP,error,failure)
+       CPASSERT(pool%ref_count>0)
        pool%ref_count=pool%ref_count-1
        IF (pool%ref_count==0) THEN
           pool%ref_count=1
-          CALL fm_pool_flush_cache(pool,error=error)
-          CALL cp_fm_struct_release(pool%el_struct,error=error)
+          CALL fm_pool_flush_cache(pool)
+          CALL cp_fm_struct_release(pool%el_struct)
           pool%ref_count=0
 
-          DEALLOCATE(pool,stat=stat)
-          CPPostcondition(stat==0,cp_warning_level,routineP,error,failure)
+          DEALLOCATE(pool)
        END IF
     END IF
     NULLIFY(pool)
@@ -216,58 +178,47 @@ CONTAINS
 !> \param element will contain the new element
 !>\param name the name for the new matrix (optional)
 !> \param name ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      08.2002 created [fawzi]
 !> \author Fawzi Mohamed
 ! *****************************************************************************
   SUBROUTINE fm_pool_create_fm(pool, element,&
-       name, error)
+       name)
     TYPE(cp_fm_pool_type), POINTER           :: pool
     TYPE(cp_fm_type), POINTER                :: element
     CHARACTER(len=*), INTENT(in), OPTIONAL   :: name
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fm_pool_create_fm', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure=.FALSE.
-
-    CPPrecondition(ASSOCIATED(pool),cp_failure_level,routineP,error,failure)
-    CPPrecondition(pool%ref_count>0,cp_failure_level,routineP,error,failure)
-    IF (.NOT.failure) THEN
-       IF (ASSOCIATED(pool%cache)) THEN
-          element => cp_sll_fm_get_first_el(pool%cache,error=error)
-          CALL cp_sll_fm_rm_first_el(pool%cache,error=error)
-          
-       ELSE
-          NULLIFY(element)
-          CALL cp_fm_create(element,matrix_struct=pool%el_struct,error=error)
-       END IF
+    CPASSERT(ASSOCIATED(pool))
+    CPASSERT(pool%ref_count>0)
+    IF (ASSOCIATED(pool%cache)) THEN
+       element => cp_sll_fm_get_first_el(pool%cache)
+       CALL cp_sll_fm_rm_first_el(pool%cache)
        
-    IF (PRESENT(name)) THEN
-      element%name=name
-      element%print_count=0
     ELSE
-      element%name="tmp-"//TRIM(ADJUSTL(cp_to_string(element%id_nr)))
-      element%print_count=0
-      ! guarantee output unicity?
+       NULLIFY(element)
+       CALL cp_fm_create(element,matrix_struct=pool%el_struct)
     END IF
     
-    END IF
-    CPPostcondition(ASSOCIATED(element),cp_failure_level,routineP,error,failure)
-    CPPostcondition(element%ref_count==1,cp_warning_level,routineP,error,failure)
+ IF (PRESENT(name)) THEN
+   element%name=name
+   element%print_count=0
+ ELSE
+   element%name="tmp-"//TRIM(ADJUSTL(cp_to_string(element%id_nr)))
+   element%print_count=0
+   ! guarantee output unicity?
+ END IF
+ 
+    CPASSERT(ASSOCIATED(element))
+    CPASSERT(element%ref_count==1)
   END SUBROUTINE fm_pool_create_fm
 
 ! *****************************************************************************
 !> \brief returns the element to the pool
 !> \param pool the pool where to cache the element
 !> \param element the element to give back
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      08.2002 created [fawzi]
 !> \author Fawzi Mohamed
@@ -276,71 +227,42 @@ CONTAINS
 !>      (it is as if you had called cp_fm_release)
 !>      Accept give_backs of non associated elements?
 ! *****************************************************************************
-  SUBROUTINE fm_pool_give_back_fm(pool, element, error)
+  SUBROUTINE fm_pool_give_back_fm(pool, element)
     TYPE(cp_fm_pool_type), POINTER           :: pool
     TYPE(cp_fm_type), POINTER                :: element
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fm_pool_give_back_fm', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: did_insert, failure
+    CPASSERT(ASSOCIATED(pool))
+    CPASSERT(pool%ref_count>0)
+    CPASSERT(ASSOCIATED(element))
+    IF(pool%el_struct%id_nr/=element%matrix_struct%id_nr)&
+       CPABORT("pool cannot reuse matrixes with another structure")
 
-    failure=.FALSE.
-
-    CPPrecondition(ASSOCIATED(pool),cp_failure_level,routineP,error,failure)
-    CPPrecondition(pool%ref_count>0,cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(element),cp_warning_level,routineP,error,failure)
-    IF (.NOT. failure) THEN
-          CALL cp_assert(pool%el_struct%id_nr==element%matrix_struct%id_nr,&
-            cp_failure_level, cp_assertion_failed, routineP,&
-            "pool cannot reuse matrixes with another structure "//&
-CPSourceFileRef,&
-            error=error,failure=failure)
-    END IF
-
-    IF (.NOT. failure) THEN
-       CPPreconditionNoFail(element%ref_count==1,cp_warning_level,routineP,error)
-       IF (cp_debug) THEN
-          CALL cp_sll_fm_insert_ordered(pool%cache, el=element,&
-               insert_equals=.FALSE., did_insert=did_insert, error=error)
-          CPPostcondition(did_insert,cp_failure_level,routineP,error,failure)
-       ELSE
-          CALL cp_sll_fm_insert_el(pool%cache, el=element,error=error)
-       END IF
-    END IF
+    CPASSERT(element%ref_count==1)
+    CALL cp_sll_fm_insert_el(pool%cache, el=element)
     NULLIFY(element)
   END SUBROUTINE fm_pool_give_back_fm
 
 ! *****************************************************************************
 !> \brief returns the structure of the elements in this pool
 !> \param pool the pool you are interested in
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \retval res ...
 !> \par History
 !>      05.2002 created [fawzi]
 !> \author Fawzi Mohamed
 ! *****************************************************************************
-FUNCTION fm_pool_get_el_struct(pool,error) RESULT(res)
+FUNCTION fm_pool_get_el_struct(pool) RESULT(res)
     TYPE(cp_fm_pool_type), POINTER           :: pool
-    TYPE(cp_error_type), INTENT(inout)       :: error
     TYPE(cp_fm_struct_type), POINTER         :: res
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fm_pool_get_el_struct', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-  failure=.FALSE.
-
-  CPPrecondition(ASSOCIATED(pool),cp_failure_level,routineP,error,failure)
-  CPPrecondition(pool%ref_count>0,cp_failure_level,routineP,error,failure)
-  IF (.NOT. failure) THEN
-     res => pool%el_struct
-  ELSE
-     NULLIFY(res)
-  END IF
+  CPASSERT(ASSOCIATED(pool))
+  CPASSERT(pool%ref_count>0)
+  res => pool%el_struct
 END FUNCTION fm_pool_get_el_struct
 
 !================== pools ================
@@ -349,66 +271,48 @@ END FUNCTION fm_pool_get_el_struct
 !> \brief shallow copy of an array of pools (retains each pool)
 !> \param source_pools the pools to copy
 !> \param target_pools will contains the new pools
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      11.2002 created [fawzi]
 !> \author Fawzi Mohamed
 ! *****************************************************************************
-SUBROUTINE fm_pools_copy(source_pools, target_pools, error)
+SUBROUTINE fm_pools_copy(source_pools, target_pools)
     TYPE(cp_fm_pool_p_type), DIMENSION(:), &
       POINTER                                :: source_pools, target_pools
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fm_pools_copy', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: i
 
-  failure=.FALSE.
-
-  CPPrecondition(ASSOCIATED(source_pools),cp_failure_level,routineP,error,failure)
-  IF (.NOT. failure) THEN
-     ALLOCATE(target_pools(SIZE(source_pools)),stat=stat)
-     CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-  END IF
-  IF (.NOT.failure) THEN
-     DO i=1,SIZE(source_pools)
-        target_pools(i)%pool => source_pools(i)%pool
-        CALL fm_pool_retain(source_pools(i)%pool,error=error)
-     END DO
-  END IF
+  CPASSERT(ASSOCIATED(source_pools))
+  ALLOCATE(target_pools(SIZE(source_pools)))
+  DO i=1,SIZE(source_pools)
+     target_pools(i)%pool => source_pools(i)%pool
+     CALL fm_pool_retain(source_pools(i)%pool)
+  END DO
 END SUBROUTINE fm_pools_copy
 
 ! *****************************************************************************
 !> \brief deallocate an array of pools (releasing each pool)
 !> \param pools the pools to release
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      11.2002 created [fawzi]
 !> \author Fawzi Mohamed
 ! *****************************************************************************
-SUBROUTINE fm_pools_dealloc(pools, error)
+SUBROUTINE fm_pools_dealloc(pools)
     TYPE(cp_fm_pool_p_type), DIMENSION(:), &
       POINTER                                :: pools
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fm_pools_dealloc', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, stat
-    LOGICAL                                  :: failure
-
-  failure=.FALSE.
+    INTEGER                                  :: i
 
   IF (ASSOCIATED(pools)) THEN
      DO i=1,SIZE(pools)
-        CALL fm_pool_release(pools(i)%pool,error=error)
+        CALL fm_pool_release(pools(i)%pool)
      END DO
-     DEALLOCATE(pools,stat=stat)
-     CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+     DEALLOCATE(pools)
   END IF
 END SUBROUTINE fm_pools_dealloc
 
@@ -417,52 +321,40 @@ END SUBROUTINE fm_pools_dealloc
 !> \param pools the pools to create the elements from
 !> \param elements will contain the vector of elements
 !> \param name the name for the new matrixes (optional)
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      09.2002 created [fawzi]
 !> \author Fawzi Mohamed
 ! *****************************************************************************
 SUBROUTINE fm_pools_create_fm_vect(pools,elements,&
-     name,error)
+     name)
     TYPE(cp_fm_pool_p_type), DIMENSION(:), &
       POINTER                                :: pools
     TYPE(cp_fm_p_type), DIMENSION(:), &
       POINTER                                :: elements
     CHARACTER(len=*), INTENT(in), OPTIONAL   :: name
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fm_pools_create_fm_vect', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: i
     TYPE(cp_fm_pool_type), POINTER           :: pool
 
-  failure=.FALSE.
   NULLIFY(pool)
 
-  CPPrecondition(ASSOCIATED(pools),cp_failure_level,routineP,error,failure)
-  IF (.NOT. failure) THEN
-     ALLOCATE(elements(SIZE(pools)),stat=stat)
-     CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-  END IF
-  IF (.NOT.failure) THEN
-     DO i=1,SIZE(pools)
-        NULLIFY(elements(i)%matrix)
-        pool => pools(i)%pool
-        IF (PRESENT(name)) THEN
-         CALL fm_pool_create_fm(pool,elements(i)%matrix,&
-           name=name//"-"//ADJUSTL(cp_to_string(i)),&
-           error=error)
-      ELSE
-         CALL fm_pool_create_fm(pool,elements(i)%matrix,&
-           error=error)
-      END IF
+  CPASSERT(ASSOCIATED(pools))
+  ALLOCATE(elements(SIZE(pools)))
+  DO i=1,SIZE(pools)
+     NULLIFY(elements(i)%matrix)
+     pool => pools(i)%pool
+     IF (PRESENT(name)) THEN
+      CALL fm_pool_create_fm(pool,elements(i)%matrix,&
+        name=name//"-"//ADJUSTL(cp_to_string(i)))
+   ELSE
+      CALL fm_pool_create_fm(pool,elements(i)%matrix)
+   END IF
 
-     END DO
-     
-  END IF
+  END DO
+  
 END SUBROUTINE fm_pools_create_fm_vect
 
 ! *****************************************************************************
@@ -470,41 +362,31 @@ END SUBROUTINE fm_pools_create_fm_vect
 !>      (like cp_fm_vect_dealloc)
 !> \param pools the pool where to give back the vector
 !> \param elements the vector of elements to give back
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      09.2002 created [fawzi]
 !> \author Fawzi Mohamed
 !> \note
 !>      accept unassociated vect?
 ! *****************************************************************************
-SUBROUTINE fm_pools_give_back_fm_vect(pools,elements,error)
+SUBROUTINE fm_pools_give_back_fm_vect(pools,elements)
     TYPE(cp_fm_pool_p_type), DIMENSION(:), &
       POINTER                                :: pools
     TYPE(cp_fm_p_type), DIMENSION(:), &
       POINTER                                :: elements
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'fm_pools_give_back_fm_vect', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: i
 
-  failure=.FALSE.
-
-  CPPrecondition(ASSOCIATED(pools),cp_failure_level,routineP,error,failure)
-  CPPrecondition(ASSOCIATED(elements),cp_failure_level,routineP,error,failure)
-  CPPrecondition(SIZE(pools)==SIZE(elements),cp_failure_level,routineP,error,failure)
-  IF (.NOT. failure) THEN
-     DO i=1,SIZE(pools)
-        CALL fm_pool_give_back_fm(pools(i)%pool,&
-             elements(i)%matrix,error=error)
-     END DO
-     DEALLOCATE(elements, stat=stat)
-     CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
-  END IF
-  NULLIFY(elements)
+  CPASSERT(ASSOCIATED(pools))
+  CPASSERT(ASSOCIATED(elements))
+  CPASSERT(SIZE(pools)==SIZE(elements))
+  DO i=1,SIZE(pools)
+     CALL fm_pool_give_back_fm(pools(i)%pool,&
+          elements(i)%matrix)
+  END DO
+  DEALLOCATE(elements)
 END SUBROUTINE fm_pools_give_back_fm_vect
 
 END MODULE cp_fm_pool_types

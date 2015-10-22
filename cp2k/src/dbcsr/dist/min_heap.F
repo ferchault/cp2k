@@ -99,38 +99,23 @@ CONTAINS
 !> \brief ...
 !> \param heap ...
 !> \param n ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE heap_new (heap, n, error)
+  SUBROUTINE heap_new (heap, n)
     TYPE(heap_t), INTENT(OUT)                :: heap
     INTEGER, INTENT(IN)                      :: n
-    LOGICAL, INTENT(OUT)                     :: error
-
-    INTEGER                                  :: stat
-
-!
 
     heap%n = n
-    ALLOCATE (heap%nodes(n), stat=stat)
-    error = (stat /= 0)
+    ALLOCATE (heap%nodes(n))
   END SUBROUTINE heap_new
 
 ! *****************************************************************************
 !> \brief ...
 !> \param heap ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE heap_release (heap, error)
+  SUBROUTINE heap_release (heap)
     TYPE(heap_t), INTENT(INOUT)              :: heap
-    LOGICAL, INTENT(OUT)                     :: error
 
-    INTEGER                                  :: stat
-
-!
-
-    DEALLOCATE (heap%nodes, stat=stat)
-    error = (stat /= 0)
-    NULLIFY (heap%nodes)
+    DEALLOCATE (heap%nodes)
     heap%n = 0
   END SUBROUTINE heap_release
 
@@ -266,9 +251,8 @@ CONTAINS
 
     error = .FALSE.
     new_n = heap%n+1
-    CALL heap_reallocate (heap, new_n, error)
+    CALL heap_reallocate (heap, new_n)
     heap%n = new_n
-    IF (error) RETURN
     CALL node_set (heap, new_n, key, value)
     CALL bubble_up (heap, new_n, new_pos, error)
     CALL bubble_down (heap, new_pos, error)
@@ -489,243 +473,25 @@ CONTAINS
 !> \brief ...
 !> \param heap ...
 !> \param n ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE heap_reallocate (heap, n, error)
+  SUBROUTINE heap_reallocate (heap, n)
     TYPE(heap_t), INTENT(INOUT)              :: heap
     INTEGER, INTENT(IN)                      :: n
-    LOGICAL, INTENT(OUT)                     :: error
 
     INTEGER, PARAMETER                       :: min_size = 10
     REAL, PARAMETER                          :: oversize = 1.4
 
-    INTEGER                                  :: n_allocate, stat
+    INTEGER                                  :: n_allocate
     TYPE(heap_node_e), DIMENSION(:), POINTER :: new_nodes, tmp_nodes
 
-!
-
-    error = .FALSE.
     IF (n .GT. SIZE (heap%nodes)) THEN
        n_allocate = MAX(MAX(n, min_size), INT(n*oversize))
-       ALLOCATE (new_nodes(n_allocate), stat=stat)
-       IF (stat /= 0) THEN
-          ALLOCATE (new_nodes(n), stat=stat)
-       ENDIF
-       IF (stat /= 0) THEN
-          error = .TRUE.
-          RETURN
-       ENDIF
+       ALLOCATE (new_nodes(n_allocate))
        new_nodes(1:heap%n) = heap%nodes(1:heap%n)
        tmp_nodes => heap%nodes
        heap%nodes => new_nodes
-       DEALLOCATE (tmp_nodes, stat=stat)
-       IF (stat /= 0) error = .TRUE.
+       DEALLOCATE (tmp_nodes)
     ENDIF
   END SUBROUTINE heap_reallocate
-
-! *****************************************************************************
-!> \brief ...
-!> \param heap ...
-!> \param error ...
-! *****************************************************************************
-  SUBROUTINE heap_check (heap, error)
-    TYPE(heap_t), INTENT(in)                 :: heap
-    LOGICAL, INTENT(out)                     :: error
-
-    INTEGER                                  :: i, n
-    INTEGER(kind=valt)                       :: left_child_value, my_value, &
-                                                right_child_value
-
-!
-
-    error = .FALSE.
-    n = heap%n
-    DO i = 1, n
-       my_value = get_value (heap, i)
-       IF (get_left_child (i) .LE. n) THEN
-          left_child_value = get_value (heap, get_left_child(i))
-          IF (left_child_value .LT. my_value) THEN
-             error = .TRUE.
-             WRITE(*,*)"Error at",i
-          ENDIF
-       ENDIF
-       IF (get_right_child (i) .LE. n) THEN
-          right_child_value = get_value (heap, get_right_child(i))
-          IF (right_child_value .LT. my_value) THEN
-             error = .TRUE.
-             WRITE(*,*)"Error at",i
-          ENDIF
-       ENDIF
-    ENDDO
-  END SUBROUTINE heap_check
-
-
-! *****************************************************************************
-!> \brief ...
-!> \param heap ...
-!> \param error ...
-! *****************************************************************************
-  SUBROUTINE heap_print (heap, error)
-    TYPE(heap_t), INTENT(in)                 :: heap
-    LOGICAL, INTENT(out)                     :: error
-
-    INTEGER                                  :: first, i, last, n
-    INTEGER(kind=keyt), ALLOCATABLE, &
-      DIMENSION(:)                           :: keys
-    INTEGER(kind=valt), ALLOCATABLE, &
-      DIMENSION(:)                           :: values
-
-    error = .FALSE.
-    CALL heap_check (heap, error)
-    IF (error) THEN
-       WRITE(*,*)"Error in heap"
-    ENDIF
-    n = heap%n
-    first = 1
-    last = first*2-1
-    DO WHILE (first .LE. heap%n)
-       last = MIN(last, heap%n)
-       ALLOCATE (keys(first:last))
-       ALLOCATE (values(first:last))
-       DO i = first, last
-          CALL node_get (heap, i, keys(i), values(i))
-       END DO
-       WRITE(*,'(8(("[",I3,",",I3,"]",1X)))')&
-            (/ ((/keys(i),values(i)/), i=first,last) /)
-       !write(*,'("[",I3,",",I3,"]",1X)') (/ (i, i=first,last) /)
-       DEALLOCATE (keys)
-       DEALLOCATE (values)
-       first = first*2
-       last = first*2-1
-    ENDDO
-  END SUBROUTINE heap_print
-
-  !
-
-! *****************************************************************************
-!> \brief ...
-!> \param error ...
-!> \param message ...
-! *****************************************************************************
-  SUBROUTINE error_test (error, message)
-    LOGICAL, INTENT(in)                      :: error
-    CHARACTER(len=*), INTENT(in)             :: message
-
-    IF (error) THEN
-       WRITE(*,'(1X,A,1X,A)')"Error:", message
-    ENDIF
-  END SUBROUTINE error_test
-
-! *****************************************************************************
-!> \brief ...
-!> \param test_size ...
-!> \param error ...
-! *****************************************************************************
-  SUBROUTINE test_heap (test_size, error)
-    INTEGER, INTENT(in), OPTIONAL            :: test_size
-    LOGICAL, INTENT(out)                     :: error
-
-    INTEGER                                  :: i, n
-    INTEGER(kind=keyt)                       :: key
-    INTEGER(kind=keyt), ALLOCATABLE, &
-      DIMENSION(:)                           :: keys
-    INTEGER(kind=valt)                       :: value
-    INTEGER(kind=valt), ALLOCATABLE, &
-      DIMENSION(:)                           :: values
-    LOGICAL                                  :: found
-    TYPE(heap_t)                             :: heap
-
-!
-!
-
-    IF (PRESENT(test_size)) THEN
-       n = test_size
-    ELSE
-       n = 10
-    ENDIF
-    CALL heap_new (heap, n, error=error)
-    CALL error_test (error, "new")
-    !
-    ALLOCATE (keys(n))
-    ALLOCATE (values(n))
-    DO i = 1,n
-       keys(i) = n-i
-       values(i) = 10*(n-i)
-    END DO
-    CALL heap_fill (heap, keys, values, error)
-    CALL error_test (error, "fill")
-    !
-    CALL heap_print (heap, error)
-    CALL error_test (error, "print")
-    !
-    WRITE(*,*)" Popping"
-    CALL heap_pop (heap, key, value, found, error)
-    CALL error_test (error, "pop")
-    WRITE(*,*)key, value, found
-    CALL heap_print (heap, error)
-    CALL error_test (error, "print")
-    !
-    WRITE(*,*)" Popping"
-    CALL heap_pop (heap, key, value, found, error)
-    CALL error_test (error, "pop")
-    WRITE(*,*)key, value, found
-    CALL heap_print (heap, error)
-    CALL error_test (error, "print")
-    !
-    WRITE(*,*)" Resetting first to 55"
-    CALL heap_reset_first (heap, 55, error)
-    CALL error_test (error, "reset_first")
-    CALL heap_print (heap, error)
-    CALL error_test (error, "print")
-    !
-    WRITE(*,*)" Resetting first to 1"
-    CALL heap_reset_first (heap, 1, error)
-    CALL error_test (error, "reset_first")
-    CALL heap_print (heap, error)
-    CALL error_test (error, "print")
-    !
-    WRITE(*,*)" Resetting first to 333"
-    CALL heap_reset_first (heap, 333, error)
-    CALL error_test (error, "reset_first")
-    CALL heap_print (heap, error)
-    CALL error_test (error, "print")
-    !
-    WRITE(*,*)" Adding -2, -20"
-    CALL heap_add (heap, -2, -20, error)
-    CALL error_test (error, "add")
-    CALL heap_print (heap, error)
-    CALL error_test (error, "print")
-    !
-    WRITE(*,*)" Adding 66, 66"
-    CALL heap_add (heap, 66, 66, error)
-    CALL error_test (error, "add")
-    CALL heap_print (heap, error)
-    CALL error_test (error, "print")
-    !
-    found = .TRUE.
-    DO WHILE (found)
-       key = 0 ; value = 0
-       CALL heap_pop (heap, key, value, found, error)
-       CALL error_test (error, "pop")
-       WRITE(*,*)key, value, found
-    END DO
-    !
-    WRITE(*,*)" Adding -2, -20"
-    CALL heap_add (heap, -2, -20, error)
-    CALL error_test (error, "add")
-    CALL heap_print (heap, error)
-    CALL error_test (error, "print")
-    !
-    WRITE(*,*)" Adding 66, 66"
-    CALL heap_add (heap, 66, 66, error)
-    CALL error_test (error, "add")
-    CALL heap_print (heap, error)
-    CALL error_test (error, "print")
-    !
-    DEALLOCATE (keys)
-    DEALLOCATE (values)
-    CALL heap_release (heap, error)
-    CALL error_test (error, "release")
-  END SUBROUTINE test_heap
 
 END MODULE min_heap

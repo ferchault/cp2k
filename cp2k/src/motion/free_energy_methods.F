@@ -39,9 +39,8 @@ MODULE free_energy_methods
                                              sw_test,&
                                              vn_test
   USE string_utilities,                ONLY: compress
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -57,15 +56,13 @@ CONTAINS
 !> \param md_env ...
 !> \param converged ...
 !> \param fe_section ...
-!> \param error ...
 !> \par History
 !>      Teodoro Laino (01.2007) [tlaino]
 ! *****************************************************************************
-  SUBROUTINE free_energy_evaluate(md_env,converged,fe_section,error)
+  SUBROUTINE free_energy_evaluate(md_env,converged,fe_section)
     TYPE(md_environment_type), POINTER       :: md_env
     LOGICAL, INTENT(OUT)                     :: converged
     TYPE(section_vals_type), POINTER         :: fe_section
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'free_energy_evaluate', &
       routineP = moduleN//':'//routineN
@@ -77,7 +74,6 @@ CONTAINS
                                                 nforce_eval, output_unit, &
                                                 stat_sign_points
     INTEGER, POINTER                         :: istep
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: beta, dx, lerr
     REAL(KIND=dp), DIMENSION(:), POINTER     :: my_val
     TYPE(cp_logger_type), POINTER            :: logger
@@ -88,54 +84,59 @@ CONTAINS
     TYPE(ui_var_type), POINTER               :: cv
 
     NULLIFY(force_env, istep, subsys, cv, simpar)
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
     CALL timeset(routineN,handle)
-    failure   = .FALSE.
     converged = .FALSE.
     CALL get_md_env(md_env, force_env=force_env, fe_env=fe_env, simpar=simpar,&
-         itimes=istep, error=error)
+         itimes=istep)
     ! Metadynamics is also a free energy calculation but is handled in a different
     ! module.
     IF (.NOT.ASSOCIATED(force_env%meta_env).AND.ASSOCIATED(fe_env)) THEN
        SELECT CASE(fe_env%type)
        CASE(do_fe_ui)
           ! Umbrella Integration..
-          CALL force_env_get(force_env, subsys=subsys, error=error)
+          CALL force_env_get(force_env, subsys=subsys)
           fe_env%nr_points = fe_env%nr_points + 1
+          output_unit = cp_logger_get_default_io_unit(logger)
           DO ic=1,fe_env%ncolvar
              cv => fe_env%uivar(ic)
              icolvar = cv%icolvar
-             CALL colvar_eval_glob_f(icolvar,force_env,error=error)
+             CALL colvar_eval_glob_f(icolvar,force_env)
              CALL reallocate(cv%ss,1,fe_env%nr_points)
              cv%ss(fe_env%nr_points) = subsys%colvar_p(icolvar)%colvar%ss
-             WRITE(*,*)"COLVAR::",cv%ss(fe_env%nr_points)
+             IF (output_unit > 0) THEN
+                WRITE(output_unit,*)"COLVAR::",cv%ss(fe_env%nr_points)
+             END IF
           END DO
           stat_sign_points = fe_env%nr_points - fe_env%nr_rejected
-          WRITE(*,*)fe_env%nr_points, stat_sign_points
+          IF (output_unit > 0) THEN
+             WRITE(output_unit,*)fe_env%nr_points, stat_sign_points
+          END IF
           ! Start statistical analysis when enough CG data points have been collected
           IF ( (fe_env%conv_par%cg_width*fe_env%conv_par%cg_points <= stat_sign_points).AND.&
                (MOD(stat_sign_points,fe_env%conv_par%cg_width)==0) ) THEN
              output_unit = cp_print_key_unit_nr(logger,fe_section,"FREE_ENERGY_INFO",&
-                  extension=".FreeEnergyLog",log_filename=.FALSE.,error=error)
-             CALL print_fe_prolog(output_unit,error)
+                  extension=".FreeEnergyLog",log_filename=.FALSE.)
+             CALL print_fe_prolog(output_unit)
              ! Trend test..  recomputes the number of statistically significant points..
-             CALL ui_check_trend(fe_env, fe_env%conv_par%test_k, stat_sign_points, output_unit, error)
+             CALL ui_check_trend(fe_env, fe_env%conv_par%test_k, stat_sign_points, output_unit)
              stat_sign_points = fe_env%nr_points - fe_env%nr_rejected
              ! Normality and serial correlation tests..
              IF (fe_env%conv_par%cg_width*fe_env%conv_par%cg_points <= stat_sign_points.AND.&
                   fe_env%conv_par%test_k) THEN
                 ! Statistical tests
-                CALL ui_check_convergence(fe_env,converged,stat_sign_points,output_unit,error)
+                CALL ui_check_convergence(fe_env,converged,stat_sign_points,output_unit)
              END IF
-             CALL print_fe_epilog(output_unit,error)
-             CALL cp_print_key_finished_output(output_unit, logger,fe_section,"FREE_ENERGY_INFO",error=error)
+             CALL print_fe_epilog(output_unit)
+             CALL cp_print_key_finished_output(output_unit, logger,fe_section,"FREE_ENERGY_INFO")
           END IF
        CASE(do_fe_ac)
           CALL initf(2)
           ! Alchemical Changes
-          CALL cp_assert(ASSOCIATED(force_env%mixed_env),cp_fatal_level,-300,routineP,&
-               'ASSERTION (cond) failed at line '//cp_to_string(__LINE__)//&
-               ' Free Energy calculations require the definition of a mixed env!',error)
+          IF(.NOT.ASSOCIATED(force_env%mixed_env))&
+             CALL cp_abort(__LOCATION__,&
+                  'ASSERTION (cond) failed at line '//cp_to_string(__LINE__)//&
+                  ' Free Energy calculations require the definition of a mixed env!')
           my_par => force_env%mixed_env%par
           my_val => force_env%mixed_env%val
           dx     =  force_env%mixed_env%dx
@@ -145,7 +146,7 @@ CONTAINS
           CALL parsef(1,TRIM(coupling_function),my_par)
           nforce_eval = SIZE(force_env%sub_force_env)
           CALL dump_ac_info(my_val, my_par, dx, lerr, fe_section, nforce_eval,&
-               fe_env%covmx, istep, beta, error)
+               fe_env%covmx, istep, beta)
           CALL finalizef()
        CASE DEFAULT
           ! Do Nothing
@@ -157,14 +158,12 @@ CONTAINS
 
 ! *****************************************************************************
 !> \brief Print prolog of free energy output section
-!> \param output_unit ...
-!> \param error ...
+!> \param output_unit which unit to print to
 !> \par History
 !>      Teodoro Laino (02.2007) [tlaino]
 ! *****************************************************************************
-  SUBROUTINE print_fe_prolog(output_unit,error)
+  SUBROUTINE print_fe_prolog(output_unit)
     INTEGER, INTENT(IN)                      :: output_unit
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'print_fe_prolog', &
       routineP = moduleN//':'//routineN
@@ -177,14 +176,12 @@ CONTAINS
 
 ! *****************************************************************************
 !> \brief Print epilog of free energy output section
-!> \param output_unit ...
-!> \param error ...
+!> \param output_unit which unit to print to
 !> \par History
 !>      Teodoro Laino (02.2007) [tlaino]
 ! *****************************************************************************
-  SUBROUTINE print_fe_epilog(output_unit,error)
+  SUBROUTINE print_fe_epilog(output_unit)
     INTEGER, INTENT(IN)                      :: output_unit
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'print_fe_epilog', &
       routineP = moduleN//':'//routineN
@@ -199,16 +196,14 @@ CONTAINS
 !> \param fe_env ...
 !> \param trend_free ...
 !> \param nr_points ...
-!> \param output_unit ...
-!> \param error ...
+!> \param output_unit which unit to print to
 !> \par History
 !>      Teodoro Laino (01.2007) [tlaino]
 ! *****************************************************************************
-  SUBROUTINE ui_check_trend(fe_env, trend_free, nr_points, output_unit, error)
+  SUBROUTINE ui_check_trend(fe_env, trend_free, nr_points, output_unit)
     TYPE(free_energy_type), POINTER          :: fe_env
     LOGICAL, INTENT(OUT)                     :: trend_free
     INTEGER, INTENT(IN)                      :: nr_points, output_unit
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'ui_check_trend', &
       routineP = moduleN//':'//routineN
@@ -216,24 +211,25 @@ CONTAINS
     INTEGER                                  :: handle, i, ii, j, k, &
                                                 my_reject, ncolvar, &
                                                 ng_points, rejected_points
-    LOGICAL                                  :: failure, test_avg, test_std
+    LOGICAL                                  :: test_avg, test_std
     REAL(KIND=dp)                            :: prob, tau, z
     REAL(KIND=dp), DIMENSION(:), POINTER     :: wrk
 
     CALL timeset(routineN,handle)
-    failure    = .FALSE.
     trend_free = .FALSE.
     test_avg   = .TRUE.
     test_std   = .TRUE.
     ncolvar    = fe_env%ncolvar
     ! Number of coarse grained points
-    WRITE(*,*)nr_points, fe_env%conv_par%cg_width
+    IF (output_unit>0) THEN
+       WRITE(output_unit,*)nr_points, fe_env%conv_par%cg_width
+    END IF
     ng_points = nr_points/fe_env%conv_par%cg_width
     my_reject = 0
     ! Allocate storage
-    CALL create_tmp_data(fe_env,wrk,ng_points,ncolvar,error)
+    CALL create_tmp_data(fe_env,wrk,ng_points,ncolvar)
     ! Compute the Coarse Grained data set using a reverse cumulative strategy
-    CALL create_csg_data(fe_env,ng_points,error)
+    CALL create_csg_data(fe_env,ng_points,output_unit)
     ! Test on coarse grained average
     DO j = 1, ncolvar
        ii = 1
@@ -247,7 +243,7 @@ CONTAINS
              test_avg = .FALSE.
              EXIT
           END IF
-          CALL k_test(wrk,my_reject+1,ng_points,tau,z,prob,error)
+          CALL k_test(wrk,my_reject+1,ng_points,tau,z,prob)
           PRINT *,prob,fe_env%conv_par%k_conf_lm
           IF (prob<fe_env%conv_par%k_conf_lm) EXIT
           my_reject = my_reject + 1
@@ -275,7 +271,7 @@ CONTAINS
                 test_std  = .FALSE.
                 EXIT
              END IF
-             CALL k_test(wrk,my_reject+1,ng_points,tau,z,prob,error)
+             CALL k_test(wrk,my_reject+1,ng_points,tau,z,prob)
              PRINT *,prob,fe_env%conv_par%k_conf_lm
              IF (prob<fe_env%conv_par%k_conf_lm) EXIT
              my_reject = my_reject + 1
@@ -294,7 +290,7 @@ CONTAINS
        WRITE(output_unit,*)"Kendall test passed:",trend_free
     END IF
     ! Release storage
-    CALL destroy_tmp_data(fe_env,wrk,ng_points,error)
+    CALL destroy_tmp_data(fe_env,wrk,ng_points)
     CALL timestop(handle)
   END SUBROUTINE ui_check_trend
 
@@ -304,37 +300,27 @@ CONTAINS
 !> \param wrk ...
 !> \param ng_points ...
 !> \param ncolvar ...
-!> \param error ...
 !> \par History
 !>      Teodoro Laino (02.2007) [tlaino]
 ! *****************************************************************************
-  SUBROUTINE create_tmp_data(fe_env,wrk,ng_points,ncolvar,error)
+  SUBROUTINE create_tmp_data(fe_env,wrk,ng_points,ncolvar)
     TYPE(free_energy_type), POINTER          :: fe_env
     REAL(KIND=dp), DIMENSION(:), OPTIONAL, &
       POINTER                                :: wrk
     INTEGER, INTENT(IN)                      :: ng_points, ncolvar
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'create_tmp_data', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: i
 
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       ALLOCATE(fe_env%cg_data(ng_points),stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       DO i = 1, ng_points
-          ALLOCATE(fe_env%cg_data(i)%avg(ncolvar),stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-          ALLOCATE(fe_env%cg_data(i)%var(ncolvar,ncolvar),stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       END DO
-       IF (PRESENT(wrk)) THEN
-          ALLOCATE(wrk(ng_points),stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       END IF
+    ALLOCATE(fe_env%cg_data(ng_points))
+    DO i = 1, ng_points
+       ALLOCATE(fe_env%cg_data(i)%avg(ncolvar))
+       ALLOCATE(fe_env%cg_data(i)%var(ncolvar,ncolvar))
+    END DO
+    IF (PRESENT(wrk)) THEN
+       ALLOCATE(wrk(ng_points))
     END IF
   END SUBROUTINE create_tmp_data
 
@@ -343,37 +329,27 @@ CONTAINS
 !> \param fe_env ...
 !> \param wrk ...
 !> \param ng_points ...
-!> \param error ...
 !> \par History
 !>      Teodoro Laino (02.2007) [tlaino]
 ! *****************************************************************************
-  SUBROUTINE destroy_tmp_data(fe_env,wrk,ng_points,error)
+  SUBROUTINE destroy_tmp_data(fe_env,wrk,ng_points)
     TYPE(free_energy_type), POINTER          :: fe_env
     REAL(KIND=dp), DIMENSION(:), OPTIONAL, &
       POINTER                                :: wrk
     INTEGER, INTENT(IN)                      :: ng_points
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'destroy_tmp_data', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: i
 
-    failure = .FALSE.
-    IF (.NOT.failure) THEN
-       DO i = 1, ng_points
-          DEALLOCATE(fe_env%cg_data(i)%avg,stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-          DEALLOCATE(fe_env%cg_data(i)%var,stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       END DO
-       DEALLOCATE(fe_env%cg_data,stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       IF (PRESENT(wrk)) THEN
-          DEALLOCATE(wrk,stat=stat)
-          CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       END IF
+    DO i = 1, ng_points
+       DEALLOCATE(fe_env%cg_data(i)%avg)
+       DEALLOCATE(fe_env%cg_data(i)%var)
+    END DO
+    DEALLOCATE(fe_env%cg_data)
+    IF (PRESENT(wrk)) THEN
+       DEALLOCATE(wrk)
     END IF
   END SUBROUTINE destroy_tmp_data
 
@@ -381,14 +357,13 @@ CONTAINS
 !> \brief Fills in temporary arrays with coarse grained data
 !> \param fe_env ...
 !> \param ng_points ...
-!> \param error ...
+!> \param output_unit which unit to print to
 !> \par History
 !>      Teodoro Laino (02.2007) [tlaino]
 ! *****************************************************************************
-  SUBROUTINE create_csg_data(fe_env,ng_points,error)
+  SUBROUTINE create_csg_data(fe_env,ng_points,output_unit)
     TYPE(free_energy_type), POINTER          :: fe_env
-    INTEGER, INTENT(IN)                      :: ng_points
-    TYPE(cp_error_type), INTENT(inout)       :: error
+    INTEGER, INTENT(IN)                      :: ng_points, output_unit
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'create_csg_data', &
       routineP = moduleN//':'//routineN
@@ -398,8 +373,10 @@ CONTAINS
     DO i = 1, ng_points
        istart = fe_env%nr_points -    (i)*fe_env%conv_par%cg_width + 1
        iend   = fe_env%nr_points -  (i-1)*fe_env%conv_par%cg_width
-       WRITE(*,*)istart, iend
-       CALL eval_cov_matrix(fe_env,cg_index=i,istart=istart,iend=iend,error=error)
+       IF (output_unit > 0) THEN
+          WRITE(output_unit,*)istart, iend
+       END IF
+       CALL eval_cov_matrix(fe_env,cg_index=i,istart=istart,iend=iend,output_unit=output_unit)
     END DO
 
   END SUBROUTINE create_csg_data
@@ -410,38 +387,36 @@ CONTAINS
 !> \param fe_env ...
 !> \param test_passed ...
 !> \param nr_points ...
-!> \param output_unit ...
-!> \param error ...
+!> \param output_unit which unit to print to
 !> \par History
 !>      Teodoro Laino (02.2007) [tlaino]
 ! *****************************************************************************
-  SUBROUTINE ui_check_norm_sc(fe_env,test_passed,nr_points,output_unit,error)
+  SUBROUTINE ui_check_norm_sc(fe_env,test_passed,nr_points,output_unit)
     TYPE(free_energy_type), POINTER          :: fe_env
     LOGICAL, INTENT(OUT)                     :: test_passed
     INTEGER, INTENT(IN)                      :: nr_points, output_unit
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'ui_check_norm_sc', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, ng_points
-    LOGICAL                                  :: failure
 
     CALL timeset(routineN,handle)
-    failure     = .FALSE.
     test_passed = .FALSE.
     DO WHILE(fe_env%conv_par%cg_width<fe_env%conv_par%max_cg_width)
        ng_points = nr_points/fe_env%conv_par%cg_width
        PRINT *, ng_points
        IF (ng_points<min_sample_size) EXIT
-       CALL ui_check_norm_sc_low(fe_env,nr_points,output_unit,error)
+       CALL ui_check_norm_sc_low(fe_env,nr_points,output_unit)
        test_passed = fe_env%conv_par%test_vn.AND.fe_env%conv_par%test_sw
        IF (test_passed) EXIT
        fe_env%conv_par%cg_width = fe_env%conv_par%cg_width + 1
-       WRITE(*,*)"New coarse grained width:",fe_env%conv_par%cg_width
+       IF (output_unit > 0) THEN
+          WRITE(output_unit,*)"New coarse grained width:",fe_env%conv_par%cg_width
+       END IF
     END DO
     IF (fe_env%conv_par%cg_width==fe_env%conv_par%max_cg_width.AND.(.NOT.(test_passed))) THEN
-       CALL ui_check_norm_sc_low(fe_env,nr_points,output_unit,error)
+       CALL ui_check_norm_sc_low(fe_env,nr_points,output_unit)
        test_passed = fe_env%conv_par%test_vn.AND.fe_env%conv_par%test_sw
     END IF
     CALL timestop(handle)
@@ -452,28 +427,25 @@ CONTAINS
 !>      coarse grained data - Low Level routine
 !> \param fe_env ...
 !> \param nr_points ...
-!> \param output_unit ...
-!> \param error ...
+!> \param output_unit which unit to print to
 !> \par History
 !>      Teodoro Laino (02.2007) [tlaino]
 ! *****************************************************************************
-  SUBROUTINE ui_check_norm_sc_low(fe_env,nr_points,output_unit,error)
+  SUBROUTINE ui_check_norm_sc_low(fe_env,nr_points,output_unit)
     TYPE(free_energy_type), POINTER          :: fe_env
     INTEGER, INTENT(IN)                      :: nr_points, output_unit
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'ui_check_norm_sc_low', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, i, j, k, ncolvar, &
                                                 ng_points
-    LOGICAL                                  :: avg_test_passed, failure, &
+    LOGICAL                                  :: avg_test_passed, &
                                                 sdv_test_passed
     REAL(KIND=dp)                            :: prob, pw, r, u, w
     REAL(KIND=dp), DIMENSION(:), POINTER     :: wrk
 
     CALL timeset(routineN,handle)
-    failure     = .FALSE.
     ncolvar     = fe_env%ncolvar
     ! Compute the Coarse Grained data set using a reverse cumulative strategy
     fe_env%conv_par%test_sw = .FALSE.
@@ -482,8 +454,8 @@ CONTAINS
     avg_test_passed = .TRUE.
     sdv_test_passed = .TRUE.
     ng_points = nr_points/fe_env%conv_par%cg_width
-    CALL create_tmp_data(fe_env,wrk,ng_points,ncolvar,error)
-    CALL create_csg_data(fe_env,ng_points,error)
+    CALL create_tmp_data(fe_env,wrk,ng_points,ncolvar)
+    CALL create_csg_data(fe_env,ng_points,output_unit)
     ! Testing Averages
     DO j = 1, ncolvar
        DO i = 1, ng_points
@@ -491,7 +463,7 @@ CONTAINS
        END DO
        ! Test of Shapiro - Wilks for normality
        !                 - Average
-       CALL sw_test(wrk, ng_points, w, pw, error)
+       CALL sw_test(wrk, ng_points, w, pw)
        PRINT *, 1.0_dp-pw,fe_env%conv_par%sw_conf_lm
        avg_test_passed = (1.0_dp-pw)<=fe_env%conv_par%sw_conf_lm
        fe_env%conv_par%test_sw = avg_test_passed
@@ -500,7 +472,7 @@ CONTAINS
        END IF
        ! Test of von Neumann for serial correlation
        !                 - Average
-       CALL vn_test(wrk,ng_points,r,u,prob,error)
+       CALL vn_test(wrk,ng_points,r,u,prob)
        PRINT *, prob, fe_env%conv_par%vn_conf_lm
        avg_test_passed = prob<=fe_env%conv_par%vn_conf_lm
        fe_env%conv_par%test_vn = avg_test_passed
@@ -518,7 +490,7 @@ CONTAINS
              END DO
              ! Test of Shapiro - Wilks for normality
              !                 - Standard Deviation
-             CALL sw_test(wrk, ng_points, w, pw, error)
+             CALL sw_test(wrk, ng_points, w, pw)
              PRINT *, 1.0_dp-pw,fe_env%conv_par%sw_conf_lm
              sdv_test_passed = (1.0_dp-pw)<=fe_env%conv_par%sw_conf_lm
              fe_env%conv_par%test_sw = fe_env%conv_par%test_sw .AND. sdv_test_passed
@@ -527,7 +499,7 @@ CONTAINS
              END IF
              ! Test of von Neumann for serial correlation
              !                 - Standard Deviation
-             CALL vn_test(wrk,ng_points,r,u,prob,error)
+             CALL vn_test(wrk,ng_points,r,u,prob)
              PRINT *, prob, fe_env%conv_par%vn_conf_lm
              sdv_test_passed = prob<=fe_env%conv_par%vn_conf_lm
              fe_env%conv_par%test_vn = fe_env%conv_par%test_vn .AND. sdv_test_passed
@@ -536,9 +508,9 @@ CONTAINS
              END IF
           END DO
        END DO
-       CALL destroy_tmp_data(fe_env,wrk,ng_points,error)
+       CALL destroy_tmp_data(fe_env,wrk,ng_points)
     ELSE
-       CALL destroy_tmp_data(fe_env,wrk,ng_points,error)
+       CALL destroy_tmp_data(fe_env,wrk,ng_points)
     END IF
     CALL timestop(handle)
   END SUBROUTINE ui_check_norm_sc_low
@@ -549,47 +521,40 @@ CONTAINS
 !> \param fe_env ...
 !> \param converged ...
 !> \param nr_points ...
-!> \param output_unit ...
-!> \param error ...
+!> \param output_unit which unit to print to
 !> \par History
 !>      Teodoro Laino (01.2007) [tlaino]
 ! *****************************************************************************
-  SUBROUTINE ui_check_convergence(fe_env,converged,nr_points,output_unit,error)
+  SUBROUTINE ui_check_convergence(fe_env,converged,nr_points,output_unit)
     TYPE(free_energy_type), POINTER          :: fe_env
     LOGICAL, INTENT(OUT)                     :: converged
     INTEGER, INTENT(IN)                      :: nr_points, output_unit
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'ui_check_convergence', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, i, ic, ncolvar, &
-                                                ng_points, stat
-    LOGICAL                                  :: failure, test_passed
+                                                ng_points
+    LOGICAL                                  :: test_passed
     REAL(KIND=dp)                            :: max_error_avg, max_error_std
     REAL(KIND=dp), DIMENSION(:), POINTER     :: avg_std, avgmx
     REAL(KIND=dp), DIMENSION(:, :), POINTER  :: cov_std, covmx
 
     CALL timeset(routineN,handle)
-    failure   = .FALSE.
     converged = .FALSE.
     ncolvar   = fe_env%ncolvar
     NULLIFY(avgmx, avg_std, covmx, cov_std)
-    CALL ui_check_norm_sc(fe_env,test_passed,nr_points,output_unit,error)
+    CALL ui_check_norm_sc(fe_env,test_passed,nr_points,output_unit)
     IF (test_passed) THEN
        ng_points = nr_points/fe_env%conv_par%cg_width
        ! We can finally compute the error on average and covariance matrix
        ! and check if we converged..
-       CALL create_tmp_data(fe_env,ng_points=ng_points,ncolvar=ncolvar,error=error)
-       CALL create_csg_data(fe_env,ng_points,error)
-       ALLOCATE(covmx(ncolvar,ncolvar),stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       ALLOCATE(avgmx(ncolvar),stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       ALLOCATE(cov_std(ncolvar*(ncolvar+1)/2,ncolvar*(ncolvar+1)/2),stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       ALLOCATE(avg_std(ncolvar),stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       CALL create_tmp_data(fe_env,ng_points=ng_points,ncolvar=ncolvar)
+       CALL create_csg_data(fe_env,ng_points,output_unit)
+       ALLOCATE(covmx(ncolvar,ncolvar))
+       ALLOCATE(avgmx(ncolvar))
+       ALLOCATE(cov_std(ncolvar*(ncolvar+1)/2,ncolvar*(ncolvar+1)/2))
+       ALLOCATE(avg_std(ncolvar))
        covmx = 0.0_dp
        avgmx = 0.0_dp
        DO i = 1, ng_points
@@ -600,9 +565,11 @@ CONTAINS
        avgmx = avgmx / REAL(ng_points, KIND=dp)
 
        ! Compute errors on average and standard deviation
-       CALL compute_avg_std_errors(fe_env, ncolvar, avgmx, covmx, avg_std, cov_std, error)
-       WRITE(*,*)"pippo",avgmx, covmx
-       WRITE(*,*)"pippo",avg_std, cov_std
+       CALL compute_avg_std_errors(fe_env, ncolvar, avgmx, covmx, avg_std, cov_std)
+       IF (output_unit>0) THEN 
+          WRITE(output_unit,*)"pippo",avgmx, covmx
+          WRITE(output_unit,*)"pippo",avg_std, cov_std
+       END IF
        ! Convergence of the averages
        max_error_avg = SQRT(MAXVAL(ABS(avg_std))/REAL(ng_points,KIND=dp))/MINVAL(avgmx)
        max_error_std = SQRT(MAXVAL(ABS(cov_std))/REAL(ng_points,KIND=dp))/MINVAL(covmx)
@@ -631,15 +598,11 @@ CONTAINS
           WRITE(output_unit,'(T2,"CV",I8,21X,7X,E12.6,14X,E12.6)')&
                (ic,avgmx(ic),SQRT(ABS(avg_std(ic))),ic=1,ncolvar)
        END IF
-       CALL destroy_tmp_data(fe_env,ng_points=ng_points,error=error)
-       DEALLOCATE(covmx,stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       DEALLOCATE(avgmx,stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       DEALLOCATE(cov_std,stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       DEALLOCATE(avg_std,stat=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       CALL destroy_tmp_data(fe_env,ng_points=ng_points)
+       DEALLOCATE(covmx)
+       DEALLOCATE(avgmx)
+       DEALLOCATE(cov_std)
+       DEALLOCATE(avg_std)
     END IF
     CALL timestop(handle)
   END SUBROUTINE ui_check_convergence
@@ -653,35 +616,30 @@ CONTAINS
 !> \param covmx ...
 !> \param avg_std ...
 !> \param cov_std ...
-!> \param error ...
 !> \par History
 !>      Teodoro Laino (02.2007) [tlaino]
 ! *****************************************************************************
-  SUBROUTINE compute_avg_std_errors(fe_env, ncolvar, avgmx, covmx, avg_std, cov_std, error)
+  SUBROUTINE compute_avg_std_errors(fe_env, ncolvar, avgmx, covmx, avg_std, cov_std)
     TYPE(free_energy_type), POINTER          :: fe_env
     INTEGER, INTENT(IN)                      :: ncolvar
     REAL(KIND=dp), DIMENSION(:), POINTER     :: avgmx
     REAL(KIND=dp), DIMENSION(:, :), POINTER  :: covmx
     REAL(KIND=dp), DIMENSION(:), POINTER     :: avg_std
     REAL(KIND=dp), DIMENSION(:, :), POINTER  :: cov_std
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'compute_avg_std_errors', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, ind, j, k, nvar, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: i, ind, j, k, nvar
     REAL(KIND=dp)                            :: fac
     REAL(KIND=dp), DIMENSION(:), POINTER     :: awrk, eig, tmp
     REAL(KIND=dp), DIMENSION(:, :), POINTER  :: wrk
 
-    failure = .FALSE.
-    ! Averages
+! Averages
+
     nvar = ncolvar
-    ALLOCATE(wrk(nvar,nvar),stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(eig(nvar),stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(wrk(nvar,nvar))
+    ALLOCATE(eig(nvar))
     fac = REAL(SIZE(fe_env%cg_data),KIND=dp)
     wrk = 0.0_dp
     eig = 0.0_dp
@@ -700,24 +658,18 @@ CONTAINS
     END DO
     wrk = wrk / (fac-1.0_dp)
     ! Diagonalize the covariance matrix and check for the maximum error
-    CALL diamat_all(wrk,eig,error=error)
+    CALL diamat_all(wrk,eig)
     DO i = 1, nvar
        avg_std(i) = eig(i)
     END DO
-    DEALLOCATE(wrk,stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    DEALLOCATE(eig,stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(wrk)
+    DEALLOCATE(eig)
     ! Standard Deviations
     nvar = ncolvar*(ncolvar+1)/2
-    ALLOCATE(wrk(nvar,nvar),stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(eig(nvar),stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(awrk(nvar),stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(tmp(nvar),stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(wrk(nvar,nvar))
+    ALLOCATE(eig(nvar))
+    ALLOCATE(awrk(nvar))
+    ALLOCATE(tmp(nvar))
     wrk = 0.0_dp
     eig = 0.0_dp
     ind = 0
@@ -749,7 +701,7 @@ CONTAINS
     END DO
     wrk = wrk / (fac-1.0_dp)
     ! Diagonalize the covariance matrix and check for the maximum error
-    CALL diamat_all(wrk,eig,error=error)
+    CALL diamat_all(wrk,eig)
     ind = 0
     DO i = 1, ncolvar
        DO j = i, ncolvar
@@ -758,14 +710,10 @@ CONTAINS
           cov_std(j,i) = cov_std(i,j)
        END DO
     END DO
-    DEALLOCATE(wrk,stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    DEALLOCATE(eig,stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    DEALLOCATE(awrk,stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-    DEALLOCATE(tmp,stat=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(wrk)
+    DEALLOCATE(eig)
+    DEALLOCATE(awrk)
+    DEALLOCATE(tmp)
 
   END SUBROUTINE compute_avg_std_errors
 
@@ -775,20 +723,20 @@ CONTAINS
 !> \param cg_index ...
 !> \param istart ...
 !> \param iend ...
+!> \param output_unit which unit to print to
 !> \param covmx ...
 !> \param avgs ...
-!> \param error ...
 !> \par History
 !>      Teodoro Laino (01.2007) [tlaino]
 ! *****************************************************************************
-  SUBROUTINE eval_cov_matrix(fe_env,cg_index,istart,iend,covmx,avgs,error)
+  SUBROUTINE eval_cov_matrix(fe_env,cg_index,istart,iend,output_unit,covmx,avgs)
     TYPE(free_energy_type), POINTER          :: fe_env
-    INTEGER, INTENT(IN)                      :: cg_index, istart, iend
+    INTEGER, INTENT(IN)                      :: cg_index, istart, iend, &
+                                                output_unit
     REAL(KIND=dp), DIMENSION(:, :), &
       OPTIONAL, POINTER                      :: covmx
     REAL(KIND=dp), DIMENSION(:), OPTIONAL, &
       POINTER                                :: avgs
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'eval_cov_matrix', &
       routineP = moduleN//':'//routineN
@@ -834,7 +782,9 @@ CONTAINS
              fe_env%cg_data(cg_index)%var(ic,jc) = fe_env%cg_data(cg_index)%var(jc,ic)
           END DO
        END DO
-       WRITE(*,*)"eval_cov_matrix",istart, iend,  fe_env%cg_data(cg_index)%avg, fe_env%cg_data(cg_index)%var
+       IF (output_unit > 0) THEN
+          WRITE(output_unit,*)"eval_cov_matrix",istart, iend,  fe_env%cg_data(cg_index)%avg, fe_env%cg_data(cg_index)%var
+       END IF
        IF (PRESENT(covmx)) covmx = fe_env%cg_data(cg_index)%var
        IF (PRESENT(avgs))  avgs  = fe_env%cg_data(cg_index)%avg
     END IF
@@ -852,12 +802,10 @@ CONTAINS
 !> \param cum_res ...
 !> \param istep ...
 !> \param beta ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author Teodoro Laino - University of Zurich [tlaino] - 05.2007
 ! *****************************************************************************
   SUBROUTINE dump_ac_info(my_val, my_par, dx, lerr, fe_section, nforce_eval, cum_res,&
-       istep, beta, error)
+       istep, beta)
     REAL(KIND=dp), DIMENSION(:), POINTER     :: my_val
     CHARACTER(LEN=default_string_length), &
       DIMENSION(:), POINTER                  :: my_par
@@ -867,7 +815,6 @@ CONTAINS
     REAL(KIND=dp), DIMENSION(:, :), POINTER  :: cum_res
     INTEGER, POINTER                         :: istep
     REAL(KIND=dp), INTENT(IN)                :: beta
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'dump_ac_info', &
       routineP = moduleN//':'//routineN
@@ -876,20 +823,18 @@ CONTAINS
     CHARACTER(LEN=default_string_length)     :: def_error, par, this_error
     INTEGER                                  :: i, iforce_eval, ipar, isize, &
                                                 iw, j, NEquilStep
-    LOGICAL                                  :: failure
     REAL(KIND=dp) :: avg_BP, avg_DET, avg_DUE, d_ene_w, dedf, ene_w, err, &
       Err_DET, Err_DUE, std_DET, std_DUE, tmp, tmp2, wfac
     TYPE(cp_logger_type), POINTER            :: logger
     TYPE(section_vals_type), POINTER         :: alch_section
 
-    failure = .FALSE.
-    logger => cp_error_get_logger(error)
-    alch_section => section_vals_get_subs_vals(fe_section,"ALCHEMICAL_CHANGE",error=error)
-    CALL section_vals_val_get(alch_section,"PARAMETER",c_val=par,error=error)
+    logger => cp_get_default_logger()
+    alch_section => section_vals_get_subs_vals(fe_section,"ALCHEMICAL_CHANGE")
+    CALL section_vals_val_get(alch_section,"PARAMETER",c_val=par)
     DO i = 1, SIZE(my_par)
        IF (my_par(i)==par) EXIT
     END DO
-    CPPrecondition(i<=SIZE(my_par),cp_failure_level,routineP,error,failure)
+    CPASSERT(i<=SIZE(my_par))
     ipar = i
     dedf = evalfd(1,ipar,my_val,dx,err)
     IF (ABS(err)>lerr) THEN
@@ -897,16 +842,16 @@ CONTAINS
        WRITE(def_error,"(A,G12.6,A)")"(",lerr,")"
        CALL compress(this_error,.TRUE.)
        CALL compress(def_error,.TRUE.)
-       CALL cp_assert(.FALSE.,cp_warning_level,-300,routineP,&
+       CALL cp_warn(__LOCATION__,&
             'ASSERTION (cond) failed at line '//cp_to_string(__LINE__)//&
             ' Error '//TRIM(this_error)//' in computing numerical derivatives larger then'//&
-            TRIM(def_error)//' .',error=error,only_ionode=.TRUE.)
+            TRIM(def_error)//' .')
     END IF
 
     ! We must print now the energy of the biased system, the weigthing energy
     ! and the derivative w.r.t.the coupling parameter of the biased energy
     ! Retrieve the expression of the weighting function:
-    CALL section_vals_val_get(alch_section,"WEIGHTING_FUNCTION",c_val=coupling_function,error=error)
+    CALL section_vals_val_get(alch_section,"WEIGHTING_FUNCTION",c_val=coupling_function)
     CALL compress(coupling_function, full=.TRUE.)
     CALL parsef(2,TRIM(coupling_function),my_par)
     ene_w   = evalf(2,my_val)
@@ -916,12 +861,12 @@ CONTAINS
        WRITE(def_error,"(A,G12.6,A)")"(",lerr,")"
        CALL compress(this_error,.TRUE.)
        CALL compress(def_error,.TRUE.)
-       CALL cp_assert(.FALSE.,cp_warning_level,-300,routineP,&
+       CALL cp_warn(__LOCATION__,&
             'ASSERTION (cond) failed at line '//cp_to_string(__LINE__)//&
             ' Error '//TRIM(this_error)//' in computing numerical derivatives larger then'//&
-            TRIM(def_error)//' .',error=error,only_ionode=.TRUE.)
+            TRIM(def_error)//' .')
     END IF
-    CALL section_vals_val_get(alch_section,"NEQUIL_STEPS",i_val=NEquilStep,error=error)
+    CALL section_vals_val_get(alch_section,"NEQUIL_STEPS",i_val=NEquilStep)
     ! Store results
     IF (istep>NEquilStep) THEN
        isize = SIZE(cum_res,2)+1
@@ -953,7 +898,7 @@ CONTAINS
        END IF
        ! Print info
        iw = cp_print_key_unit_nr(logger,fe_section,"FREE_ENERGY_INFO",&
-            extension=".free_energy",error=error)
+            extension=".free_energy")
        IF (iw>0) THEN
           WRITE(iw,'(T2,79("-"),T37," oOo ")')
           DO iforce_eval = 1, nforce_eval
@@ -981,7 +926,7 @@ CONTAINS
           WRITE(iw,'(T2,79("-"))')
        END IF
     END IF
-    CALL cp_print_key_finished_output(iw,logger,fe_section,"FREE_ENERGY_INFO",error=error)
+    CALL cp_print_key_finished_output(iw,logger,fe_section,"FREE_ENERGY_INFO")
 
   END SUBROUTINE dump_ac_info
 

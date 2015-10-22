@@ -16,8 +16,8 @@ MODULE mdctrl_methods
   USE glbopt_callback,                 ONLY: glbopt_md_callback
   USE md_environment_types,            ONLY: md_environment_type
   USE mdctrl_types,                    ONLY: mdctrl_type
-  USE message_passing,                 ONLY: mp_abort
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -33,31 +33,25 @@ CONTAINS
 !> \param mdctrl data which is passed on to the wrapped client-routine
 !> \param md_env contains the current state of the md_run
 !> \param should_stop can be used to abort the md_run
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 ! *****************************************************************************
-  SUBROUTINE mdctrl_callback(mdctrl, md_env, should_stop, error)
+  SUBROUTINE mdctrl_callback(mdctrl, md_env, should_stop)
     TYPE(mdctrl_type), POINTER               :: mdctrl
     TYPE(md_environment_type), POINTER       :: md_env
     LOGICAL, INTENT(inout)                   :: should_stop
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'mdctrl_callback', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
-    CPPrecondition(ASSOCIATED(md_env), cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(mdctrl), cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(md_env))
+    CPASSERT(ASSOCIATED(mdctrl))
 
     IF(ASSOCIATED(mdctrl%glbopt)) THEN
-      CALL glbopt_md_callback(mdctrl%glbopt, md_env, should_stop, error)
+      CALL glbopt_md_callback(mdctrl%glbopt, md_env, should_stop)
 
     !ELSE IF(ASSOCIATED(mdctrl%your_own_hook)) THEN ...
 
     ELSE
-      CALL mp_abort("mdctrl_callback: No hook found.")
+      CPABORT("mdctrl_callback: No hook found.")
     ENDIF
 
   END SUBROUTINE mdctrl_callback

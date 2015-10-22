@@ -33,6 +33,8 @@ MODULE graph_methods
                                              ptable
   USE physcon,                         ONLY: bohr
   USE string_utilities,                ONLY: uppercase
+#include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -162,7 +164,7 @@ CONTAINS
                 END DO
                 ind=ind+(pos(ndim-is+1)-1)*itt
              END DO
-             IF (ind >np) STOP "something wrong in indexing .."
+             IF (ind >np) CPABORT("something wrong in indexing ..")
           END IF
           pnt=point_no_pbc(pos,ngrid,ndim)
           xx = x0 + dp_grid * ( pos - 1 )
@@ -276,7 +278,7 @@ CONTAINS
                                                 resto
     REAL(KIND=dp), DIMENSION(:), POINTER     :: dx, rnd, xx
 
-    IF (ndw/=ndim) STOP "Not implemented for projected FES!"
+    IF (ndw/=ndim) CPABORT("Not implemented for projected FES!")
 
     ntrust  = ngrid/10
     ntrials = PRODUCT (ngrid)
@@ -404,7 +406,7 @@ CONTAINS
                                                 fes_rep, tang, xx, yy
     REAL(KIND=dp), DIMENSION(:, :), POINTER  :: dx, pos, pos_old
 
-    IF (ndw/=ndim) STOP "Not implemented for projected FES!"
+    IF (ndw/=ndim) CPABORT("Not implemented for projected FES!")
     nreplica = mep_input_data%nreplica
     ALLOCATE(xx(ndim),dx(ndim,nreplica),pos_old(ndim,nreplica),pos(ndim,nreplica),&
              ipos(ndim),fes_rep(nreplica),dxx(ndim),dyy(ndim),yy(ndim),davg1(ndim),&
@@ -607,7 +609,7 @@ CONTAINS
     IF (ndw .GT. 3) THEN
        WRITE(*,*)
        WRITE(*,*) 'ERROR: GAUSSIAN format can only handle FES on 3 CV !'
-       STOP
+       CPABORT("")
     END IF
 
     OPEN(10,file=file,status='old')
@@ -634,7 +636,7 @@ CONTAINS
        WRITE(*,*)
        WRITE(*,*) 'ERROR: this progam can only handle orthogonal cells'
        WRITE(*,*) ' with vectors pointing in the X, Y and Z directions'
-       STOP
+       CPABORT("")
     END IF
 
     WRITE(*,*)
@@ -671,12 +673,12 @@ CONTAINS
              IF (iiy .GT. ngrid(2)) iiy=iiy-ngrid(2)
              IF (iiz .GT. ngrid(3)) iiz=iiz-ngrid(3)
              
-             IF (iix .LT. 1) STOP 'ix < 0'
-             IF (iiy .LT. 1) STOP 'iy < 0'
-             IF (iiz .LT. 1) STOP 'iz < 0'
-             IF (iix .GT. ngrid(1)) STOP 'ix > cell'
-             IF (iiy .GT. ngrid(2)) STOP 'iy > cell'
-             IF (iiz .GT. ngrid(3)) STOP 'iz > cell'
+             IF (iix .LT. 1) CPABORT("ix < 0")
+             IF (iiy .LT. 1) CPABORT("iy < 0")
+             IF (iiz .LT. 1) CPABORT("iz < 0")
+             IF (iix .GT. ngrid(1)) CPABORT("ix > cell")
+             IF (iiy .GT. ngrid(2)) CPABORT("iy > cell")
+             IF (iiz .GT. ngrid(3)) CPABORT("iz > cell")
              i=ix+(iy-1)*ngrid(1)+(iz-1)*ngrid(1)*ngrid(2)
              ii=iix+(iiy-1)*ngrid(1)+(iiz-1)*ngrid(1)*ngrid(2)
              rhot(ii)=rho(i)
@@ -706,7 +708,7 @@ CONTAINS
        END DO
        IF (i == nelem+1) THEN
           WRITE(*,*)TRIM(label), "In line: ", line
-          STOP "Element not recognized!"
+          CPABORT("Element not recognized!")
        END IF
        izat(natoms)=i
     END DO

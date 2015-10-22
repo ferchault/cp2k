@@ -36,16 +36,17 @@ MODULE dbcsr_api
        dbcsr_get_conf_avg_elements_images, dbcsr_get_conf_comm_thread_load, &
        dbcsr_get_conf_max_ele_block, dbcsr_get_conf_mm_driver, &
        dbcsr_get_conf_mm_stacksize, dbcsr_get_conf_mpi_mem, &
-       dbcsr_get_conf_nstacks, dbcsr_get_conf_use_comm_thread, &
-       dbcsr_get_conf_use_mpi_filtering, dbcsr_get_conf_use_mpi_rma, &
-       dbcsr_set_conf_avg_elements_images, dbcsr_set_conf_comm_thread_load, &
-       dbcsr_set_conf_external_timing, dbcsr_set_conf_max_ele_block, &
+       dbcsr_get_conf_nstacks, dbcsr_get_conf_randmat_seed, &
+       dbcsr_get_conf_use_comm_thread, dbcsr_get_conf_use_mpi_filtering, &
+       dbcsr_get_conf_use_mpi_rma, dbcsr_set_conf_avg_elements_images, &
+       dbcsr_set_conf_comm_thread_load, dbcsr_set_conf_max_ele_block, &
        dbcsr_set_conf_mm_driver, dbcsr_set_conf_mm_stacksize, &
-       dbcsr_set_conf_nstacks, dbcsr_set_conf_use_comm_thread, &
-       dbcsr_set_conf_use_mpi_filtering, dbcsr_set_conf_use_mpi_rma, &
-       dbcsr_set_default_config, has_acc, has_mpi, mm_driver_acc, &
-       mm_driver_blas, mm_driver_matmul, mm_driver_smm, mm_name_acc, &
-       mm_name_blas, mm_name_matmul, mm_name_smm, multrec_limit
+       dbcsr_set_conf_nstacks, dbcsr_set_conf_randmat_seed, &
+       dbcsr_set_conf_use_comm_thread, dbcsr_set_conf_use_mpi_filtering, &
+       dbcsr_set_conf_use_mpi_rma, dbcsr_set_default_config, has_acc, &
+       has_mpi, mm_driver_acc, mm_driver_blas, mm_driver_matmul, &
+       mm_driver_smm, mm_name_acc, mm_name_blas, mm_name_matmul, mm_name_smm, &
+       multrec_limit
   USE dbcsr_csr_conversions,           ONLY: &
        convert_csr_to_dbcsr, convert_dbcsr_to_csr, csr_create_from_dbcsr, &
        csr_create_new, csr_create_template, csr_dbcsr_blkrow_dist, &
@@ -71,9 +72,6 @@ MODULE dbcsr_api
                                              dbcsr_create_dist_block_cyclic,&
                                              dbcsr_create_dist_r_unrot,&
                                              dbcsr_get_stored_coordinates
-  USE dbcsr_error_handling,            ONLY: dbcsr_error_set,&
-                                             dbcsr_error_stop,&
-                                             dbcsr_error_type
   USE dbcsr_io,                        ONLY: dbcsr_binary_read,&
                                              dbcsr_binary_write,&
                                              dbcsr_print,&
@@ -89,11 +87,10 @@ MODULE dbcsr_api
        dbcsr_col_block_sizes, dbcsr_distribution, dbcsr_get_data_size, &
        dbcsr_get_data_type, dbcsr_get_matrix_type, dbcsr_get_num_blocks, &
        dbcsr_has_symmetry, dbcsr_init, dbcsr_max_col_size, &
-       dbcsr_max_row_size, dbcsr_name, dbcsr_nblkcols_local, &
-       dbcsr_nblkcols_total, dbcsr_nblkrows_local, dbcsr_nblkrows_total, &
-       dbcsr_nfullcols_total, dbcsr_nfullrows_total, dbcsr_release, &
-       dbcsr_row_block_sizes, dbcsr_setname, dbcsr_valid_index, &
-       dbcsr_wm_use_mutable
+       dbcsr_max_row_size, dbcsr_name, dbcsr_nblkcols_total, &
+       dbcsr_nblkrows_total, dbcsr_nfullcols_total, dbcsr_nfullrows_total, &
+       dbcsr_release, dbcsr_row_block_sizes, dbcsr_setname, &
+       dbcsr_valid_index, dbcsr_wm_use_mutable
   USE dbcsr_mp_methods,                ONLY: &
        dbcsr_mp_get_process, dbcsr_mp_group, dbcsr_mp_hold, dbcsr_mp_mynode, &
        dbcsr_mp_new, dbcsr_mp_npcols, dbcsr_mp_nprows, dbcsr_mp_numnodes, &
@@ -116,7 +113,6 @@ MODULE dbcsr_api
                                              dbcsr_desymmetrize_deep,&
                                              dbcsr_distribute,&
                                              dbcsr_new_transposed,&
-                                             dbcsr_replicate,&
                                              dbcsr_replicate_all
   USE dbcsr_types,                     ONLY: &
        dbcsr_data_obj, dbcsr_distribution_obj, dbcsr_func_artanh, &
@@ -131,10 +127,6 @@ MODULE dbcsr_api
                                              convert_sizes_to_offsets,&
                                              dbcsr_checksum,&
                                              dbcsr_verify_matrix
-  USE dbcsr_vector_operations,         ONLY: create_col_vec_from_matrix,&
-                                             create_replicated_col_vec_from_matrix,&
-                                             create_replicated_row_vec_from_matrix,&
-                                             create_row_vec_from_matrix
   USE dbcsr_work_operations,           ONLY: add_work_coordinate,&
                                              dbcsr_create,&
                                              dbcsr_finalize,&
@@ -221,9 +213,6 @@ MODULE dbcsr_api
             dbcsr_distribution_col_clusters,&
             dbcsr_distribution_has_row_clusters,&
             dbcsr_distribution_has_col_clusters,&
-            dbcsr_error_set,&
-            dbcsr_error_stop,&
-            dbcsr_error_type,&
             dbcsr_filter,&
             dbcsr_finalize,&
             dbcsr_finalize_lib,&
@@ -280,9 +269,7 @@ MODULE dbcsr_api
             dbcsr_multiply,&
             dbcsr_name,&
             dbcsr_setname,&
-            dbcsr_nblkcols_local,&
             dbcsr_nblkcols_total,&
-            dbcsr_nblkrows_local,&
             dbcsr_nblkrows_total,&
             dbcsr_new_transposed,&
             dbcsr_nfullcols_total,&
@@ -298,7 +285,6 @@ MODULE dbcsr_api
             dbcsr_print_block_sum,&
             dbcsr_put_block,&
             dbcsr_release,&
-            dbcsr_replicate,&
             dbcsr_replicate_all,&
             dbcsr_reserve_all_blocks,&
             dbcsr_reserve_block2d,&
@@ -315,7 +301,6 @@ MODULE dbcsr_api
             dbcsr_scale_by_vector,&
             dbcsr_set,&
             dbcsr_set_conf_comm_thread_load,&
-            dbcsr_set_conf_external_timing,&
             dbcsr_set_conf_max_ele_block,&
             dbcsr_set_conf_mm_driver,&
             dbcsr_set_conf_mm_stacksize,&
@@ -340,10 +325,6 @@ MODULE dbcsr_api
             dbcsr_verify_matrix,&
             dbcsr_wm_use_mutable,&
             dbcsr_work_create,&
-            create_col_vec_from_matrix,&
-            create_row_vec_from_matrix,&
-            create_replicated_col_vec_from_matrix,&
-            create_replicated_row_vec_from_matrix,&
             has_acc,&
             has_mpi,&
             mm_driver_blas,&
@@ -371,5 +352,6 @@ MODULE dbcsr_api
             csr_eqrow_ceil_dist,&
             csr_eqrow_floor_dist,&
             csr_print_sparsity,&
-            dbcsr_distribution_get_num_images_1d
+            dbcsr_distribution_get_num_images_1d,&
+            dbcsr_set_conf_randmat_seed, dbcsr_get_conf_randmat_seed
 END MODULE dbcsr_api

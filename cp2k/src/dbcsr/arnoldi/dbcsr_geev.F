@@ -11,8 +11,10 @@
 ! *****************************************************************************
 
 MODULE dbcsr_geev
+  USE dbcsr_error_handling,            ONLY: dbcsr_abort
   USE kinds,                           ONLY: real_4,&
                                              real_8
+#include "../../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -174,6 +176,7 @@ CONTAINS
                                                 work(1+6*ndim+2*ndim**2)
     REAL(real_4), DIMENSION(ndim)            :: eval
 
+    MARK_USED(jobvr) !the argument has to be here for the template to work
     lwork=1+6*ndim+2*ndim**2
     liwork=3+5*ndim
 
@@ -213,7 +216,7 @@ CONTAINS
     REAL(real_4), DIMENSION(ndim)            :: diag, offdiag
     REAL(real_4), DIMENSION(ndim, ndim)      :: evec_r
 
-!for the time being avois unused warning
+    MARK_USED(jobvl) !the argument has to be here for the template to work
 
     levec(1,1)=CMPLX(0.0,0.0,real_4)
     info =0
@@ -257,7 +260,7 @@ CONTAINS
     REAL(real_8), DIMENSION(ndim)            :: diag, offdiag
     REAL(real_8), DIMENSION(ndim, ndim)      :: evec_r
 
-!for the time being avois unused warning
+    MARK_USED(jobvl) !the argument has to be here for the template to work
 
     levec(1,1)=CMPLX(0.0,0.0,real_8)
     info =0
@@ -302,6 +305,9 @@ CONTAINS
     REAL(real_4), DIMENSION(ndim)            :: eval1, eval2
     REAL(real_4), DIMENSION(ndim, ndim)      :: evec_l, evec_r
 
+    MARK_USED(jobvr) !the argument has to be here for the template to work
+    MARK_USED(jobvl) !the argument has to be here for the template to work
+
     eval1=REAL(0.0,real_4); eval2=REAL(0.0,real_4)
     tmp_array(:,:)=matrix(:,:)
     ! ask lapack how much space it would like in the work vector, don't ask me why
@@ -331,7 +337,7 @@ CONTAINS
         levec(:,i+1)=CMPLX(evec_l(:,i),-evec_l(:,i+1),real_4)
         i=i+2
       ELSE
-        STOP 'something went wrong while sorting the EV in dbcsr_geev'
+        CALL dbcsr_abort(routineP,__LINE__,'something went wrong while sorting the EV in dbcsr_geev')
       END IF
     END DO
 
@@ -369,6 +375,9 @@ CONTAINS
     REAL(real_8), DIMENSION(ndim)            :: eval1, eval2
     REAL(real_8), DIMENSION(ndim, ndim)      :: evec_l, evec_r
 
+    MARK_USED(jobvr) !the argument has to be here for the template to work
+    MARK_USED(jobvl) !the argument has to be here for the template to work
+
     eval1=REAL(0.0,real_8); eval2=REAL(0.0,real_8)
     tmp_array(:,:)=matrix(:,:)
     ! ask lapack how much space it would like in the work vector, don't ask me why
@@ -398,7 +407,7 @@ CONTAINS
         levec(:,i+1)=CMPLX(evec_l(:,i),-evec_l(:,i+1),real_8)
         i=i+2
       ELSE
-        STOP 'something went wrong while sorting the EV in dbcsr_geev'
+        CALL dbcsr_abort(routineP,__LINE__,'something went wrong while sorting the EV in dbcsr_geev')
       END IF
     END DO
 

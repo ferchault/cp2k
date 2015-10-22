@@ -52,13 +52,11 @@ MODULE particle_methods
   USE shell_potential_types,           ONLY: get_shell,&
                                              shell_kind_type
   USE string_utilities,                ONLY: uppercase
-  USE termination,                     ONLY: stop_memory,&
-                                             stop_program
-  USE timings,                         ONLY: timeset,&
-                                             timestop
+  USE termination,                     ONLY: stop_memory
   USE util,                            ONLY: sort,&
                                              sort_unique
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -85,18 +83,16 @@ CONTAINS
 !> \param first_sgf ...
 !> \param last_sgf ...
 !> \param nsgf ...
-!> \param basis_set_id ...
 !> \param basis ...
-!> \param error ...
 !> \date    14.01.2002
 !> \par History
 !>      - particle type cleaned (13.10.2003,MK)
-!>      - refactoring and add besis set option (17.08.2010,jhu)
+!>      - refactoring and add basis set option (17.08.2010,jhu)
 !> \author  MK
 !> \version 1.0
 ! *****************************************************************************
   SUBROUTINE get_particle_set(particle_set,qs_kind_set,first_sgf,last_sgf,nsgf,&
-                              basis_set_id,basis,error)
+                              basis)
 
     TYPE(particle_type), DIMENSION(:), &
       POINTER                                :: particle_set
@@ -104,30 +100,26 @@ CONTAINS
       POINTER                                :: qs_kind_set
     INTEGER, DIMENSION(:), INTENT(INOUT), &
       OPTIONAL                               :: first_sgf, last_sgf, nsgf
-    INTEGER, INTENT(IN), OPTIONAL            :: basis_set_id
     TYPE(gto_basis_set_p_type), &
       DIMENSION(:), OPTIONAL, POINTER        :: basis
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'get_particle_set', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: ikind, iparticle, isgf, &
                                                 nparticle, ns
-    LOGICAL                                  :: failure
 
-    failure = .FALSE.
-    CPPrecondition(ASSOCIATED(particle_set),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(particle_set))
 
     nparticle = SIZE(particle_set)
     IF (PRESENT(first_sgf)) THEN
-      CPPrecondition(SIZE(first_sgf) >= nparticle,cp_failure_level,routineP,error,failure)
+      CPASSERT(SIZE(first_sgf) >= nparticle)
     END IF
     IF (PRESENT(last_sgf)) THEN
-      CPPrecondition(SIZE(last_sgf) >= nparticle,cp_failure_level,routineP,error,failure)
+      CPASSERT(SIZE(last_sgf) >= nparticle)
     END IF
     IF (PRESENT(nsgf)) THEN
-      CPPrecondition(SIZE(nsgf) >= nparticle,cp_failure_level,routineP,error,failure)
+      CPASSERT(SIZE(nsgf) >= nparticle)
     END IF
 
     IF (PRESENT(first_sgf).OR.PRESENT(last_sgf).OR.PRESENT(nsgf)) THEN
@@ -136,8 +128,6 @@ CONTAINS
         CALL get_atomic_kind(particle_set(iparticle)%atomic_kind, kind_number=ikind)
         IF (PRESENT(basis)) THEN
           CALL get_gto_basis_set(gto_basis_set=basis(ikind)%gto_basis_set,nsgf=ns)
-        ELSEIF (PRESENT(basis_set_id)) THEN
-          CALL get_qs_kind(qs_kind_set(ikind), nsgf=ns, basis_set_id=basis_set_id)
         ELSE
           CALL get_qs_kind(qs_kind_set(ikind), nsgf=ns)
         END IF
@@ -171,7 +161,6 @@ CONTAINS
 !> \param charge_occup ...
 !> \param charge_beta ...
 !> \param charge_extended ...
-!> \param error ...
 !> \date    14.01.2002
 !> \author  MK
 !> \version 1.0
@@ -179,7 +168,7 @@ CONTAINS
   SUBROUTINE write_particle_coordinates(particle_set,iunit,output_format,&
                                         content,title,cell,array,unit_conv,&
                                         charge_occup,charge_beta,&
-                                        charge_extended,error)
+                                        charge_extended)
 
     TYPE(particle_type), DIMENSION(:), &
       POINTER                                :: particle_set
@@ -191,7 +180,6 @@ CONTAINS
     REAL(KIND=dp), INTENT(IN), OPTIONAL      :: unit_conv
     LOGICAL, INTENT(IN), OPTIONAL            :: charge_occup, charge_beta, &
                                                 charge_extended
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'write_particle_coordinates', &
       routineP = moduleN//':'//routineN
@@ -201,8 +189,7 @@ CONTAINS
     CHARACTER(LEN=4)                         :: name
     CHARACTER(LEN=default_string_length)     :: atm_name, my_format
     INTEGER                                  :: handle, iatom, natom, stat
-    LOGICAL                                  :: dummy, failure, &
-                                                my_charge_beta, &
+    LOGICAL                                  :: dummy, my_charge_beta, &
                                                 my_charge_extended, &
                                                 my_charge_occup
     REAL(KIND=dp)                            :: angle_alpha, angle_beta, &
@@ -218,12 +205,11 @@ CONTAINS
 
     CALL timeset(routineN,handle)
 
-    failure = .FALSE.
     natom = SIZE(particle_set)
     IF (PRESENT(array)) THEN
        SELECT CASE(TRIM(content))
        CASE ("POS_VEL","POS_VEL_FORCE")
-          CALL stop_program(routineN,moduleN,__LINE__,"Illegal usage")
+          CPABORT("Illegal usage")
        END SELECT
     END IF
     factor = 1.0_dp
@@ -313,8 +299,7 @@ CONTAINS
        END DO
     CASE (dump_dcd,dump_dcd_aligned_cell)
        IF (.NOT.(PRESENT(cell))) THEN
-          CALL stop_program(routineN,moduleN,__LINE__,&
-                            "Cell is not present! Report this bug!")
+          CPABORT("Cell is not present! Report this bug!")
        END IF
        CALL get_cell(cell,alpha=angle_alpha,beta=angle_beta,gamma=angle_gamma,&
                      abc=abc)
@@ -324,15 +309,15 @@ CONTAINS
           ! Cell vector a is aligned with the x axis and the cell vector b lies
           ! in the xy plane.
           NULLIFY (cell_dcd)
-          CALL cell_create(cell_dcd,error=error)
-          CALL cell_clone(cell,cell_dcd,error=error)
+          CALL cell_create(cell_dcd)
+          CALL cell_clone(cell,cell_dcd)
           angles(1) = angle_alpha/degree
           angles(2) = angle_beta/degree
           angles(3) = angle_gamma/degree
           CALL set_cell_param(cell_dcd,abc,angles,&
-                              do_init_cell=.TRUE.,error=error)
+                              do_init_cell=.TRUE.)
           h(1:3,1:3) = MATMUL(cell_dcd%hmat(1:3,1:3),cell%h_inv(1:3,1:3))
-          CALL cell_release(cell_dcd,error=error)
+          CALL cell_release(cell_dcd)
        END IF
        ALLOCATE (arr(3,natom),STAT=stat)
        IF (stat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
@@ -354,8 +339,7 @@ CONTAINS
                 arr(1:3,iatom) = particle_set(iatom)%f(1:3)
              END DO
           CASE DEFAULT
-             CALL stop_program(routineN,moduleN,__LINE__,&
-                               "Illegal DCD dump type")
+             CPABORT("Illegal DCD dump type")
           END SELECT
        END IF
        ALLOCATE (x4(natom),STAT=stat)
@@ -382,14 +366,10 @@ CONTAINS
        WRITE (iunit) y4*REAL(factor,KIND=sp)
        WRITE (iunit) z4*REAL(factor,KIND=sp)
        ! Release work storage
-       DEALLOCATE (arr,STAT=stat)
-       IF (stat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"arr")
-       DEALLOCATE (x4,STAT=stat)
-       IF (stat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"x4")
-       DEALLOCATE (y4,STAT=stat)
-       IF (stat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"y4")
-       DEALLOCATE (z4,STAT=stat)
-       IF (stat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"z4")
+       DEALLOCATE (arr)
+       DEALLOCATE (x4)
+       DEALLOCATE (y4)
+       DEALLOCATE (z4)
     CASE (dump_pdb)
        my_charge_occup = .FALSE.
        IF (PRESENT(charge_occup)) my_charge_occup = charge_occup
@@ -447,7 +427,7 @@ CONTAINS
           ELSE
              qeff = 0.0_dp
           END IF
-          IF (ASSOCIATED(shell)) CALL get_shell(shell=shell,charge=qeff,error=error)
+          IF (ASSOCIATED(shell)) CALL get_shell(shell=shell,charge=qeff)
           WRITE (UNIT=line( 1: 6),FMT="(A6)") "ATOM  "
           WRITE (UNIT=line( 7:11),FMT="(I5)") MODULO(iatom,100000)
           WRITE (UNIT=line(13:16),FMT="(A4)") ADJUSTL(name)
@@ -462,8 +442,7 @@ CONTAINS
              END IF
              WRITE (UNIT=line(31:54),FMT="(3F8.3)") r(1:3)*factor
           CASE DEFAULT
-             CALL stop_program(routineN,moduleN,__LINE__,&
-                               "PDB dump only for trajectory available")
+             CPABORT("PDB dump only for trajectory available")
           END SELECT
           IF (my_charge_occup) THEN
              WRITE (UNIT=line(55:60),FMT="(F6.2)") qeff
@@ -484,7 +463,7 @@ CONTAINS
        END DO
        WRITE (UNIT=iunit,FMT="(A)") "END"
     CASE DEFAULT
-       CALL stop_program(routineN,moduleN,__LINE__,"Illegal dump type")
+       CPABORT("Illegal dump type")
     END SELECT
 
     CALL timestop(handle)
@@ -496,18 +475,16 @@ CONTAINS
 !> \param particle_set ...
 !> \param subsys_section ...
 !> \param charges ...
-!> \param error ...
 !> \date    05.06.2000
 !> \author  MK
 !> \version 1.0
 ! *****************************************************************************
   SUBROUTINE write_fist_particle_coordinates(particle_set,subsys_section,&
-             charges, error)
+             charges)
     TYPE(particle_type), DIMENSION(:), &
       POINTER                                :: particle_set
     TYPE(section_vals_type), POINTER         :: subsys_section
     REAL(KIND=dp), DIMENSION(:), POINTER     :: charges
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: &
       routineN = 'write_fist_particle_coordinates', &
@@ -523,12 +500,12 @@ CONTAINS
     NULLIFY (logger)
     NULLIFY (shell_kind)
 
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
     iw = cp_print_key_unit_nr(logger,subsys_section,&
-         "PRINT%ATOMIC_COORDINATES",extension=".coordLog",error=error)
+         "PRINT%ATOMIC_COORDINATES",extension=".coordLog")
 
-    CALL section_vals_val_get(subsys_section,"PRINT%ATOMIC_COORDINATES%UNIT",c_val=unit_str,error=error)
-    conv = cp_unit_from_cp2k(1.0_dp,TRIM(unit_str),error=error)
+    CALL section_vals_val_get(subsys_section,"PRINT%ATOMIC_COORDINATES%UNIT",c_val=unit_str)
+    conv = cp_unit_from_cp2k(1.0_dp,TRIM(unit_str))
     CALL uppercase(unit_str)
     IF (iw > 0) THEN
       WRITE (UNIT=iw,FMT="(/,/,T2,A)")&
@@ -548,8 +525,7 @@ CONTAINS
         IF (ASSOCIATED(shell_kind)) THEN
           CALL get_shell(shell=shell_kind,&
                          charge_core=qcore,&
-                         charge_shell=qshell,&
-                         error=error)
+                         charge_shell=qshell)
           qeff = qcore + qshell
         END IF
         WRITE (UNIT=iw,&
@@ -561,7 +537,7 @@ CONTAINS
     END IF
 
     CALL cp_print_key_finished_output(iw,logger,subsys_section,&
-         "PRINT%ATOMIC_COORDINATES", error=error)
+         "PRINT%ATOMIC_COORDINATES")
 
   END SUBROUTINE write_fist_particle_coordinates
 
@@ -571,12 +547,11 @@ CONTAINS
 !> \param qs_kind_set ...
 !> \param subsys_section ...
 !> \param label ...
-!> \param error ...
 !> \date    05.06.2000
 !> \author  MK
 !> \version 1.0
 ! *****************************************************************************
-  SUBROUTINE write_qs_particle_coordinates(particle_set,qs_kind_set,subsys_section,label,error)
+  SUBROUTINE write_qs_particle_coordinates(particle_set,qs_kind_set,subsys_section,label)
 
     TYPE(particle_type), DIMENSION(:), &
       POINTER                                :: particle_set
@@ -584,7 +559,6 @@ CONTAINS
       POINTER                                :: qs_kind_set
     TYPE(section_vals_type), POINTER         :: subsys_section
     CHARACTER(LEN=*), INTENT(IN)             :: label
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: &
       routineN = 'write_qs_particle_coordinates', &
@@ -600,12 +574,12 @@ CONTAINS
     CALL timeset(routineN,handle)
 
     NULLIFY(logger)
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
     iw = cp_print_key_unit_nr(logger,subsys_section,&
-         "PRINT%ATOMIC_COORDINATES",extension=".coordLog",error=error)
+         "PRINT%ATOMIC_COORDINATES",extension=".coordLog")
 
-    CALL section_vals_val_get(subsys_section,"PRINT%ATOMIC_COORDINATES%UNIT",c_val=unit_str,error=error)
-    conv = cp_unit_from_cp2k(1.0_dp,TRIM(unit_str),error=error)
+    CALL section_vals_val_get(subsys_section,"PRINT%ATOMIC_COORDINATES%UNIT",c_val=unit_str)
+    conv = cp_unit_from_cp2k(1.0_dp,TRIM(unit_str))
     IF (iw>0) THEN
       WRITE (UNIT=iw,FMT="(/,/,T2,A)")&
         "MODULE "//TRIM(label)//":  ATOMIC COORDINATES IN "//TRIM(unit_str)
@@ -630,7 +604,7 @@ CONTAINS
     END IF
 
     CALL cp_print_key_finished_output(iw,logger,subsys_section,&
-         "PRINT%ATOMIC_COORDINATES", error=error)
+         "PRINT%ATOMIC_COORDINATES")
 
     CALL timestop(handle)
 
@@ -641,27 +615,24 @@ CONTAINS
 !> \param particle_set ...
 !> \param cell ...
 !> \param subsys_section ...
-!> \param error ...
 !> \date    06.10.2000
 !> \author  Matthias Krack
 !> \version 1.0
 ! *****************************************************************************
-  SUBROUTINE write_particle_distances(particle_set,cell,subsys_section,error)
+  SUBROUTINE write_particle_distances(particle_set,cell,subsys_section)
 
     TYPE(particle_type), DIMENSION(:), &
       POINTER                                :: particle_set
     TYPE(cell_type), POINTER                 :: cell
     TYPE(section_vals_type), POINTER         :: subsys_section
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'write_particle_distances', &
       routineP = moduleN//':'//routineN
 
     CHARACTER(LEN=default_string_length)     :: unit_str
     INTEGER                                  :: handle, iatom, iw, jatom, &
-                                                natom, stat
+                                                natom
     INTEGER, DIMENSION(3)                    :: periodic
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: conv, dab
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :)                        :: distance_matrix
@@ -670,19 +641,17 @@ CONTAINS
 
     CALL timeset(routineN,handle)
 
-    failure = .FALSE.
     NULLIFY(logger)
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
     iw = cp_print_key_unit_nr(logger,subsys_section,&
-         "PRINT%INTERATOMIC_DISTANCES",extension=".distLog",error=error)
+         "PRINT%INTERATOMIC_DISTANCES",extension=".distLog")
 
-    CALL section_vals_val_get(subsys_section,"PRINT%INTERATOMIC_DISTANCES%UNIT",c_val=unit_str,error=error)
-    conv = cp_unit_from_cp2k(1.0_dp,TRIM(unit_str),error=error)
+    CALL section_vals_val_get(subsys_section,"PRINT%INTERATOMIC_DISTANCES%UNIT",c_val=unit_str)
+    conv = cp_unit_from_cp2k(1.0_dp,TRIM(unit_str))
     IF (iw>0) THEN
        CALL get_cell(cell=cell, periodic=periodic)
        natom = SIZE(particle_set)
-       ALLOCATE (distance_matrix(natom,natom),STAT=stat)
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+       ALLOCATE (distance_matrix(natom,natom))
        distance_matrix(:,:) = 0.0_dp
        DO iatom=1,natom
           DO jatom=iatom+1,natom
@@ -698,11 +667,11 @@ CONTAINS
        WRITE (UNIT=iw,FMT="(/,/,T2,A)")&
             "INTERATOMIC DISTANCES IN "//TRIM(unit_str)
 
-       CALL write_particle_matrix(distance_matrix,particle_set,iw,error=error)
+       CALL write_particle_matrix(distance_matrix,particle_set,iw)
     END IF
 
     CALL cp_print_key_finished_output(iw,logger,subsys_section,&
-         "PRINT%INTERATOMIC_DISTANCES", error=error)
+         "PRINT%INTERATOMIC_DISTANCES")
 
     CALL timestop(handle)
 
@@ -715,25 +684,21 @@ CONTAINS
 !> \param iw ...
 !> \param el_per_part ...
 !> \param Ilist ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE write_particle_matrix(matrix,particle_set,iw,el_per_part,Ilist,error)
+  SUBROUTINE write_particle_matrix(matrix,particle_set,iw,el_per_part,Ilist)
     REAL(KIND=dp), DIMENSION(:, :)           :: matrix
     TYPE(particle_type), DIMENSION(:), &
       POINTER                                :: particle_set
     INTEGER, INTENT(IN)                      :: iw
     INTEGER, INTENT(IN), OPTIONAL            :: el_per_part
     INTEGER, DIMENSION(:), OPTIONAL, POINTER :: Ilist
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=2)                         :: element_symbol
     INTEGER                                  :: from, i, iatom, icol, jatom, &
                                                 katom, my_el_per_part, natom, &
                                                 to
     INTEGER, DIMENSION(:), POINTER           :: my_list
-    LOGICAL                                  :: failure
 
-    failure = .FALSE.
     my_el_per_part = 1
     IF (PRESENT(el_per_part)) my_el_per_part = el_per_part
     IF (PRESENT(Ilist)) THEN
@@ -776,66 +741,60 @@ CONTAINS
 !> \param particle_set ...
 !> \param cell ...
 !> \param input_section ...
-!> \param error ...
 !> \date    11.03.04
 !> \par History
 !>          Recovered (23.03.06,MK)
 !> \author  MK
 !> \version 1.0
 ! *****************************************************************************
-  SUBROUTINE write_structure_data(particle_set,cell,input_section,error)
+  SUBROUTINE write_structure_data(particle_set,cell,input_section)
     TYPE(particle_type), DIMENSION(:), &
       POINTER                                :: particle_set
     TYPE(cell_type), POINTER                 :: cell
     TYPE(section_vals_type), POINTER         :: input_section
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'write_structure_data', &
       routineP = moduleN//':'//routineN
 
     CHARACTER(LEN=default_string_length)     :: string, unit_str
-    INTEGER                                  :: handle, i, i_rep, istat, iw, &
-                                                n, n_rep, n_vals, natom, &
+    INTEGER                                  :: handle, i, i_rep, iw, n, &
+                                                n_rep, n_vals, natom, &
                                                 new_size, old_size, wrk2(2), &
                                                 wrk3(3), wrk4(4)
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: work
     INTEGER, DIMENSION(:), POINTER           :: atomic_indices, index_list
-    LOGICAL                                  :: failure, unique
+    LOGICAL                                  :: unique
     REAL(KIND=dp)                            :: conv, dab
     REAL(KIND=dp), DIMENSION(3)              :: r, rab, rbc, rcd, s
     TYPE(cp_logger_type), POINTER            :: logger
     TYPE(section_vals_type), POINTER         :: section
 
     CALL timeset(routineN,handle)
-    failure = .FALSE.
     NULLIFY (atomic_indices)
     NULLIFY (index_list)
     NULLIFY (logger)
     NULLIFY (section)
     string = ""
 
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
     iw = cp_print_key_unit_nr(logger=logger,&
                               basis_section=input_section,&
                               print_key_path="PRINT%STRUCTURE_DATA",&
-                              extension=".coordLog",&
-                              error=error)
+                              extension=".coordLog")
 
-    CALL section_vals_val_get(input_section,"PRINT%STRUCTURE_DATA%UNIT",c_val=unit_str,error=error)
-    conv = cp_unit_from_cp2k(1.0_dp,TRIM(unit_str),error=error)
+    CALL section_vals_val_get(input_section,"PRINT%STRUCTURE_DATA%UNIT",c_val=unit_str)
+    conv = cp_unit_from_cp2k(1.0_dp,TRIM(unit_str))
     CALL uppercase(unit_str)
     IF (iw > 0) THEN
        natom = SIZE(particle_set)
        section => section_vals_get_subs_vals(section_vals=input_section,&
-                                             subsection_name="PRINT%STRUCTURE_DATA",&
-                                             error=error)
+                                             subsection_name="PRINT%STRUCTURE_DATA")
 
       WRITE (UNIT=iw,FMT="(/,T2,A)") "REQUESTED STRUCTURE DATA"
       ! Print the requested atomic position vectors
       CALL section_vals_val_get(section_vals=section,&
                                 keyword_name="POSITION",&
-                                n_rep_val=n_rep,&
-                                error=error)
+                                n_rep_val=n_rep)
       IF (n_rep > 0) THEN
          WRITE (UNIT=iw,FMT="(/,T3,A,/)")&
           "Position vectors r(i) of the atoms i in "//TRIM(unit_str)
@@ -844,19 +803,16 @@ CONTAINS
             CALL section_vals_val_get(section_vals=section,&
                                       keyword_name="POSITION",&
                                       i_rep_val=i_rep,&
-                                      i_vals=atomic_indices,&
-                                      error=error)
+                                      i_vals=atomic_indices)
             n_vals = SIZE(atomic_indices)
             new_size = old_size + n_vals
             CALL reallocate(index_list,1,new_size)
             index_list(old_size+1:new_size) = atomic_indices(1:n_vals)
             old_size = new_size
          END DO
-         ALLOCATE (work(new_size),STAT=istat)
-         CPPostcondition((istat == 0),cp_failure_level,routineP,error,failure)
+         ALLOCATE (work(new_size))
          CALL sort(index_list,new_size,work)
-         DEALLOCATE (work,STAT=istat)
-         CPPostcondition((istat == 0),cp_failure_level,routineP,error,failure)
+         DEALLOCATE (work)
          DO i=1,new_size
             WRITE (UNIT=string,FMT="(A,I0,A)") "(",index_list(i),")"
             IF ((index_list(i) < 1).OR.(index_list(i) > natom)) THEN
@@ -871,15 +827,13 @@ CONTAINS
             WRITE (UNIT=iw,FMT="(T3,A,T20,A,3F13.6)")&
              "r"//TRIM(string),"=",pbc(particle_set(index_list(i))%r(1:3),cell)*conv
          END DO
-         DEALLOCATE (index_list,STAT=istat)
-         CPPostcondition((istat == 0),cp_failure_level,routineP,error,failure)
+         DEALLOCATE (index_list)
       END IF
 
       ! Print the requested atomic position vectors in scaled coordinates
       CALL section_vals_val_get(section_vals=section,&
                                 keyword_name="POSITION_SCALED",&
-                                n_rep_val=n_rep,&
-                                error=error)
+                                n_rep_val=n_rep)
       IF (n_rep > 0) THEN
          WRITE (UNIT=iw,FMT="(/,T3,A,/)")&
           "Position vectors s(i) of the atoms i in scaled coordinates"
@@ -888,19 +842,16 @@ CONTAINS
             CALL section_vals_val_get(section_vals=section,&
                                       keyword_name="POSITION_SCALED",&
                                       i_rep_val=i_rep,&
-                                      i_vals=atomic_indices,&
-                                      error=error)
+                                      i_vals=atomic_indices)
             n_vals = SIZE(atomic_indices)
             new_size = old_size + n_vals
             CALL reallocate(index_list,1,new_size)
             index_list(old_size+1:new_size) = atomic_indices(1:n_vals)
             old_size = new_size
          END DO
-         ALLOCATE (work(new_size),STAT=istat)
-         CPPostcondition((istat == 0),cp_failure_level,routineP,error,failure)
+         ALLOCATE (work(new_size))
          CALL sort(index_list,new_size,work)
-         DEALLOCATE (work,STAT=istat)
-         CPPostcondition((istat == 0),cp_failure_level,routineP,error,failure)
+         DEALLOCATE (work)
          DO i=1,new_size
             WRITE (UNIT=string,FMT="(A,I0,A)") "(",index_list(i),")"
             IF ((index_list(i) < 1).OR.(index_list(i) > natom)) THEN
@@ -917,15 +868,13 @@ CONTAINS
             WRITE (UNIT=iw,FMT="(T3,A,T20,A,3F13.6)")&
              "s"//TRIM(string),"=",s(1:3)
          END DO
-         DEALLOCATE (index_list,STAT=istat)
-         CPPostcondition((istat == 0),cp_failure_level,routineP,error,failure)
+         DEALLOCATE (index_list)
       END IF
 
       ! Print the requested distances
       CALL section_vals_val_get(section_vals=section,&
                                 keyword_name="DISTANCE",&
-                                n_rep_val=n,&
-                                error=error)
+                                n_rep_val=n)
       IF (n > 0) THEN
         WRITE (UNIT=iw,FMT="(/,T3,A,/)")&
           "Distance vector r(i,j) between the atom i and j in "//&
@@ -934,8 +883,7 @@ CONTAINS
           CALL section_vals_val_get(section_vals=section,&
                                     keyword_name="DISTANCE",&
                                     i_rep_val=i,&
-                                    i_vals=atomic_indices,&
-                                    error=error)
+                                    i_vals=atomic_indices)
           string = ""
           WRITE (UNIT=string,FMT="(A,2(I0,A))")&
             "(",atomic_indices(1),",",atomic_indices(2),")"
@@ -958,8 +906,7 @@ CONTAINS
       ! Print the requested angles
       CALL section_vals_val_get(section_vals=section,&
                                 keyword_name="ANGLE",&
-                                n_rep_val=n,&
-                                error=error)
+                                n_rep_val=n)
       IF (n > 0) THEN
         WRITE (UNIT=iw,FMT="(/,T3,A,/)")&
           "Angle a(i,j,k) between the atomic distance vectors r(j,i) and "//&
@@ -968,8 +915,7 @@ CONTAINS
           CALL section_vals_val_get(section_vals=section,&
                                     keyword_name="ANGLE",&
                                     i_rep_val=i,&
-                                    i_vals=atomic_indices,&
-                                    error=error)
+                                    i_vals=atomic_indices)
           string = ""
           WRITE (UNIT=string,FMT="(A,3(I0,A))")&
             "(",atomic_indices(1),",",atomic_indices(2),",",atomic_indices(3),")"
@@ -992,8 +938,7 @@ CONTAINS
       ! Print the requested dihedral angles
       CALL section_vals_val_get(section_vals=section,&
                                 keyword_name="DIHEDRAL_ANGLE",&
-                                n_rep_val=n,&
-                                error=error)
+                                n_rep_val=n)
       IF (n > 0) THEN
         WRITE (UNIT=iw,FMT="(/,T3,A,/)")&
           "Dihedral angle d(i,j,k,l) between the planes (i,j,k) and (j,k,l) "//&
@@ -1002,8 +947,7 @@ CONTAINS
           CALL section_vals_val_get(section_vals=section,&
                                     keyword_name="DIHEDRAL_ANGLE",&
                                     i_rep_val=i,&
-                                    i_vals=atomic_indices,&
-                                    error=error)
+                                    i_vals=atomic_indices)
           string = ""
           WRITE (UNIT=string,FMT="(A,4(I0,A))")&
             "(",atomic_indices(1),",",atomic_indices(2),",",&
@@ -1027,7 +971,7 @@ CONTAINS
       END IF
     END IF
     CALL cp_print_key_finished_output(iw,logger,input_section,&
-         "PRINT%STRUCTURE_DATA", error=error)
+         "PRINT%STRUCTURE_DATA")
 
     CALL timestop(handle)
 

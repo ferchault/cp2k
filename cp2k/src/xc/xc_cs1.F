@@ -14,9 +14,6 @@ MODULE xc_cs1
 
   
   USE kinds,                           ONLY: dp
-  USE termination,                     ONLY: stop_program
-  USE timings,                         ONLY: timeset,&
-                                             timestop
   USE xc_derivative_set_types,         ONLY: xc_derivative_set_type,&
                                              xc_dset_get_derivative
   USE xc_derivative_types,             ONLY: xc_derivative_get,&
@@ -26,6 +23,7 @@ MODULE xc_cs1
   USE xc_rho_set_types,                ONLY: xc_rho_set_get,&
                                              xc_rho_set_type
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -63,15 +61,12 @@ CONTAINS
 !> \param needs the components needed by this functional are set to
 !>        true (does not set the unneeded components to false)
 !> \param max_deriv ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 ! *****************************************************************************
-  SUBROUTINE cs1_lda_info(reference,shortform, needs, max_deriv, error)
+  SUBROUTINE cs1_lda_info(reference,shortform, needs, max_deriv)
     CHARACTER(LEN=*), INTENT(OUT), OPTIONAL  :: reference, shortform
     TYPE(xc_rho_cflags_type), &
       INTENT(inout), OPTIONAL                :: needs
     INTEGER, INTENT(out), OPTIONAL           :: max_deriv
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cs1_lda_info', &
       routineP = moduleN//':'//routineN
@@ -99,15 +94,12 @@ CONTAINS
 !> \param needs the components needed by this functional are set to
 !>        true (does not set the unneeded components to false)
 !> \param max_deriv ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 ! *****************************************************************************
-  SUBROUTINE cs1_lsd_info(reference,shortform, needs, max_deriv, error)
+  SUBROUTINE cs1_lsd_info(reference,shortform, needs, max_deriv)
     CHARACTER(LEN=*), INTENT(OUT), OPTIONAL  :: reference, shortform
     TYPE(xc_rho_cflags_type), &
       INTENT(inout), OPTIONAL                :: needs
     INTEGER, INTENT(out), OPTIONAL           :: max_deriv
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cs1_lsd_info', &
       routineP = moduleN//':'//routineN
@@ -155,20 +147,17 @@ CONTAINS
 !> \param rho_set ...
 !> \param deriv_set ...
 !> \param order ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE cs1_lda_eval (rho_set,deriv_set,order,error)
+  SUBROUTINE cs1_lda_eval (rho_set,deriv_set,order)
     TYPE(xc_rho_set_type), POINTER           :: rho_set
     TYPE(xc_derivative_set_type), POINTER    :: deriv_set
     INTEGER, INTENT(in)                      :: order
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cs1_lda_eval', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, m, npoints
     INTEGER, DIMENSION(:, :), POINTER        :: bo
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: epsilon_rho
     REAL(KIND=dp), DIMENSION(:, :, :), POINTER :: e_0, e_ndrho, &
       e_ndrho_ndrho, e_ndrho_ndrho_ndrho, e_rho, e_rho_ndrho, &
@@ -177,81 +166,74 @@ CONTAINS
     TYPE(xc_derivative_type), POINTER        :: deriv
 
     CALL timeset(routineN,handle)
-    failure=.FALSE.
     NULLIFY(bo,rho, rho13, grho, e_0,e_rho,e_ndrho,&
          e_rho_rho, e_rho_ndrho, e_ndrho_ndrho,&
          e_rho_rho_rho, e_rho_rho_ndrho, e_rho_ndrho_ndrho, &
          e_ndrho_ndrho_ndrho)
 
-    CPPrecondition(ASSOCIATED(rho_set),cp_failure_level,routineP,error,failure)
-    CPPrecondition(rho_set%ref_count>0,cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(deriv_set),cp_failure_level,routineP,error,failure)
-    CPPrecondition(deriv_set%ref_count>0,cp_failure_level,routineP,error,failure)
-    IF (.NOT. failure) THEN
-       CALL xc_rho_set_get(rho_set,rho_1_3=rho13,rho=rho,&
-            norm_drho=grho,local_bounds=bo,rho_cutoff=epsilon_rho,&
-            error=error)
-       npoints=(bo(2,1)-bo(1,1)+1)*(bo(2,2)-bo(1,2)+1)*(bo(2,3)-bo(1,3)+1)
-       m=ABS(order)
-       CALL cs1_init(epsilon_rho)
+    CPASSERT(ASSOCIATED(rho_set))
+    CPASSERT(rho_set%ref_count>0)
+    CPASSERT(ASSOCIATED(deriv_set))
+    CPASSERT(deriv_set%ref_count>0)
+    CALL xc_rho_set_get(rho_set,rho_1_3=rho13,rho=rho,&
+         norm_drho=grho,local_bounds=bo,rho_cutoff=epsilon_rho)
+    npoints=(bo(2,1)-bo(1,1)+1)*(bo(2,2)-bo(1,2)+1)*(bo(2,3)-bo(1,3)+1)
+    m=ABS(order)
+    CALL cs1_init(epsilon_rho)
 
-       IF ( order>=0 ) THEN
-          deriv => xc_dset_get_derivative(deriv_set,"",&
-               allocate_deriv=.TRUE., error=error)
-          CALL xc_derivative_get(deriv,deriv_data=e_0,error=error)
+    IF ( order>=0 ) THEN
+       deriv => xc_dset_get_derivative(deriv_set,"",&
+            allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=e_0)
 
-          CALL cs1_u_0 ( rho, grho, rho13, e_0,npoints, error)
-       END IF
-       IF ( order>=1 .OR. order==-1 ) THEN
-          deriv => xc_dset_get_derivative(deriv_set,"(rho)",&
-               allocate_deriv=.TRUE.,error=error)
-          CALL xc_derivative_get(deriv,deriv_data=e_rho,error=error)
-          deriv => xc_dset_get_derivative(deriv_set,"(norm_drho)",&
-               allocate_deriv=.TRUE.,error=error)
-          CALL xc_derivative_get(deriv,deriv_data=e_ndrho,error=error)
-
-          CALL cs1_u_1 ( rho, grho, rho13, e_rho, e_ndrho,&
-               npoints,error)
-       END IF
-       IF ( order>=2.OR.order==-2 ) THEN
-          deriv => xc_dset_get_derivative(deriv_set,"(rho)(rho)",&
-               allocate_deriv=.TRUE.,error=error)
-          CALL xc_derivative_get(deriv,deriv_data=e_rho_rho,error=error)
-          deriv => xc_dset_get_derivative(deriv_set,"(rho)(norm_drho)",&
-               allocate_deriv=.TRUE.,error=error)
-          CALL xc_derivative_get(deriv,deriv_data=e_rho_ndrho,error=error)
-          deriv => xc_dset_get_derivative(deriv_set,&
-               "(norm_drho)(norm_drho)", allocate_deriv=.TRUE.,error=error)
-          CALL xc_derivative_get(deriv,deriv_data=e_ndrho_ndrho,error=error)
-
-          CALL cs1_u_2 ( rho, grho, rho13, e_rho_rho, e_rho_ndrho, &
-               e_ndrho_ndrho, npoints, error )
-       END IF
-       IF ( order>=3.OR.order==-3 ) THEN
-          deriv => xc_dset_get_derivative(deriv_set,"(rho)(rho)(rho)",&
-               allocate_deriv=.TRUE.,error=error)
-          CALL xc_derivative_get(deriv,deriv_data=e_rho_rho_rho,error=error)
-          deriv => xc_dset_get_derivative(deriv_set,&
-               "(rho)(rho)(norm_drho)",allocate_deriv=.TRUE.,error=error)
-          CALL xc_derivative_get(deriv,deriv_data=e_rho_rho_ndrho,error=error)
-          deriv => xc_dset_get_derivative(deriv_set,&
-               "(rho)(norm_drho)(norm_drho)",allocate_deriv=.TRUE.,error=error)
-          CALL xc_derivative_get(deriv,deriv_data=e_rho_ndrho_ndrho,error=error)
-          deriv => xc_dset_get_derivative(deriv_set,&
-               "(norm_drho)(norm_drho)(norm_drho)", allocate_deriv=.TRUE.,&
-               error=error)
-          CALL xc_derivative_get(deriv,deriv_data=e_ndrho_ndrho_ndrho,error=error)
-
-          CALL cs1_u_3 ( rho, grho, rho13, e_rho_rho_rho, e_rho_rho_ndrho,&
-               e_rho_ndrho_ndrho, e_ndrho_ndrho_ndrho, npoints, error)
-       END IF
-       IF ( order>3.OR.order<-3) THEN
-          CALL cp_unimplemented_error(fromWhere=routineP, &
-               message="derivatives bigger than 3 not implemented", &
-               error=error, error_level=cp_failure_level)
-       END IF
-
+       CALL cs1_u_0 ( rho, grho, rho13, e_0,npoints)
     END IF
+    IF ( order>=1 .OR. order==-1 ) THEN
+       deriv => xc_dset_get_derivative(deriv_set,"(rho)",&
+            allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=e_rho)
+       deriv => xc_dset_get_derivative(deriv_set,"(norm_drho)",&
+            allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=e_ndrho)
+
+       CALL cs1_u_1 ( rho, grho, rho13, e_rho, e_ndrho,&
+            npoints)
+    END IF
+    IF ( order>=2.OR.order==-2 ) THEN
+       deriv => xc_dset_get_derivative(deriv_set,"(rho)(rho)",&
+            allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=e_rho_rho)
+       deriv => xc_dset_get_derivative(deriv_set,"(rho)(norm_drho)",&
+            allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=e_rho_ndrho)
+       deriv => xc_dset_get_derivative(deriv_set,&
+            "(norm_drho)(norm_drho)", allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=e_ndrho_ndrho)
+
+       CALL cs1_u_2 ( rho, grho, rho13, e_rho_rho, e_rho_ndrho, &
+            e_ndrho_ndrho, npoints)
+    END IF
+    IF ( order>=3.OR.order==-3 ) THEN
+       deriv => xc_dset_get_derivative(deriv_set,"(rho)(rho)(rho)",&
+            allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=e_rho_rho_rho)
+       deriv => xc_dset_get_derivative(deriv_set,&
+            "(rho)(rho)(norm_drho)",allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=e_rho_rho_ndrho)
+       deriv => xc_dset_get_derivative(deriv_set,&
+            "(rho)(norm_drho)(norm_drho)",allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=e_rho_ndrho_ndrho)
+       deriv => xc_dset_get_derivative(deriv_set,&
+            "(norm_drho)(norm_drho)(norm_drho)", allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=e_ndrho_ndrho_ndrho)
+
+       CALL cs1_u_3 ( rho, grho, rho13, e_rho_rho_rho, e_rho_rho_ndrho,&
+            e_rho_ndrho_ndrho, e_ndrho_ndrho_ndrho, npoints)
+    END IF
+    IF ( order>3.OR.order<-3) THEN
+       CPABORT("derivatives bigger than 3 not implemented")
+    END IF
+
     CALL timestop(handle)
   END SUBROUTINE cs1_lda_eval
 
@@ -260,20 +242,17 @@ CONTAINS
 !> \param rho_set ...
 !> \param deriv_set ...
 !> \param order ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE cs1_lsd_eval (rho_set,deriv_set,order,error)
+  SUBROUTINE cs1_lsd_eval (rho_set,deriv_set,order)
     TYPE(xc_rho_set_type), POINTER           :: rho_set
     TYPE(xc_derivative_set_type), POINTER    :: deriv_set
     INTEGER, INTENT(in)                      :: order
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cs1_lsd_eval', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, npoints
     INTEGER, DIMENSION(:, :), POINTER        :: bo
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: epsilon_rho
     REAL(KIND=dp), DIMENSION(:, :, :), &
       POINTER                                :: e_0, e_ndrhoa, e_ndrhob, &
@@ -283,52 +262,47 @@ CONTAINS
     TYPE(xc_derivative_type), POINTER        :: deriv
 
     CALL timeset(routineN,handle)
-    failure=.FALSE.
     NULLIFY(bo)
 
-    CPPrecondition(ASSOCIATED(rho_set),cp_failure_level,routineP,error,failure)
-    CPPrecondition(rho_set%ref_count>0,cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(deriv_set),cp_failure_level,routineP,error,failure)
-    CPPrecondition(deriv_set%ref_count>0,cp_failure_level,routineP,error,failure)
-    IF (.NOT. failure) THEN
-       CALL xc_rho_set_get(rho_set,rhoa=rhoa,rhob=rhob,&
-            rhoa_1_3=rhoa_1_3,rhob_1_3=rhob_1_3,&
-            norm_drhoa=norm_drhoa,norm_drhob=norm_drhob,&
-            local_bounds=bo,rho_cutoff=epsilon_rho, error=error)
-       npoints=(bo(2,1)-bo(1,1)+1)*(bo(2,2)-bo(1,2)+1)*(bo(2,3)-bo(1,3)+1)
-       CALL cs1_init(epsilon_rho)
+    CPASSERT(ASSOCIATED(rho_set))
+    CPASSERT(rho_set%ref_count>0)
+    CPASSERT(ASSOCIATED(deriv_set))
+    CPASSERT(deriv_set%ref_count>0)
+    CALL xc_rho_set_get(rho_set,rhoa=rhoa,rhob=rhob,&
+         rhoa_1_3=rhoa_1_3,rhob_1_3=rhob_1_3,&
+         norm_drhoa=norm_drhoa,norm_drhob=norm_drhob,&
+         local_bounds=bo,rho_cutoff=epsilon_rho)
+    npoints=(bo(2,1)-bo(1,1)+1)*(bo(2,2)-bo(1,2)+1)*(bo(2,3)-bo(1,3)+1)
+    CALL cs1_init(epsilon_rho)
 
-       IF ( order>=0 ) THEN
-          deriv => xc_dset_get_derivative(deriv_set,"",&
-               allocate_deriv=.TRUE., error=error)
-          CALL xc_derivative_get(deriv,deriv_data=e_0,error=error)
+    IF ( order>=0 ) THEN
+       deriv => xc_dset_get_derivative(deriv_set,"",&
+            allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=e_0)
 
-          CALL cs1_ss_0 ( rhoa, rhob, norm_drhoa, norm_drhob,&
-               rhoa_1_3, rhob_1_3, e_0,npoints,error)
-       END IF
-       IF ( order>=1.OR.order==-1 ) THEN
-          deriv => xc_dset_get_derivative(deriv_set,"(rhoa)",&
-               allocate_deriv=.TRUE.,error=error)
-          CALL xc_derivative_get(deriv,deriv_data=e_rhoa,error=error)
-          deriv => xc_dset_get_derivative(deriv_set,"(rhob)",&
-               allocate_deriv=.TRUE.,error=error)
-          CALL xc_derivative_get(deriv,deriv_data=e_rhob,error=error)
-          deriv => xc_dset_get_derivative(deriv_set,"(norm_drhoa)",&
-               allocate_deriv=.TRUE.,error=error)
-          CALL xc_derivative_get(deriv,deriv_data=e_ndrhoa,error=error)
-          deriv => xc_dset_get_derivative(deriv_set,"(norm_drhob)",&
-               allocate_deriv=.TRUE.,error=error)
-          CALL xc_derivative_get(deriv,deriv_data=e_ndrhob,error=error)
+       CALL cs1_ss_0 ( rhoa, rhob, norm_drhoa, norm_drhob,&
+            rhoa_1_3, rhob_1_3, e_0,npoints)
+    END IF
+    IF ( order>=1.OR.order==-1 ) THEN
+       deriv => xc_dset_get_derivative(deriv_set,"(rhoa)",&
+            allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=e_rhoa)
+       deriv => xc_dset_get_derivative(deriv_set,"(rhob)",&
+            allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=e_rhob)
+       deriv => xc_dset_get_derivative(deriv_set,"(norm_drhoa)",&
+            allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=e_ndrhoa)
+       deriv => xc_dset_get_derivative(deriv_set,"(norm_drhob)",&
+            allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=e_ndrhob)
 
-          CALL cs1_ss_1 ( rhoa, rhob, norm_drhoa, norm_drhob,&
-               rhoa_1_3, rhob_1_3, e_rhoa, e_rhob, e_ndrhoa, e_ndrhob,&
-               npoints,error)
-       END IF
-       IF ( order>1 .OR. order<1 ) THEN
-          CALL cp_unimplemented_error(fromWhere=routineP, &
-               message="derivatives bigger than 3 not implemented", &
-               error=error, error_level=cp_failure_level)
-       END IF
+       CALL cs1_ss_1 ( rhoa, rhob, norm_drhoa, norm_drhob,&
+            rhoa_1_3, rhob_1_3, e_rhoa, e_rhob, e_ndrhoa, e_ndrhob,&
+            npoints)
+    END IF
+    IF ( order>1 .OR. order<1 ) THEN
+       CPABORT("derivatives bigger than 3 not implemented")
     END IF
     CALL timestop(handle)
   END SUBROUTINE cs1_lsd_eval
@@ -340,15 +314,13 @@ CONTAINS
 !> \param r13 ...
 !> \param e_0 ...
 !> \param npoints ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE cs1_u_0 ( rho, grho, r13, e_0, npoints, error )
+  SUBROUTINE cs1_u_0 ( rho, grho, r13, e_0, npoints)
 
     REAL(KIND=dp), DIMENSION(*), INTENT(IN)  :: rho, grho, r13
     REAL(KIND=dp), DIMENSION(*), &
       INTENT(INOUT)                          :: e_0
     INTEGER, INTENT(in)                      :: npoints
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     INTEGER                                  :: ip
     REAL(KIND=dp)                            :: c2p, c3p, c4p, cp, dpv, F1, &
@@ -397,15 +369,13 @@ CONTAINS
 !> \param e_rho ...
 !> \param e_ndrho ...
 !> \param npoints ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE cs1_u_1 ( rho, grho, r13, e_rho, e_ndrho, npoints, error )
+  SUBROUTINE cs1_u_1 ( rho, grho, r13, e_rho, e_ndrho, npoints)
 
     REAL(KIND=dp), DIMENSION(*), INTENT(IN)  :: rho, grho, r13
     REAL(KIND=dp), DIMENSION(*), &
       INTENT(INOUT)                          :: e_rho, e_ndrho
     INTEGER, INTENT(in)                      :: npoints
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     INTEGER                                  :: ip
     REAL(KIND=dp)                            :: c2p, c3p, c4p, cp, dF1, dF3, &
@@ -461,17 +431,15 @@ CONTAINS
 !> \param e_rho_ndrho ...
 !> \param e_ndrho_ndrho ...
 !> \param npoints ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE cs1_u_2 ( rho, grho, r13, e_rho_rho, e_rho_ndrho, e_ndrho_ndrho,&
-       npoints, error)
+       npoints)
 
     REAL(KIND=dp), DIMENSION(*), INTENT(IN)  :: rho, grho, r13
     REAL(KIND=dp), DIMENSION(*), &
       INTENT(INOUT)                          :: e_rho_rho, e_rho_ndrho, &
                                                 e_ndrho_ndrho
     INTEGER, INTENT(in)                      :: npoints
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     INTEGER                                  :: ip
     REAL(KIND=dp)                            :: c2p, c3p, c4p, cp, d2F1, &
@@ -538,10 +506,9 @@ CONTAINS
 !> \param e_rho_ndrho_ndrho ...
 !> \param e_ndrho_ndrho_ndrho ...
 !> \param npoints ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE cs1_u_3 ( rho, grho, r13, e_rho_rho_rho, e_rho_rho_ndrho,&
-       e_rho_ndrho_ndrho, e_ndrho_ndrho_ndrho, npoints, error)
+       e_rho_ndrho_ndrho, e_ndrho_ndrho_ndrho, npoints)
 
     REAL(KIND=dp), DIMENSION(*), INTENT(IN)  :: rho, grho, r13
     REAL(KIND=dp), DIMENSION(*), &
@@ -550,7 +517,6 @@ CONTAINS
                                                 e_rho_ndrho_ndrho, &
                                                 e_ndrho_ndrho_ndrho
     INTEGER, INTENT(in)                      :: npoints
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     INTEGER                                  :: ip
     REAL(KIND=dp) :: c2p, c3p, c4p, cp, d2rgF2, d2rgF4, d3F1, d3F3, d3gF2, &
@@ -650,17 +616,15 @@ CONTAINS
 !> \param r13b ...
 !> \param e_0 ...
 !> \param npoints ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE cs1_ss_0 ( rhoa, rhob, grhoa, grhob, r13a, r13b, e_0,&
-       npoints,error)
+       npoints)
 
     REAL(KIND=dp), DIMENSION(*), INTENT(IN)  :: rhoa, rhob, grhoa, grhob, &
                                                 r13a, r13b
     REAL(KIND=dp), DIMENSION(*), &
       INTENT(INOUT)                          :: e_0
     INTEGER, INTENT(in)                      :: npoints
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cs1_ss_0', &
       routineP = moduleN//':'//routineN
@@ -670,12 +634,9 @@ CONTAINS
                                                 oca, ocb, oda, odb, r3a, r3b, &
                                                 ra, rb, xa, xb
 
-!FM IF ( .NOT. debug_flag ) CALL stop_program(routineN,moduleN,__LINE__,"Routine not tested")
+!FM IF ( .NOT. debug_flag ) CPABORT("Routine not tested")
 
-    CALL cp_assert(.FALSE.,cp_warning_level, cp_assertion_failed,routineP,&
-         "not tested!"//&
-         CPSourceFileRef,&
-         error)
+    CPWARN("not tested!")
 
     !$omp parallel do default(none) &
     !$omp             shared(npoints, rhoa, eps_rho, r13a, grhoa, rhob) &
@@ -733,10 +694,9 @@ CONTAINS
 !> \param e_ndrhoa ...
 !> \param e_ndrhob ...
 !> \param npoints ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE cs1_ss_1 ( rhoa, rhob, grhoa, grhob, r13a, r13b, e_rhoa,&
-       e_rhob, e_ndrhoa, e_ndrhob, npoints, error )
+       e_rhob, e_ndrhoa, e_ndrhob, npoints)
 
     REAL(KIND=dp), DIMENSION(*), INTENT(IN)  :: rhoa, rhob, grhoa, grhob, &
                                                 r13a, r13b
@@ -744,7 +704,6 @@ CONTAINS
       INTENT(INOUT)                          :: e_rhoa, e_rhob, e_ndrhoa, &
                                                 e_ndrhob
     INTEGER, INTENT(in)                      :: npoints
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'cs1_ss_1', &
       routineP = moduleN//':'//routineN
@@ -755,10 +714,7 @@ CONTAINS
                                                 ocb, oda, odb, r3a, r3b, ra, &
                                                 rb
 
-    CALL cp_assert(.FALSE.,cp_warning_level, cp_assertion_failed,routineP,&
-         "not tested!"//&
-         CPSourceFileRef,&
-         error)
+    CPWARN("not tested!")
 
     !$omp parallel do default(none) &
     !$omp             shared(npoints, rhoa, eps_rho, r13a, grhoa, rhob) &

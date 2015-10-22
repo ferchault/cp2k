@@ -17,9 +17,9 @@ MODULE gamma
                                              dp_size
   USE mathconstants,                   ONLY: ifac,&
                                              pi
-  USE termination,                     ONLY: stop_memory,&
-                                             stop_program
+  USE termination,                     ONLY: stop_memory
 #include "cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -76,15 +76,15 @@ CONTAINS
     REAL(KIND=dp)                            :: t
 
     IF (current_nmax > -1) THEN
-      CALL stop_program(routineN,moduleN,__LINE__,&
-                        "An incomplete Gamma function table is already "//&
-                        " allocated. Use the init routine for an update")
+      CALL cp_abort(__LOCATION__,&
+           "An incomplete Gamma function table is already "//&
+           " allocated. Use the init routine for an update")
     END IF
 
     IF (nmax < 0) THEN
-      CALL stop_program(routineN,moduleN,__LINE__,&
-                        "A negative n value for the initialization of the "//&
-                        "incomplete Gamma function is invalid")
+      CALL cp_abort(__LOCATION__,&
+           "A negative n value for the initialization of the "//&
+           "incomplete Gamma function is invalid")
     END IF
 
 !   *** Check arguments ***
@@ -93,7 +93,7 @@ CONTAINS
         (tmin < 0.0_dp).OR.&
         (tdelta <= 0.0_dp).OR.&
         (tmin > tmax)) THEN
-      CALL stop_program(routineN,moduleN,__LINE__,"Invalid arguments")
+      CPABORT("Invalid arguments")
     END IF
 
     n = nmax + 6
@@ -132,14 +132,9 @@ CONTAINS
     CHARACTER(len=*), PARAMETER :: routineN = 'deallocate_md_ftable', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: istat
-
     IF (current_nmax > -1) THEN
 
-      DEALLOCATE (ftable,STAT=istat)
-      IF (istat /= 0) THEN
-        CALL stop_memory(routineN,moduleN,__LINE__,"ftable")
-      END IF
+      DEALLOCATE (ftable)
 
       current_nmax = -1
 
@@ -513,8 +508,7 @@ CONTAINS
 
 !           *** No convergence with kmax iterations ***
 
-            CALL stop_program(routineN,moduleN,__LINE__,&
-                              "Maximum number of iterations reached")
+            CPABORT("Maximum number of iterations reached")
 
           ELSE
 
@@ -567,9 +561,9 @@ CONTAINS
       routineP = moduleN//':'//routineN
 
     IF (nmax < 0) THEN
-      CALL stop_program(routineN,moduleN,__LINE__,&
-                        "A negative n value for the initialization of the "//&
-                        "incomplete Gamma function is invalid")
+      CALL cp_abort(__LOCATION__,&
+           "A negative n value for the initialization of the "//&
+           "incomplete Gamma function is invalid")
     END IF
 
 !   *** Check, if the current initialization is sufficient ***

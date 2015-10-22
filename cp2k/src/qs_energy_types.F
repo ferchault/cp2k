@@ -15,11 +15,9 @@ MODULE qs_energy_types
   USE kinds,                           ONLY: dp,&
                                              dp_size,&
                                              int_size
-  USE termination,                     ONLY: stop_memory,&
-                                             stop_program
-  USE timings,                         ONLY: timeset,&
-                                             timestop
+  USE termination,                     ONLY: stop_memory
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -125,20 +123,15 @@ CONTAINS
     CHARACTER(len=*), PARAMETER :: routineN = 'deallocate_qs_energy', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: istat
-
     IF (ASSOCIATED(qs_energy)) THEN
       IF (ASSOCIATED(qs_energy%ddapc_restraint)) THEN
-        DEALLOCATE (qs_energy%ddapc_restraint,STAT=istat)
-        IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-                                         "qs_energy%ddapc_restraint")
+        DEALLOCATE (qs_energy%ddapc_restraint)
       END IF
-      DEALLOCATE (qs_energy,STAT=istat)
-      IF (istat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,"qs_energy")
+      DEALLOCATE (qs_energy)
     ELSE
-      CALL stop_program(routineN,moduleN,__LINE__,&
-                        "The qs_energy pointer is not associated "//&
-                        "and cannot be deallocated")
+      CALL cp_abort(__LOCATION__,&
+           "The qs_energy pointer is not associated "//&
+           "and cannot be deallocated")
     END IF
 
   END SUBROUTINE deallocate_qs_energy
@@ -206,9 +199,9 @@ CONTAINS
       END IF
       qs_energy%ddapc_restraint(:) = 0.0_dp
     ELSE
-      CALL stop_program(routineN,moduleN,__LINE__,&
-                        "The qs_energy pointer is not associated "//&
-                        "and cannot be initialised")
+      CALL cp_abort(__LOCATION__,&
+           "The qs_energy pointer is not associated "//&
+           "and cannot be initialised")
     END IF
 
   END SUBROUTINE init_qs_energy

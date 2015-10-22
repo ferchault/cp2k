@@ -22,9 +22,8 @@ MODULE mc_misc
        mc_moves_p_type, mc_moves_type, mc_simpar_type
   USE physcon,                         ONLY: angstrom
   USE termination,                     ONLY: stop_memory
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "../../common/cp_common_uses.f90"
+#include "../../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -86,16 +85,14 @@ SUBROUTINE mc_averages_release ( averages  )
     CHARACTER(len=*), PARAMETER :: routineN = 'mc_averages_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: handle, stat
+    INTEGER                                  :: handle
 
 ! begin the timing of the subroutine
 
       CALL timeset(routineN,handle)
 
 ! deallocate
-      DEALLOCATE (averages,stat=stat)
-      IF (stat /= 0) CALL stop_memory(routineN,moduleN,__LINE__,&
-                                     "averages")
+      DEALLOCATE (averages)
 
       NULLIFY(averages)
 

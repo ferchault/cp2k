@@ -22,8 +22,6 @@ MODULE xc_vwn
   USE input_section_types,             ONLY: section_vals_type,&
                                              section_vals_val_get
   USE kinds,                           ONLY: dp
-  USE timings,                         ONLY: timeset,&
-                                             timestop
   USE xc_derivative_set_types,         ONLY: xc_derivative_set_type,&
                                              xc_dset_get_derivative
   USE xc_derivative_types,             ONLY: xc_derivative_get,&
@@ -36,6 +34,7 @@ MODULE xc_vwn
   USE xc_rho_set_types,                ONLY: xc_rho_set_get,&
                                              xc_rho_set_type
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -59,21 +58,18 @@ CONTAINS
 !> \brief ...
 !> \param cutoff ...
 !> \param vwn_params ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE vwn_init ( cutoff, vwn_params, error )
+  SUBROUTINE vwn_init ( cutoff, vwn_params)
 
     REAL(KIND=dp), INTENT(IN)                :: cutoff
     TYPE(section_vals_type), POINTER         :: vwn_params
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'vwn_init', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: TYPE
-    LOGICAL                                  :: failure
 
-    CALL section_vals_val_get(vwn_params,"functional_type",i_val=TYPE,error=error)
+    CALL section_vals_val_get(vwn_params,"functional_type",i_val=TYPE)
     eps_rho = cutoff
     CALL set_util ( cutoff )
 
@@ -101,9 +97,7 @@ CONTAINS
           ca  = 13.0045_dp
           x0a = -0.00475840_dp
        CASE DEFAULT
-         failure = .FALSE.
-         CALL cp_assert( .FALSE. , cp_failure_level,cp_assertion_failed,routineP,&
-                        " Only functionals VWN3 and VWN5 are supported" ,error,failure)
+         CPABORT(" Only functionals VWN3 and VWN5 are supported")
 
     END SELECT
 
@@ -115,14 +109,12 @@ CONTAINS
 !> \param shortform ...
 !> \param needs ...
 !> \param max_deriv ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE vwn_lda_info ( reference, shortform, needs, max_deriv, error)
+  SUBROUTINE vwn_lda_info ( reference, shortform, needs, max_deriv)
     CHARACTER(LEN=*), INTENT(OUT), OPTIONAL  :: reference, shortform
     TYPE(xc_rho_cflags_type), &
       INTENT(inout), OPTIONAL                :: needs
     INTEGER, INTENT(out), OPTIONAL           :: max_deriv
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     IF ( PRESENT ( reference ) ) THEN
        reference = "S. H. Vosko, L. Wilk and M. Nusair,"// &
@@ -144,21 +136,18 @@ CONTAINS
 !> \param deriv_set ...
 !> \param order ...
 !> \param vwn_params ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE vwn_lda_eval(rho_set,deriv_set,order,vwn_params,error)
+  SUBROUTINE vwn_lda_eval(rho_set,deriv_set,order,vwn_params)
     TYPE(xc_rho_set_type), POINTER           :: rho_set
     TYPE(xc_derivative_set_type), POINTER    :: deriv_set
     INTEGER, INTENT(in)                      :: order
     TYPE(section_vals_type), POINTER         :: vwn_params
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'vwn_lda_eval', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: handle, npoints, stat
+    INTEGER                                  :: handle, npoints
     INTEGER, DIMENSION(:, :), POINTER        :: bo
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: epsilon_rho, sc
     REAL(KIND=dp), ALLOCATABLE, DIMENSION(:) :: x
     REAL(KIND=dp), DIMENSION(:, :, :), &
@@ -167,72 +156,63 @@ CONTAINS
     TYPE(xc_derivative_type), POINTER        :: deriv
 
     CALL timeset(routineN,handle)
-    failure=.FALSE.
     NULLIFY(bo)
 
-    CALL section_vals_val_get(vwn_params,"scale_c",r_val=sc,error=error)
+    CALL section_vals_val_get(vwn_params,"scale_c",r_val=sc)
 
-    CPPrecondition(ASSOCIATED(rho_set),cp_failure_level,routineP,error,failure)
-    CPPrecondition(rho_set%ref_count>0,cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(deriv_set),cp_failure_level,routineP,error,failure)
-    CPPrecondition(deriv_set%ref_count>0,cp_failure_level,routineP,error,failure)
-    IF (.NOT. failure) THEN
-       CALL xc_rho_set_get(rho_set,rho=rho,&
-            local_bounds=bo,rho_cutoff=epsilon_rho,&
-            error=error)
-       npoints=(bo(2,1)-bo(1,1)+1)*(bo(2,2)-bo(1,2)+1)*(bo(2,3)-bo(1,3)+1)
-       CALL vwn_init(epsilon_rho, vwn_params, error)
+    CPASSERT(ASSOCIATED(rho_set))
+    CPASSERT(rho_set%ref_count>0)
+    CPASSERT(ASSOCIATED(deriv_set))
+    CPASSERT(deriv_set%ref_count>0)
+    CALL xc_rho_set_get(rho_set,rho=rho,&
+         local_bounds=bo,rho_cutoff=epsilon_rho)
+    npoints=(bo(2,1)-bo(1,1)+1)*(bo(2,2)-bo(1,2)+1)*(bo(2,3)-bo(1,3)+1)
+    CALL vwn_init(epsilon_rho, vwn_params)
 
-       ALLOCATE ( x(npoints), STAT=stat )
-       CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-       CALL calc_srs_pw ( rho, x, npoints )
+    ALLOCATE ( x(npoints))
+    CALL calc_srs_pw ( rho, x, npoints )
 
-       IF (order>=1) THEN
-          deriv => xc_dset_get_derivative(deriv_set,"",&
-               allocate_deriv=.TRUE., error=error)
-          CALL xc_derivative_get(deriv,deriv_data=e_0,error=error)
-          deriv => xc_dset_get_derivative(deriv_set,"(rho)",&
-               allocate_deriv=.TRUE.,error=error)
-          CALL xc_derivative_get(deriv,deriv_data=e_rho,error=error)
+    IF (order>=1) THEN
+       deriv => xc_dset_get_derivative(deriv_set,"",&
+            allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=e_0)
+       deriv => xc_dset_get_derivative(deriv_set,"(rho)",&
+            allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=e_rho)
 
-          CALL vwn_lda_01 ( rho, x, e_0,e_rho,npoints, sc, error )
-       ELSEIF ( order>=0 ) THEN
-          deriv => xc_dset_get_derivative(deriv_set,"",&
-               allocate_deriv=.TRUE., error=error)
-          CALL xc_derivative_get(deriv,deriv_data=e_0,error=error)
+       CALL vwn_lda_01 ( rho, x, e_0,e_rho,npoints, sc)
+    ELSEIF ( order>=0 ) THEN
+       deriv => xc_dset_get_derivative(deriv_set,"",&
+            allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=e_0)
 
-          CALL vwn_lda_0 ( rho, x, e_0, npoints, sc, error )
-       ELSEIF ( order==-1 ) THEN
-          deriv => xc_dset_get_derivative(deriv_set,"(rho)",&
-               allocate_deriv=.TRUE.,error=error)
-          CALL xc_derivative_get(deriv,deriv_data=e_rho,error=error)
+       CALL vwn_lda_0 ( rho, x, e_0, npoints, sc)
+    ELSEIF ( order==-1 ) THEN
+       deriv => xc_dset_get_derivative(deriv_set,"(rho)",&
+            allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=e_rho)
 
-          CALL vwn_lda_1 ( rho, x, e_rho, npoints, sc, error )
-       END IF
-       IF ( order>=2.OR.order==-2 ) THEN
-          deriv => xc_dset_get_derivative(deriv_set,"(rho)(rho)",&
-               allocate_deriv=.TRUE.,error=error)
-          CALL xc_derivative_get(deriv,deriv_data=e_rho_rho,error=error)
-
-          CALL vwn_lda_2 ( rho, x, e_rho_rho, npoints, sc, error )
-       END IF
-       IF ( order>=3.OR.order==-3 ) THEN
-          deriv => xc_dset_get_derivative(deriv_set,"(rho)(rho)(rho)",&
-               allocate_deriv=.TRUE.,error=error)
-          CALL xc_derivative_get(deriv,deriv_data=e_rho_rho_rho,error=error)
-
-          CALL vwn_lda_3 ( rho, x, e_rho_rho_rho, npoints, sc,&
-               error)
-       END IF
-       IF ( order>3.OR.order<-3) THEN
-          CALL cp_unimplemented_error(fromWhere=routineP, &
-               message="derivatives bigger than 3 not implemented", &
-               error=error, error_level=cp_failure_level)
-       END IF
-
-       DEALLOCATE(x,stat=stat)
-       CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+       CALL vwn_lda_1 ( rho, x, e_rho, npoints, sc)
     END IF
+    IF ( order>=2.OR.order==-2 ) THEN
+       deriv => xc_dset_get_derivative(deriv_set,"(rho)(rho)",&
+            allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=e_rho_rho)
+
+       CALL vwn_lda_2 ( rho, x, e_rho_rho, npoints, sc)
+    END IF
+    IF ( order>=3.OR.order==-3 ) THEN
+       deriv => xc_dset_get_derivative(deriv_set,"(rho)(rho)(rho)",&
+            allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=e_rho_rho_rho)
+
+       CALL vwn_lda_3 ( rho, x, e_rho_rho_rho, npoints, sc)
+    END IF
+    IF ( order>3.OR.order<-3) THEN
+       CPABORT("derivatives bigger than 3 not implemented")
+    END IF
+
+    DEALLOCATE(x)
     CALL timestop(handle)
 
   END SUBROUTINE vwn_lda_eval
@@ -244,16 +224,14 @@ CONTAINS
 !> \param e_0 ...
 !> \param npoints ...
 !> \param sc ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE vwn_lda_0 ( rho, x, e_0, npoints, sc, error )
+  SUBROUTINE vwn_lda_0 ( rho, x, e_0, npoints, sc)
 
     REAL(KIND=dp), DIMENSION(*), INTENT(IN)  :: rho, x
     REAL(KIND=dp), DIMENSION(*), &
       INTENT(INOUT)                          :: e_0
     INTEGER, INTENT(in)                      :: npoints
     REAL(KIND=dp)                            :: sc
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     INTEGER                                  :: ip
     REAL(KIND=dp)                            :: at, dpx, ln1, ln2, px, px0, &
@@ -292,16 +270,14 @@ CONTAINS
 !> \param e_rho ...
 !> \param npoints ...
 !> \param sc ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE vwn_lda_1 ( rho, x, e_rho, npoints, sc, error )
+  SUBROUTINE vwn_lda_1 ( rho, x, e_rho, npoints, sc)
 
     REAL(KIND=dp), DIMENSION(*), INTENT(IN)  :: rho, x
     REAL(KIND=dp), DIMENSION(*), &
       INTENT(INOUT)                          :: e_rho
     INTEGER, INTENT(in)                      :: npoints
     REAL(KIND=dp)                            :: sc
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     INTEGER                                  :: ip
     REAL(KIND=dp)                            :: at, dat, dex, dln1, dln2, &
@@ -348,16 +324,14 @@ CONTAINS
 !> \param e_rho ...
 !> \param npoints ...
 !> \param sc ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE vwn_lda_01 ( rho, x, e_0, e_rho, npoints, sc, error )
+  SUBROUTINE vwn_lda_01 ( rho, x, e_0, e_rho, npoints, sc)
 
     REAL(KIND=dp), DIMENSION(*), INTENT(IN)  :: rho, x
     REAL(KIND=dp), DIMENSION(*), &
       INTENT(INOUT)                          :: e_0, e_rho
     INTEGER, INTENT(in)                      :: npoints
     REAL(KIND=dp)                            :: sc
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     INTEGER                                  :: ip
     REAL(KIND=dp)                            :: at, dat, dex, dln1, dln2, &
@@ -404,16 +378,14 @@ CONTAINS
 !> \param e_rho_rho ...
 !> \param npoints ...
 !> \param sc ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE vwn_lda_2 ( rho, x, e_rho_rho, npoints, sc, error )
+  SUBROUTINE vwn_lda_2 ( rho, x, e_rho_rho, npoints, sc)
 
     REAL(KIND=dp), DIMENSION(*), INTENT(IN)  :: rho, x
     REAL(KIND=dp), DIMENSION(*), &
       INTENT(INOUT)                          :: e_rho_rho
     INTEGER, INTENT(in)                      :: npoints
     REAL(KIND=dp)                            :: sc
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     INTEGER                                  :: ip
     REAL(KIND=dp)                            :: at, d2at, d2ex, d2ln1, d2ln2, &
@@ -466,16 +438,14 @@ CONTAINS
 !> \param e_rho_rho_rho ...
 !> \param npoints ...
 !> \param sc ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE vwn_lda_3 ( rho, x, e_rho_rho_rho, npoints, sc, error )
+  SUBROUTINE vwn_lda_3 ( rho, x, e_rho_rho_rho, npoints, sc)
 
     REAL(KIND=dp), DIMENSION(*), INTENT(IN)  :: rho, x
     REAL(KIND=dp), DIMENSION(*), &
       INTENT(INOUT)                          :: e_rho_rho_rho
     INTEGER, INTENT(in)                      :: npoints
     REAL(KIND=dp)                            :: sc
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     INTEGER                                  :: ip
     REAL(KIND=dp) :: at, ax, bx, cx, d2at, d2bx, d2dx, d2ex, d2ln1, d2ln2, &
@@ -538,21 +508,18 @@ CONTAINS
 !> \param deriv_set ...
 !> \param order ...
 !> \param vwn_params ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE vwn_lsd_eval(rho_set,deriv_set,order,vwn_params,error)
+  SUBROUTINE vwn_lsd_eval(rho_set,deriv_set,order,vwn_params)
     TYPE(xc_rho_set_type), POINTER           :: rho_set
     TYPE(xc_derivative_set_type), POINTER    :: deriv_set
     INTEGER, INTENT(in)                      :: order
     TYPE(section_vals_type), POINTER         :: vwn_params
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'vwn_lsd_eval', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: handle, npoints, stat, TYPE
+    INTEGER                                  :: handle, npoints, TYPE
     INTEGER, DIMENSION(:, :), POINTER        :: bo
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: epsilon_rho, sc
     REAL(KIND=dp), DIMENSION(:, :, :), &
       POINTER                                :: dummy, e_0, e_a, e_aa, e_aaa, &
@@ -561,140 +528,120 @@ CONTAINS
     TYPE(xc_derivative_type), POINTER        :: deriv
 
     CALL timeset(routineN,handle)
-    failure=.FALSE.
     NULLIFY(bo)
 
-    CALL section_vals_val_get(vwn_params,"scale_c",r_val=sc,error=error)
+    CALL section_vals_val_get(vwn_params,"scale_c",r_val=sc)
 
-    CPPrecondition(ASSOCIATED(rho_set),cp_failure_level,routineP,error,failure)
-    CPPrecondition(rho_set%ref_count>0,cp_failure_level,routineP,error,failure)
-    CPPrecondition(ASSOCIATED(deriv_set),cp_failure_level,routineP,error,failure)
-    CPPrecondition(deriv_set%ref_count>0,cp_failure_level,routineP,error,failure)
-    IF (.NOT. failure) THEN
-      CALL xc_rho_set_get(rho_set,rhoa=rhoa,rhob=rhob,&
-           local_bounds=bo,rho_cutoff=epsilon_rho,&
-           error=error)
-      npoints=(bo(2,1)-bo(1,1)+1)*(bo(2,2)-bo(1,2)+1)*(bo(2,3)-bo(1,3)+1)
-      CALL vwn_init(epsilon_rho, vwn_params, error)
+    CPASSERT(ASSOCIATED(rho_set))
+    CPASSERT(rho_set%ref_count>0)
+    CPASSERT(ASSOCIATED(deriv_set))
+    CPASSERT(deriv_set%ref_count>0)
+    CALL xc_rho_set_get(rho_set,rhoa=rhoa,rhob=rhob,&
+         local_bounds=bo,rho_cutoff=epsilon_rho)
+    npoints=(bo(2,1)-bo(1,1)+1)*(bo(2,2)-bo(1,2)+1)*(bo(2,3)-bo(1,3)+1)
+    CALL vwn_init(epsilon_rho, vwn_params)
 
-      IF (cp_debug) THEN
-        ALLOCATE(dummy(bo(1,1):bo(2,1),bo(1,2):bo(2,2),bo(1,3):bo(2,3)),stat=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-      ELSE
-        dummy=> rhoa
-      END IF
+    dummy=> rhoa
 
-      e_0 => dummy
-      e_a => dummy
-      e_b => dummy
-      e_aa => dummy
-      e_bb => dummy
-      e_ab => dummy
-      e_aaa => dummy
-      e_bbb => dummy
-      e_aab => dummy
-      e_abb => dummy
+    e_0 => dummy
+    e_a => dummy
+    e_b => dummy
+    e_aa => dummy
+    e_bb => dummy
+    e_ab => dummy
+    e_aaa => dummy
+    e_bbb => dummy
+    e_aab => dummy
+    e_abb => dummy
 
-      IF (order>=0) THEN
-        deriv => xc_dset_get_derivative(deriv_set,"",&
-              allocate_deriv=.TRUE., error=error)
-        CALL xc_derivative_get(deriv, deriv_data=e_0,error=error)
-      END IF
-      IF (order>=1.OR.order==-1) THEN
-        deriv => xc_dset_get_derivative(deriv_set,"(rhoa)",&
-              allocate_deriv=.TRUE.,error=error)
-        CALL xc_derivative_get(deriv,deriv_data=e_a,error=error)
-
-        deriv => xc_dset_get_derivative(deriv_set,"(rhob)",&
-              allocate_deriv=.TRUE.,error=error)
-         CALL xc_derivative_get(deriv,deriv_data=e_b,error=error)
-      END IF
-      IF (order>=2.OR.order==-2) THEN
-        deriv => xc_dset_get_derivative(deriv_set,"(rhoa)(rhoa)",&
-              allocate_deriv=.TRUE.,error=error)
-        CALL xc_derivative_get(deriv,deriv_data=e_aa,error=error)
-
-        deriv => xc_dset_get_derivative(deriv_set,"(rhob)(rhob)",&
-              allocate_deriv=.TRUE.,error=error)
-        CALL xc_derivative_get(deriv,deriv_data=e_bb,error=error)
-
-        deriv => xc_dset_get_derivative(deriv_set,"(rhoa)(rhob)",&
-              allocate_deriv=.TRUE.,error=error)
-        CALL xc_derivative_get(deriv,deriv_data=e_ab,error=error)
-      END IF
-      IF (order>=3.OR.order==-3) THEN
-        deriv => xc_dset_get_derivative(deriv_set,"(rhoa)(rhoa)(rhoa)",&
-              allocate_deriv=.TRUE.,error=error)
-        CALL xc_derivative_get(deriv,deriv_data=e_aaa,error=error)
-
-        deriv => xc_dset_get_derivative(deriv_set,"(rhob)(rhob)(rhob)",&
-              allocate_deriv=.TRUE.,error=error)
-        CALL xc_derivative_get(deriv,deriv_data=e_bbb,error=error)
-
-        deriv => xc_dset_get_derivative(deriv_set,"(rhoa)(rhoa)(rhob)",&
-              allocate_deriv=.TRUE.,error=error)
-        CALL xc_derivative_get(deriv,deriv_data=e_aab,error=error)
-
-        deriv => xc_dset_get_derivative(deriv_set,"(rhoa)(rhob)(rhob)",&
-              allocate_deriv=.TRUE.,error=error)
-        CALL xc_derivative_get(deriv,deriv_data=e_abb,error=error)
-
-      END IF
-      IF ( order>3.OR.order<-3) THEN
-        CALL cp_unimplemented_error(fromWhere=routineP, &
-             message="derivatives bigger than 3 not implemented", &
-             error=error, error_level=cp_failure_level)
-      END IF
-
-      CALL section_vals_val_get(vwn_params,"functional_type",i_val=TYPE,error=error)
-      SELECT CASE(TYPE)
-        CASE(do_vwn3)
-
-          !$omp parallel default(none) &
-          !$omp          shared(rhoa, rhob, e_0, e_a, e_b, e_aa, e_bb, e_ab) &
-          !$omp          shared(e_aaa, e_bbb, e_aab, e_abb, order, npoints) &
-          !$omp          shared(sc, error)
-
-          CALL vwn3_lsd_calc(&
-                 rhoa=rhoa, rhob=rhob, e_0=e_0, &
-                 e_a=e_a, e_b=e_b,&
-                 e_aa=e_aa, e_bb=e_bb,e_ab=e_ab,&
-                 e_aaa=e_aaa, e_bbb=e_bbb, e_aab=e_aab, e_abb=e_abb,&
-                 order=order, npoints=npoints, &
-                 sc=sc, error=error)
-
-          !$omp end parallel
-
-        CASE(do_vwn5)
-
-          !$omp parallel default(none) &
-          !$omp          shared(rhoa, rhob, e_0, e_a, e_b, e_aa, e_bb, e_ab) &
-          !$omp          shared(e_aaa, e_bbb, e_aab, e_abb, order, npoints) &
-          !$omp          shared(sc, error)
-
-          CALL vwn5_lsd_calc(&
-                 rhoa=rhoa, rhob=rhob, e_0=e_0, &
-                 e_a=e_a, e_b=e_b,&
-                 e_aa=e_aa, e_bb=e_bb,e_ab=e_ab,&
-                 e_aaa=e_aaa, e_bbb=e_bbb, e_aab=e_aab, e_abb=e_abb,&
-                 order=order, npoints=npoints, &
-                 sc=sc, error=error)
-
-          !$omp end parallel
-
-        CASE DEFAULT
-          failure = .FALSE.
-          CALL cp_assert( .FALSE. , cp_failure_level,cp_assertion_failed,routineP,&
-                        " Only functionals VWN3 and VWN5 are supported" ,error,failure)
-      END SELECT
-
-      IF (cp_debug) THEN
-        DEALLOCATE(dummy,stat=stat)
-        CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
-      ELSE
-        NULLIFY(dummy)
-      END IF
+    IF (order>=0) THEN
+      deriv => xc_dset_get_derivative(deriv_set,"",&
+            allocate_deriv=.TRUE.)
+      CALL xc_derivative_get(deriv, deriv_data=e_0)
     END IF
+    IF (order>=1.OR.order==-1) THEN
+      deriv => xc_dset_get_derivative(deriv_set,"(rhoa)",&
+            allocate_deriv=.TRUE.)
+      CALL xc_derivative_get(deriv,deriv_data=e_a)
+
+      deriv => xc_dset_get_derivative(deriv_set,"(rhob)",&
+            allocate_deriv=.TRUE.)
+       CALL xc_derivative_get(deriv,deriv_data=e_b)
+    END IF
+    IF (order>=2.OR.order==-2) THEN
+      deriv => xc_dset_get_derivative(deriv_set,"(rhoa)(rhoa)",&
+            allocate_deriv=.TRUE.)
+      CALL xc_derivative_get(deriv,deriv_data=e_aa)
+
+      deriv => xc_dset_get_derivative(deriv_set,"(rhob)(rhob)",&
+            allocate_deriv=.TRUE.)
+      CALL xc_derivative_get(deriv,deriv_data=e_bb)
+
+      deriv => xc_dset_get_derivative(deriv_set,"(rhoa)(rhob)",&
+            allocate_deriv=.TRUE.)
+      CALL xc_derivative_get(deriv,deriv_data=e_ab)
+    END IF
+    IF (order>=3.OR.order==-3) THEN
+      deriv => xc_dset_get_derivative(deriv_set,"(rhoa)(rhoa)(rhoa)",&
+            allocate_deriv=.TRUE.)
+      CALL xc_derivative_get(deriv,deriv_data=e_aaa)
+
+      deriv => xc_dset_get_derivative(deriv_set,"(rhob)(rhob)(rhob)",&
+            allocate_deriv=.TRUE.)
+      CALL xc_derivative_get(deriv,deriv_data=e_bbb)
+
+      deriv => xc_dset_get_derivative(deriv_set,"(rhoa)(rhoa)(rhob)",&
+            allocate_deriv=.TRUE.)
+      CALL xc_derivative_get(deriv,deriv_data=e_aab)
+
+      deriv => xc_dset_get_derivative(deriv_set,"(rhoa)(rhob)(rhob)",&
+            allocate_deriv=.TRUE.)
+      CALL xc_derivative_get(deriv,deriv_data=e_abb)
+
+    END IF
+    IF ( order>3.OR.order<-3) THEN
+      CPABORT("derivatives bigger than 3 not implemented")
+    END IF
+
+    CALL section_vals_val_get(vwn_params,"functional_type",i_val=TYPE)
+    SELECT CASE(TYPE)
+      CASE(do_vwn3)
+
+        !$omp parallel default(none) &
+        !$omp          shared(rhoa, rhob, e_0, e_a, e_b, e_aa, e_bb, e_ab) &
+        !$omp          shared(e_aaa, e_bbb, e_aab, e_abb, order, npoints) &
+        !$omp          shared(sc)
+
+        CALL vwn3_lsd_calc(&
+               rhoa=rhoa, rhob=rhob, e_0=e_0, &
+               e_a=e_a, e_b=e_b,&
+               e_aa=e_aa, e_bb=e_bb,e_ab=e_ab,&
+               e_aaa=e_aaa, e_bbb=e_bbb, e_aab=e_aab, e_abb=e_abb,&
+               order=order, npoints=npoints, &
+               sc=sc)
+
+        !$omp end parallel
+
+      CASE(do_vwn5)
+
+        !$omp parallel default(none) &
+        !$omp          shared(rhoa, rhob, e_0, e_a, e_b, e_aa, e_bb, e_ab) &
+        !$omp          shared(e_aaa, e_bbb, e_aab, e_abb, order, npoints) &
+        !$omp          shared(sc)
+
+        CALL vwn5_lsd_calc(&
+               rhoa=rhoa, rhob=rhob, e_0=e_0, &
+               e_a=e_a, e_b=e_b,&
+               e_aa=e_aa, e_bb=e_bb,e_ab=e_ab,&
+               e_aaa=e_aaa, e_bbb=e_bbb, e_aab=e_aab, e_abb=e_abb,&
+               order=order, npoints=npoints, &
+               sc=sc)
+
+        !$omp end parallel
+
+      CASE DEFAULT
+        CPABORT(" Only functionals VWN3 and VWN5 are supported")
+    END SELECT
 
     CALL timestop(handle)
 
@@ -717,10 +664,9 @@ CONTAINS
 !> \param order ...
 !> \param npoints ...
 !> \param sc ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE vwn3_lsd_calc ( rhoa, rhob, e_0, e_a, e_b, e_aa, e_bb, e_ab,&
-                            e_aaa, e_bbb, e_aab, e_abb, order, npoints, sc, error )
+                            e_aaa, e_bbb, e_aab, e_abb, order, npoints, sc)
 
     REAL(KIND=dp), DIMENSION(*), &
       INTENT(INOUT)                          :: rhoa, rhob, e_0, e_a, e_b, &
@@ -728,7 +674,6 @@ CONTAINS
                                                 e_bbb, e_aab, e_abb
     INTEGER, INTENT(in)                      :: order, npoints
     REAL(KIND=dp)                            :: sc
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     INTEGER                                  :: ip
     REAL(KIND=dp) :: ap, bp, cp, myrho, myrhoa, myrhob, Qf, Qp, t1, t10, &
@@ -1283,10 +1228,9 @@ CONTAINS
 !> \param order ...
 !> \param npoints ...
 !> \param sc ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE vwn5_lsd_calc ( rhoa, rhob, e_0, e_a, e_b, e_aa, e_bb, e_ab,&
-                            e_aaa, e_bbb, e_aab, e_abb, order, npoints, sc, error )
+                            e_aaa, e_bbb, e_aab, e_abb, order, npoints, sc)
 
     REAL(KIND=dp), DIMENSION(*), &
       INTENT(INOUT)                          :: rhoa, rhob, e_0, e_a, e_b, &
@@ -1294,7 +1238,6 @@ CONTAINS
                                                 e_bbb, e_aab, e_abb
     INTEGER, INTENT(in)                      :: order, npoints
     REAL(KIND=dp)                            :: sc
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     INTEGER                                  :: ip
     REAL(KIND=dp) :: ap, bp, cp, d2f0, myrho, myrhoa, myrhob, Qa, Qf, Qp, t1, &

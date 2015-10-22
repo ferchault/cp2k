@@ -9,6 +9,7 @@ MODULE beta_gamma_psi
   
   USE kinds,                           ONLY: dp
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
  IMPLICIT NONE
  PRIVATE
@@ -99,7 +100,7 @@ SELECT CASE(i)
   CASE(10)
     fn_val = MAXEXPONENT(1.0e0_dp)
   CASE DEFAULT
-    STOP "unknown case"
+    CPABORT("unknown case")
 END SELECT
 
 END FUNCTION ipmpar
@@ -1565,7 +1566,7 @@ GO TO 220
 130 w1 = bup(b0, a0, y0, x0, n, eps)
 b0 = b0 + n
 131 CALL bgrat (b0, a0, y0, x0, w1, eps, ierr1)
-IF (ierr1 > 0) STOP "Error in BGRAT"
+IF (ierr1 > 0) CPABORT("Error in BGRAT")
 w = 0.5e0_dp + (0.5e0_dp - w1)
 GO TO 220
 

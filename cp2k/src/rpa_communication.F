@@ -23,9 +23,8 @@ MODULE rpa_communication
                                              mp_wait,&
                                              mp_waitall
   USE mp2_types,                       ONLY: integ_mat_buffer_type
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -52,11 +51,10 @@ MODULE rpa_communication
 !> \param map_rec_size ...
 !> \param local_size_source ...
 !> \param para_env_RPA ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE initialize_buffer(fm_mat_source,fm_mat_dest,RPA_proc_map,buffer_rec,buffer_send,&
                                number_of_rec,number_of_send,&
-                               map_send_size,map_rec_size,local_size_source,para_env_RPA,error)
+                               map_send_size,map_rec_size,local_size_source,para_env_RPA)
     TYPE(cp_fm_type), POINTER                :: fm_mat_source, fm_mat_dest
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: RPA_proc_map
     TYPE(integ_mat_buffer_type), &
@@ -65,7 +63,6 @@ MODULE rpa_communication
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: map_send_size, map_rec_size
     INTEGER, ALLOCATABLE, DIMENSION(:, :)    :: local_size_source
     TYPE(cp_para_env_type), POINTER          :: para_env_RPA
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'initialize_buffer', &
       routineP = moduleN//':'//routineN
@@ -77,19 +74,16 @@ MODULE rpa_communication
       nrow_local_s, proc_receive, proc_send, proc_shift, rec_counter, &
       rec_local_col, rec_local_row, rec_pcol, rec_prow, ref_rec_pcol, &
       ref_rec_prow, send_counter, send_pcol, send_prow, size_rec_buffer, &
-      size_send_buffer, stat
+      size_send_buffer
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: index_counter, proc2counter
     INTEGER, DIMENSION(:), POINTER           :: col_indices_d, col_indices_s, &
                                                 row_indices_d, row_indices_s
-    LOGICAL                                  :: failure
 
     CALL timeset(routineN,handle)
-    failure=.FALSE.
 
     ! create the RPA proc_map
     IF(.NOT.(ALLOCATED(RPA_proc_map))) THEN
-      ALLOCATE(RPA_proc_map(-para_env_RPA%num_pe:2*para_env_RPA%num_pe-1),STAT=stat)
-      CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+      ALLOCATE(RPA_proc_map(-para_env_RPA%num_pe:2*para_env_RPA%num_pe-1))
       RPA_proc_map=0
       DO i=0,para_env_RPA%num_pe-1
         RPA_proc_map(i)=i
@@ -105,8 +99,7 @@ MODULE rpa_communication
                         row_indices=row_indices_s,&
                         col_indices=col_indices_s,&
                         nrow_block=nrow_block_s,&
-                        ncol_block=ncol_block_s,&
-                        error=error)
+                        ncol_block=ncol_block_s)
     myprow_s=fm_mat_source%matrix_struct%context%mepos(1)
     mypcol_s=fm_mat_source%matrix_struct%context%mepos(2)
     nprow_s =fm_mat_source%matrix_struct%context%num_pe(1)
@@ -119,24 +112,21 @@ MODULE rpa_communication
                         row_indices=row_indices_d,&
                         col_indices=col_indices_d,&
                         nrow_block=nrow_block_d,&
-                        ncol_block=ncol_block_d,&
-                        error=error)
+                        ncol_block=ncol_block_d)
     myprow_d=fm_mat_dest%matrix_struct%context%mepos(1)
     mypcol_d=fm_mat_dest%matrix_struct%context%mepos(2)
     nprow_d =fm_mat_dest%matrix_struct%context%num_pe(1)
     npcol_d =fm_mat_dest%matrix_struct%context%num_pe(2)
 
     ! 0) create the map for the local sizes
-    ALLOCATE(local_size_source(2,0:para_env_RPA%num_pe-1),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(local_size_source(2,0:para_env_RPA%num_pe-1))
     local_size_source=0
     local_size_source(1,para_env_RPA%mepos)=nrow_local_s
     local_size_source(2,para_env_RPA%mepos)=ncol_local_s
     CALL mp_sum(local_size_source,para_env_RPA%group)
 
     ! 1) loop over my local data and define a map for the proc to send data
-    ALLOCATE(map_send_size(0:para_env_RPA%num_pe-1),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(map_send_size(0:para_env_RPA%num_pe-1))
     map_send_size=0
     DO jjB=1, ncol_local_s
       j_global=col_indices_s(jjB)
@@ -152,8 +142,7 @@ MODULE rpa_communication
     END DO
 
     ! 2) loop over my local data of fm_mat_S and define a map for the proc from which rec data
-    ALLOCATE(map_rec_size(0:para_env_RPA%num_pe-1),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(map_rec_size(0:para_env_RPA%num_pe-1))
     map_rec_size=0
     DO jjB=1, ncol_local_d
       j_global=col_indices_d(jjB)
@@ -177,13 +166,11 @@ MODULE rpa_communication
       END IF
     END DO
 
-    ALLOCATE(buffer_send(number_of_send),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(buffer_send(number_of_send))
 
     ! 3.5) prepare the index map
     CALL timeset(routineN//"_bS",handle2)
-    ALLOCATE(proc2counter(0:para_env_RPA%num_pe-1),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(proc2counter(0:para_env_RPA%num_pe-1))
     proc2counter=0
     ! allocate buffer for sending
     send_counter=0
@@ -194,16 +181,14 @@ MODULE rpa_communication
       IF(map_send_size(proc_send)>0) THEN
         send_counter=send_counter+1
         ! prepare the sending buffer
-        ALLOCATE(buffer_send(send_counter)%indx(2,size_send_buffer),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(buffer_send(send_counter)%indx(2,size_send_buffer))
         buffer_send(send_counter)%indx=0
 
         proc2counter(proc_send)=send_counter
       END IF
     END DO
 
-    ALLOCATE(index_counter(0:para_env_RPA%num_pe-1),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(index_counter(0:para_env_RPA%num_pe-1))
     index_counter=0
     DO iiB=1, nrow_local_s
       i_global=row_indices_s(iiB)
@@ -236,8 +221,7 @@ MODULE rpa_communication
       END IF
     END DO
 
-    ALLOCATE(buffer_rec(number_of_rec),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(buffer_rec(number_of_rec))
 
     ! 4.5) prepare the index map
     CALL timeset(routineN//"_bR",handle2)
@@ -250,8 +234,7 @@ MODULE rpa_communication
       IF(map_rec_size(proc_receive)>0) THEN
         rec_counter=rec_counter+1
         ! allocate the auxilliary index structure
-        ALLOCATE(buffer_rec(rec_counter)%indx(2,size_rec_buffer),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(buffer_rec(rec_counter)%indx(2,size_rec_buffer))
         buffer_rec(rec_counter)%indx=0
 
         proc2counter(proc_receive)=rec_counter
@@ -323,26 +306,23 @@ MODULE rpa_communication
 !> \param RPA_proc_map ...
 !> \param buffer_rec ...
 !> \param buffer_send ...
-!> \param number_of_rec ...
 !> \param number_of_send ...
 !> \param map_send_size ...
 !> \param map_rec_size ...
 !> \param local_size_source ...
 !> \param para_env_RPA ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE fm_redistribute(fm_mat_source,fm_mat_dest,RPA_proc_map,buffer_rec,buffer_send,&
-                             number_of_rec,number_of_send,&
-                             map_send_size,map_rec_size,local_size_source,para_env_RPA,error)
+                             number_of_send,&
+                             map_send_size,map_rec_size,local_size_source,para_env_RPA)
     TYPE(cp_fm_type), POINTER                :: fm_mat_source, fm_mat_dest
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: RPA_proc_map
     TYPE(integ_mat_buffer_type), &
       ALLOCATABLE, DIMENSION(:)              :: buffer_rec, buffer_send
-    INTEGER                                  :: number_of_rec, number_of_send
+    INTEGER                                  :: number_of_send
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: map_send_size, map_rec_size
     INTEGER, ALLOCATABLE, DIMENSION(:, :)    :: local_size_source
     TYPE(cp_para_env_type), POINTER          :: para_env_RPA
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'fm_redistribute', &
       routineP = moduleN//':'//routineN
@@ -353,14 +333,12 @@ MODULE rpa_communication
       npcol_s, nprow_d, nprow_s, nrow_block_d, nrow_block_s, nrow_local_d, &
       nrow_local_s, proc_receive, proc_send, proc_shift, rec_counter, &
       rec_local_col, rec_local_row, rec_pcol, rec_prow, ref_rec_pcol, &
-      ref_rec_prow, send_counter, size_rec_buffer, size_send_buffer, stat
+      ref_rec_prow, send_counter, size_rec_buffer, size_send_buffer
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: req_send
     INTEGER, DIMENSION(:), POINTER           :: col_indices_d, col_indices_s, &
                                                 row_indices_d, row_indices_s
-    LOGICAL                                  :: failure
 
     CALL timeset(routineN,handle)
-    failure=.FALSE.
 
     ! get info for the source
     CALL cp_fm_get_info(matrix=fm_mat_source,&
@@ -369,8 +347,7 @@ MODULE rpa_communication
                         row_indices=row_indices_s,&
                         col_indices=col_indices_s,&
                         nrow_block=nrow_block_s,&
-                        ncol_block=ncol_block_s,&
-                        error=error)
+                        ncol_block=ncol_block_s)
     myprow_s=fm_mat_source%matrix_struct%context%mepos(1)
     mypcol_s=fm_mat_source%matrix_struct%context%mepos(2)
     nprow_s =fm_mat_source%matrix_struct%context%num_pe(1)
@@ -383,8 +360,7 @@ MODULE rpa_communication
                         row_indices=row_indices_d,&
                         col_indices=col_indices_d,&
                         nrow_block=nrow_block_d,&
-                        ncol_block=ncol_block_d,&
-                        error=error)
+                        ncol_block=ncol_block_d)
     myprow_d=fm_mat_dest%matrix_struct%context%mepos(1)
     mypcol_d=fm_mat_dest%matrix_struct%context%mepos(2)
     nprow_d =fm_mat_dest%matrix_struct%context%num_pe(1)
@@ -425,8 +401,7 @@ MODULE rpa_communication
       IF(map_rec_size(proc_receive)>0) THEN
         rec_counter=rec_counter+1
         ! prepare the buffer for receive
-        ALLOCATE(buffer_rec(rec_counter)%msg(size_rec_buffer),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(buffer_rec(rec_counter)%msg(size_rec_buffer))
         buffer_rec(rec_counter)%msg=0.0_dp
         buffer_rec(rec_counter)%proc=proc_receive
 
@@ -440,8 +415,7 @@ MODULE rpa_communication
     ! 2) prepare sending buffer
     CALL timeset(routineN//"_bS",handle2)
     ! allocate buffer for sending, fill the buffer, send the message
-    ALLOCATE(req_send(number_of_send),STAT=stat)
-    CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(req_send(number_of_send))
     send_counter=0
     DO proc_shift=1, para_env_RPA%num_pe-1
       proc_send=RPA_proc_map(para_env_RPA%mepos+proc_shift)
@@ -450,8 +424,7 @@ MODULE rpa_communication
       IF(map_send_size(proc_send)>0) THEN
         send_counter=send_counter+1
         ! allocate
-        ALLOCATE(buffer_send(send_counter)%msg(size_send_buffer),STAT=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+        ALLOCATE(buffer_send(send_counter)%msg(size_send_buffer))
         buffer_send(send_counter)%msg=0.0_dp
         buffer_send(send_counter)%proc=proc_send
     
@@ -532,28 +505,24 @@ MODULE rpa_communication
 !> \param map_send_size ...
 !> \param map_rec_size ...
 !> \param local_size_source ...
-!> \param error ...
 ! *****************************************************************************
   SUBROUTINE release_buffer(RPA_proc_map,buffer_rec,buffer_send,&
                             number_of_rec,number_of_send,&
-                            map_send_size,map_rec_size,local_size_source,error)
+                            map_send_size,map_rec_size,local_size_source)
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: RPA_proc_map
     TYPE(integ_mat_buffer_type), &
       ALLOCATABLE, DIMENSION(:)              :: buffer_rec, buffer_send
     INTEGER                                  :: number_of_rec, number_of_send
     INTEGER, ALLOCATABLE, DIMENSION(:)       :: map_send_size, map_rec_size
     INTEGER, ALLOCATABLE, DIMENSION(:, :)    :: local_size_source
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'release_buffer', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, rec_counter, &
                                                 send_counter
-    LOGICAL                                  :: failure
 
     CALL timeset(routineN,handle)
-    failure=.FALSE.
 
     IF(ALLOCATED(RPA_proc_map))   DEALLOCATE(RPA_proc_map)
     IF(ALLOCATED(map_send_size))  DEALLOCATE(map_send_size)

@@ -48,10 +48,8 @@ MODULE qs_linres_nmr_utils
                                              nmr_env_type
   USE qs_matrix_pools,                 ONLY: qs_matrix_pools_type
   USE scf_control_types,               ONLY: scf_control_type
-  USE termination,                     ONLY: stop_program
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -66,28 +64,25 @@ CONTAINS
 !> \brief Initialize the nmr environment
 !> \param nmr_env ...
 !> \param qs_env ...
-!> \param error ...
 !> \par History
 !>      07.2006 created [MI]
 !> \author MI
 ! *****************************************************************************
-  SUBROUTINE nmr_env_init(nmr_env,qs_env,error)
+  SUBROUTINE nmr_env_init(nmr_env,qs_env)
     !
     TYPE(nmr_env_type)                       :: nmr_env
     TYPE(qs_environment_type), POINTER       :: qs_env
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'nmr_env_init', &
       routineP = moduleN//':'//routineN
 
     CHARACTER(LEN=2)                         :: label
     CHARACTER(LEN=default_path_length)       :: nics_file_name
-    INTEGER                                  :: handle, ini, ir, istat, j, &
-                                                n_mo(2), n_rep, nao, &
-                                                nat_print, natom, nmoloc, &
-                                                nspins, output_unit
+    INTEGER                                  :: handle, ini, ir, j, n_mo(2), &
+                                                n_rep, nao, nat_print, natom, &
+                                                nmoloc, nspins, output_unit
     INTEGER, DIMENSION(:), POINTER           :: bounds, list
-    LOGICAL                                  :: failure, gapw, my_end
+    LOGICAL                                  :: gapw, my_end
     TYPE(atomic_kind_type), DIMENSION(:), &
       POINTER                                :: atomic_kind_set
     TYPE(cell_type), POINTER                 :: cell
@@ -106,7 +101,6 @@ CONTAINS
 
     CALL timeset(routineN,handle)
 
-    failure = .FALSE.
 
     NULLIFY(atomic_kind_set, cell, dft_control, linres_control, scf_control)
     NULLIFY(logger, mpools, nmr_section, particle_set)
@@ -116,14 +110,14 @@ CONTAINS
     nao = 0
     nmoloc = 0
 
-    logger => cp_error_get_logger(error)
-    lr_section => section_vals_get_subs_vals(qs_env%input,"PROPERTIES%LINRES",error=error)
+    logger => cp_get_default_logger()
+    lr_section => section_vals_get_subs_vals(qs_env%input,"PROPERTIES%LINRES")
 
     output_unit = cp_print_key_unit_nr(logger,lr_section,"PRINT%PROGRAM_RUN_INFO",&
-                                       extension=".linresLog",error=error)
+                                       extension=".linresLog")
 
     IF(nmr_env%ref_count /= 0) THEN
-      CALL nmr_env_cleanup(nmr_env,error=error)
+      CALL nmr_env_cleanup(nmr_env)
     END IF
 
     IF(output_unit>0) THEN
@@ -131,35 +125,34 @@ CONTAINS
       WRITE(output_unit,"(T10,A,/)") "Inizialization of the NMR environment"
     ENDIF
 
-    CALL nmr_env_create(nmr_env,error=error)
+    CALL nmr_env_create(nmr_env)
     !
     ! If current_density or full_nmr different allocations are required
     nmr_section => section_vals_get_subs_vals(qs_env%input, &
-         &                                    "PROPERTIES%LINRES%NMR",error=error)
-    CALL section_vals_val_get(nmr_section,"INTERPOLATE_SHIFT",l_val=nmr_env%interpolate_shift,error=error)
-    CALL section_vals_val_get(nmr_section,"SHIFT_GAPW_RADIUS",r_val=nmr_env%shift_gapw_radius,error=error)
-    CALL section_vals_val_get(nmr_section,"NICS",l_val=nmr_env%do_nics,error=error)
+         &                                    "PROPERTIES%LINRES%NMR")
+    CALL section_vals_val_get(nmr_section,"INTERPOLATE_SHIFT",l_val=nmr_env%interpolate_shift)
+    CALL section_vals_val_get(nmr_section,"SHIFT_GAPW_RADIUS",r_val=nmr_env%shift_gapw_radius)
+    CALL section_vals_val_get(nmr_section,"NICS",l_val=nmr_env%do_nics)
     IF(nmr_env%do_nics) THEN
        CALL section_vals_val_get(nmr_section,"NICS_FILE_NAME",&
-                                 c_val=nics_file_name,error=error)
-       CALL parser_create(parser,nics_file_name,error=error)
-       CALL parser_get_next_line(parser,1,error=error)
-       CALL parser_get_object(parser,nmr_env%n_nics,error=error)
-       ALLOCATE(nmr_env%r_nics(3,nmr_env%n_nics),STAT=istat)
-       CPPrecondition(istat==0,cp_failure_level,routineP,error,failure)
-       CALL parser_get_next_line(parser,2,error=error)
+                                 c_val=nics_file_name)
+       CALL parser_create(parser,nics_file_name)
+       CALL parser_get_next_line(parser,1)
+       CALL parser_get_object(parser,nmr_env%n_nics)
+       ALLOCATE(nmr_env%r_nics(3,nmr_env%n_nics))
+       CALL parser_get_next_line(parser,2)
        DO j = 1,nmr_env%n_nics
-          CALL parser_get_object(parser,label,error=error)
-          CALL parser_get_object(parser,nmr_env%r_nics(1,j),error=error)
-          CALL parser_get_object(parser,nmr_env%r_nics(2,j),error=error)
-          CALL parser_get_object(parser,nmr_env%r_nics(3,j),error=error)
-          nmr_env%r_nics(1,j) = cp_unit_to_cp2k(nmr_env%r_nics(1,j),"angstrom",error=error)
-          nmr_env%r_nics(2,j) = cp_unit_to_cp2k(nmr_env%r_nics(2,j),"angstrom",error=error)
-          nmr_env%r_nics(3,j) = cp_unit_to_cp2k(nmr_env%r_nics(3,j),"angstrom",error=error)
-          CALL parser_get_next_line(parser,1,at_end=my_end,error=error)
+          CALL parser_get_object(parser,label)
+          CALL parser_get_object(parser,nmr_env%r_nics(1,j))
+          CALL parser_get_object(parser,nmr_env%r_nics(2,j))
+          CALL parser_get_object(parser,nmr_env%r_nics(3,j))
+          nmr_env%r_nics(1,j) = cp_unit_to_cp2k(nmr_env%r_nics(1,j),"angstrom")
+          nmr_env%r_nics(2,j) = cp_unit_to_cp2k(nmr_env%r_nics(2,j),"angstrom")
+          nmr_env%r_nics(3,j) = cp_unit_to_cp2k(nmr_env%r_nics(3,j),"angstrom")
+          CALL parser_get_next_line(parser,1,at_end=my_end)
           IF (my_end) EXIT
        ENDDO
-       CALL parser_release(parser,error=error)
+       CALL parser_release(parser)
     ENDIF
 
     CALL get_qs_env(qs_env=qs_env,&
@@ -170,19 +163,17 @@ CONTAINS
                     mpools=mpools,&
                     particle_set=particle_set,&
                     pw_env=pw_env,&
-                    scf_control=scf_control,error=error)
+                    scf_control=scf_control)
     !
     ! Check if restat also psi0 should be restarted
     !IF(nmr_env%restart_nmr .AND. scf_control%density_guess/=restart_guess)THEN
-    !   CALL stop_program(routineN,moduleN,__LINE__,"restart_nmr requires density_guess=restart")
+    !   CPABORT("restart_nmr requires density_guess=restart")
     !ENDIF
     !
     ! check that the psi0 are localized and you have all the centers
-    CPPrecondition(linres_control%localized_psi0,cp_warning_level,routineP,error,failure)
-    IF(failure .AND. (output_unit>0)) THEN
-       WRITE(output_unit,'(A)') &
-            ' To get NMR parameters within PBC you need localized zero order orbitals '
-    ENDIF
+    IF(.NOT.linres_control%localized_psi0)&
+       CPWARN(' To get NMR parameters within PBC you need localized zero order orbitals ')
+    
     gapw = dft_control%qs_control%gapw
     nspins = dft_control%nspins
     natom = SIZE(particle_set,1)
@@ -200,7 +191,7 @@ CONTAINS
     nmr_env%chi_SI2ppmcgs = 6.022045_dp/1.0E+2_dp
     ! Chi to Shift: 10^-30  *  2/3  mu_0 / Omega  * 1/ppm
     nmr_env%chi_SI2shiftppm = 1.0E-30_dp * 8.37758041E-7_dp/ &
-       (cp_unit_from_cp2k(cell%deth,"angstrom^3",error=error)*1.0E-30_dp) * 1.0E+6_dp
+       (cp_unit_from_cp2k(cell%deth,"angstrom^3")*1.0E-30_dp) * 1.0E+6_dp
 
     IF(output_unit>0) THEN
        WRITE(output_unit,"(T2,A,T65,ES15.6)") "NMR| Shift gapw radius (a.u.) ",nmr_env%shift_gapw_radius
@@ -217,22 +208,20 @@ CONTAINS
        WRITE(output_unit,"(T2,A,T65,ES15.6)") "NMR| Conversion Chi to Shift",nmr_env%chi_SI2shiftppm
     ENDIF
 
-    ALLOCATE (nmr_env%do_calc_cs_atom(natom), STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (nmr_env%do_calc_cs_atom(natom))
     nmr_env%do_calc_cs_atom = 0
 
     IF (BTEST(cp_print_key_should_output(logger%iter_info,nmr_section,&
-         &    "PRINT%SHIELDING_TENSOR",error=error),cp_p_file)) THEN
+         &    "PRINT%SHIELDING_TENSOR"),cp_p_file)) THEN
 
        NULLIFY(bounds,list)
        nat_print = 0
        CALL section_vals_val_get(nmr_section,&
             &                    "PRINT%SHIELDING_TENSOR%ATOMS_LU_BOUNDS",&
-                                 i_vals=bounds,error=error)
+                                 i_vals=bounds)
        nat_print = bounds(2) - bounds(1)  + 1
        IF(nat_print > 0) THEN
-          ALLOCATE(nmr_env%cs_atom_list(nat_print),STAT=istat)
-          CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+          ALLOCATE(nmr_env%cs_atom_list(nat_print))
           DO ir = 1,nat_print
              nmr_env%cs_atom_list(ir) = bounds(1) + (ir-1)
              nmr_env%do_calc_cs_atom(bounds(1) + (ir-1)) = 1
@@ -241,12 +230,12 @@ CONTAINS
 
        IF(.NOT. ASSOCIATED(nmr_env%cs_atom_list)) THEN
           CALL section_vals_val_get(nmr_section,"PRINT%SHIELDING_TENSOR%ATOMS_LIST",&
-                                    n_rep_val=n_rep,error=error)
+                                    n_rep_val=n_rep)
           nat_print = 0
           DO ir = 1,n_rep
              NULLIFY(list)
              CALL section_vals_val_get(nmr_section,"PRINT%SHIELDING_TENSOR%ATOMS_LIST",&
-                                       i_rep_val=ir,i_vals=list,error=error)
+                                       i_rep_val=ir,i_vals=list)
              IF(ASSOCIATED(list)) THEN
                 CALL reallocate(nmr_env%cs_atom_list,1,nat_print + SIZE(list))
                 DO ini = 1, SIZE(list)
@@ -259,8 +248,7 @@ CONTAINS
        ENDIF
 
        IF(.NOT. ASSOCIATED(nmr_env%cs_atom_list)) THEN
-          ALLOCATE(nmr_env%cs_atom_list(natom),STAT=istat)
-          CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+          ALLOCATE(nmr_env%cs_atom_list(natom))
           DO ir = 1,natom
              nmr_env%cs_atom_list(ir) = ir
           ENDDO
@@ -268,15 +256,15 @@ CONTAINS
        ENDIF
        !
        ! check the list
-       CPPostcondition(ASSOCIATED(nmr_env%cs_atom_list),cp_failure_level,routineP,error,failure)
+       CPASSERT(ASSOCIATED(nmr_env%cs_atom_list))
        DO ir = 1,SIZE(nmr_env%cs_atom_list,1)
           IF(nmr_env%cs_atom_list(ir).LT.1.OR.nmr_env%cs_atom_list(ir).GT.natom) THEN
-             CALL stop_program(routineN,moduleN,__LINE__,"Unknown atom(s)")
+             CPABORT("Unknown atom(s)")
           ENDIF
           DO j = 1,SIZE(nmr_env%cs_atom_list,1)
              IF(j.EQ.ir) CYCLE
              IF(nmr_env%cs_atom_list(ir).EQ.nmr_env%cs_atom_list(j)) THEN
-                CALL stop_program(routineN,moduleN,__LINE__,"Duplicate atoms")
+                CPABORT("Duplicate atoms")
              ENDIF
            ENDDO
         ENDDO
@@ -296,20 +284,18 @@ CONTAINS
     !
     ! Initialize the chemical shift tensor
     ALLOCATE(nmr_env%chemical_shift(3,3,natom),&
-             nmr_env%chemical_shift_loc(3,3,natom),STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+             nmr_env%chemical_shift_loc(3,3,natom))
     nmr_env%chemical_shift = 0.0_dp
     nmr_env%chemical_shift_loc = 0.0_dp
     IF(nmr_env%do_nics) THEN
        ALLOCATE(nmr_env%chemical_shift_nics_loc(3,3,nmr_env%n_nics),&
-                nmr_env%chemical_shift_nics(3,3,nmr_env%n_nics),STAT=istat)
-       CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+                nmr_env%chemical_shift_nics(3,3,nmr_env%n_nics))
        nmr_env%chemical_shift_nics_loc = 0.0_dp
        nmr_env%chemical_shift_nics = 0.0_dp
     ENDIF
 
     CALL cp_print_key_finished_output(output_unit,logger,lr_section,&
-         &                            "PRINT%PROGRAM_RUN_INFO",error=error)
+         &                            "PRINT%PROGRAM_RUN_INFO")
 
     CALL timestop(handle)
 
@@ -318,23 +304,16 @@ CONTAINS
 ! *****************************************************************************
 !> \brief Deallocate the nmr environment
 !> \param nmr_env ...
-!> \param error ...
 !> \par History
 !>      07.2005 created [MI]
 !> \author MI
 ! *****************************************************************************
-  SUBROUTINE nmr_env_cleanup(nmr_env,error)
+  SUBROUTINE nmr_env_cleanup(nmr_env)
 
     TYPE(nmr_env_type)                       :: nmr_env
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'nmr_env_cleanup', &
       routineP = moduleN//':'//routineN
-
-    INTEGER                                  :: istat
-    LOGICAL                                  :: failure
-
-    failure = .FALSE.
 
     nmr_env%ref_count = nmr_env%ref_count - 1
     IF(nmr_env%ref_count == 0 ) THEN
@@ -346,25 +325,20 @@ CONTAINS
        END IF
        !chemical_shift
        IF(ASSOCIATED(nmr_env%chemical_shift)) THEN
-          DEALLOCATE(nmr_env%chemical_shift,STAT=istat)
-          CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+          DEALLOCATE(nmr_env%chemical_shift)
        END IF
        IF(ASSOCIATED(nmr_env%chemical_shift_loc)) THEN
-          DEALLOCATE(nmr_env%chemical_shift_loc,STAT=istat)
-          CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+          DEALLOCATE(nmr_env%chemical_shift_loc)
        END IF
        ! nics
        IF(ASSOCIATED(nmr_env%r_nics)) THEN
-          DEALLOCATE(nmr_env%r_nics,STAT=istat)
-          CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+          DEALLOCATE(nmr_env%r_nics)
        END IF
        IF(ASSOCIATED(nmr_env%chemical_shift_nics)) THEN
-          DEALLOCATE(nmr_env%chemical_shift_nics,STAT=istat)
-          CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+          DEALLOCATE(nmr_env%chemical_shift_nics)
        END IF
        IF(ASSOCIATED(nmr_env%chemical_shift_nics_loc)) THEN
-          DEALLOCATE(nmr_env%chemical_shift_nics_loc,STAT=istat)
-          CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+          DEALLOCATE(nmr_env%chemical_shift_nics_loc)
        END IF
     END IF  ! ref count
 

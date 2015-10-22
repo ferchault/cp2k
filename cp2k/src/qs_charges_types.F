@@ -13,6 +13,7 @@ MODULE qs_charges_types
   
   USE kinds,                           ONLY: dp
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -54,107 +55,76 @@ CONTAINS
 !> \param nspins ...
 !> \param total_rho_core_rspace ...
 !> \param total_rho_gspace ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      10.2002 created [fawzi]
 !> \author Fawzi Mohamed
 ! *****************************************************************************
 SUBROUTINE qs_charges_create(qs_charges,nspins,total_rho_core_rspace, &
-     total_rho_gspace, error)
+     total_rho_gspace)
     TYPE(qs_charges_type), POINTER           :: qs_charges
     INTEGER, INTENT(in)                      :: nspins
     REAL(KIND=dp), INTENT(in), OPTIONAL      :: total_rho_core_rspace, &
                                                 total_rho_gspace
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'qs_charges_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-  failure=.FALSE.
-
-  ALLOCATE(qs_charges, stat=stat)
-  CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-  IF (.NOT.failure) THEN
-     qs_charges%total_rho_core_rspace=0.0_dp
-     IF (PRESENT(total_rho_core_rspace)) &
-          qs_charges%total_rho_core_rspace=total_rho_core_rspace
-     qs_charges%total_rho_gspace=0.0_dp
-     IF (PRESENT(total_rho_gspace)) &
-          qs_charges%total_rho_gspace=total_rho_gspace
-     qs_charges%total_rho_soft_gspace = 0.0_dp
-     qs_charges%total_rho0_hard_lebedev = 0.0_dp
-     qs_charges%total_rho_soft_gspace = 0.0_dp
-     qs_charges%background = 0.0_dp
-     ALLOCATE(qs_charges%total_rho1_hard(nspins),stat=stat)
-     CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-     qs_charges%total_rho1_hard(:) = 0.0_dp
-     ALLOCATE(qs_charges%total_rho1_soft(nspins),stat=stat)
-     CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-     qs_charges%total_rho1_soft(:) = 0.0_dp
-     qs_charges%ref_count=1
-  END IF
+  ALLOCATE(qs_charges)
+  qs_charges%total_rho_core_rspace=0.0_dp
+  IF (PRESENT(total_rho_core_rspace)) &
+       qs_charges%total_rho_core_rspace=total_rho_core_rspace
+  qs_charges%total_rho_gspace=0.0_dp
+  IF (PRESENT(total_rho_gspace)) &
+       qs_charges%total_rho_gspace=total_rho_gspace
+  qs_charges%total_rho_soft_gspace = 0.0_dp
+  qs_charges%total_rho0_hard_lebedev = 0.0_dp
+  qs_charges%total_rho_soft_gspace = 0.0_dp
+  qs_charges%background = 0.0_dp
+  ALLOCATE(qs_charges%total_rho1_hard(nspins))
+  qs_charges%total_rho1_hard(:) = 0.0_dp
+  ALLOCATE(qs_charges%total_rho1_soft(nspins))
+  qs_charges%total_rho1_soft(:) = 0.0_dp
+  qs_charges%ref_count=1
 END SUBROUTINE qs_charges_create
 
 ! *****************************************************************************
 !> \brief retains the given qs_charges (see cp2k/doc/ReferenceCounting.html)
 !> \param qs_charges the object to retain
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      10.2002 created [fawzi]
 !> \author Fawzi Mohamed
 ! *****************************************************************************
-SUBROUTINE qs_charges_retain(qs_charges, error)
+SUBROUTINE qs_charges_retain(qs_charges)
     TYPE(qs_charges_type), POINTER           :: qs_charges
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'qs_charges_retain', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-  failure=.FALSE.
-
-  CPPrecondition(ASSOCIATED(qs_charges),cp_failure_level,routineP,error,failure)
-  IF (.NOT. failure) THEN
-     CPPrecondition(qs_charges%ref_count>0,cp_failure_level,routineP,error,failure)
-     qs_charges%ref_count=qs_charges%ref_count+1
-  END IF
+  CPASSERT(ASSOCIATED(qs_charges))
+  CPASSERT(qs_charges%ref_count>0)
+  qs_charges%ref_count=qs_charges%ref_count+1
 END SUBROUTINE qs_charges_retain
 
 ! *****************************************************************************
 !> \brief releases the charges object (see cp2k/doc/ReferenceCounting.html)
 !> \param qs_charges the object to be released
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      10.2002 created [fawzi]
 !> \author Fawzi Mohamed
 ! *****************************************************************************
-SUBROUTINE qs_charges_release(qs_charges, error)
+SUBROUTINE qs_charges_release(qs_charges)
     TYPE(qs_charges_type), POINTER           :: qs_charges
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'qs_charges_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-  failure=.FALSE.
-
   IF (ASSOCIATED(qs_charges)) THEN
-     CPPrecondition(qs_charges%ref_count>0,cp_failure_level,routineP,error,failure)
+     CPASSERT(qs_charges%ref_count>0)
      qs_charges%ref_count=qs_charges%ref_count-1
      IF (qs_charges%ref_count<1) THEN
-        DEALLOCATE(qs_charges%total_rho1_hard,stat=stat)
-        DEALLOCATE(qs_charges%total_rho1_soft,stat=stat)
-        DEALLOCATE(qs_charges,stat=stat)
-        CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+        DEALLOCATE(qs_charges%total_rho1_hard)
+        DEALLOCATE(qs_charges%total_rho1_soft)
+        DEALLOCATE(qs_charges)
      END IF
   END IF
   NULLIFY(qs_charges)

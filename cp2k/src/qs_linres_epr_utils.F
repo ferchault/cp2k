@@ -57,9 +57,8 @@ MODULE qs_linres_epr_utils
                                              qs_rho_create,&
                                              qs_rho_set
   USE scf_control_types,               ONLY: scf_control_type
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -75,24 +74,22 @@ CONTAINS
 !> \brief Initialize the epr environment
 !> \param epr_env ...
 !> \param qs_env ...
-!> \param error ...
 !> \par History
 !>      07.2006 created [MI]
 !> \author MI
 ! *****************************************************************************
-  SUBROUTINE epr_env_init(epr_env,qs_env,error)
+  SUBROUTINE epr_env_init(epr_env,qs_env)
     !
     TYPE(epr_env_type)                       :: epr_env
     TYPE(qs_environment_type), POINTER       :: qs_env
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'epr_env_init', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: handle, i_B, idir, ispin, &
-                                                istat, n_mo(2), nao, natom, &
-                                                nmoloc, nspins, output_unit
-    LOGICAL                                  :: failure, gapw
+                                                n_mo(2), nao, natom, nmoloc, &
+                                                nspins, output_unit
+    LOGICAL                                  :: gapw
     TYPE(atomic_kind_type), DIMENSION(:), &
       POINTER                                :: atomic_kind_set
     TYPE(cell_type), POINTER                 :: cell
@@ -116,7 +113,6 @@ CONTAINS
 
     CALL timeset(routineN,handle)
 
-    failure = .FALSE.
 
     NULLIFY(atomic_kind_set, qs_kind_set, cell, dft_control, linres_control, scf_control)
     NULLIFY(logger, mos, mpools, particle_set)
@@ -127,15 +123,15 @@ CONTAINS
     nao = 0
     nmoloc = 0
 
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
     !ionode = logger%para_env%mepos==logger%para_env%source
-    lr_section => section_vals_get_subs_vals(qs_env%input,"PROPERTIES%LINRES",error=error)
+    lr_section => section_vals_get_subs_vals(qs_env%input,"PROPERTIES%LINRES")
 
     output_unit = cp_print_key_unit_nr(logger,lr_section,"PRINT%PROGRAM_RUN_INFO",&
-                                       extension=".linresLog",error=error)
+                                       extension=".linresLog")
 
     IF(epr_env%ref_count /= 0) THEN
-      CALL epr_env_cleanup(epr_env,error=error)
+      CALL epr_env_cleanup(epr_env)
     END IF
 
     IF(output_unit>0) THEN
@@ -143,7 +139,7 @@ CONTAINS
       WRITE(output_unit,"(T10,A,/)") "Initialization of the EPR environment"
     ENDIF
 
-    CALL epr_env_create(epr_env,error=error)
+    CALL epr_env_create(epr_env)
 
 
     CALL get_qs_env(qs_env=qs_env,&
@@ -156,16 +152,16 @@ CONTAINS
                     mpools=mpools,&
                     particle_set=particle_set,&
                     pw_env=pw_env,&
-                    scf_control=scf_control,error=error)
+                    scf_control=scf_control)
     !
     ! Check if restat also psi0 should be restarted
     !IF(epr_env%restart_epr .AND. scf_control%density_guess/=restart_guess)THEN
-    !   CALL stop_program(routineN,moduleN,__LINE__,"restart_epr requires density_guess=restart")
+    !   CPABORT("restart_epr requires density_guess=restart")
     !ENDIF
     !
     ! check that the psi0 are localized and you have all the centers
-    CPPrecondition(linres_control%localized_psi0,cp_warning_level,routineP,error,failure)
-    IF(failure .AND. (output_unit>0)) THEN
+    CPASSERT(linres_control%localized_psi0)
+    IF(output_unit>0) THEN
        WRITE(output_unit,'(A)') &
             ' To get EPR parameters within PBC you need localized zero order orbitals '
     ENDIF
@@ -185,63 +181,57 @@ CONTAINS
     epr_env%g_soo_chicorr_factor = 2.0 / 3.0_dp * fourpi * ( a_fine )**2 / cell%deth
     !
     ! If the current density on the grid needs to be stored
-    CALL pw_env_get(pw_env, auxbas_pw_pool=auxbas_pw_pool,error=error)
+    CALL pw_env_get(pw_env, auxbas_pw_pool=auxbas_pw_pool)
     !
     ! Initialize local current density if GAPW calculation
     IF(gapw) THEN
-       CALL init_nablavks_atom_set(nablavks_atom_set,atomic_kind_set,qs_kind_set,nspins,error=error)
+       CALL init_nablavks_atom_set(nablavks_atom_set,atomic_kind_set,qs_kind_set,nspins)
        CALL set_epr_env(epr_env=epr_env,&
-                        nablavks_atom_set=nablavks_atom_set,&
-                        error=error)
+                        nablavks_atom_set=nablavks_atom_set)
     ENDIF
     !
     ! Bind
-    ALLOCATE(epr_env%bind_set(3,3),STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(epr_env%bind_set(3,3))
     DO i_B = 1,3
       DO idir = 1,3
         NULLIFY(epr_env%bind_set(idir,i_B)%rho, rho_r, rho_g)
-        CALL qs_rho_create(epr_env%bind_set(idir,i_B)%rho, error)
+        CALL qs_rho_create(epr_env%bind_set(idir,i_B)%rho)
         ALLOCATE(rho_r(1), rho_g(1))
         CALL pw_pool_create_pw(auxbas_pw_pool, rho_r(1)%pw,&
-             use_data=REALDATA3D,in_space=REALSPACE,error=error)
+             use_data=REALDATA3D,in_space=REALSPACE)
         CALL pw_pool_create_pw(auxbas_pw_pool, rho_g(1)%pw,&
-             use_data=COMPLEXDATA1D,in_space=RECIPROCALSPACE,error=error)
-        CALL qs_rho_set(epr_env%bind_set(idir,i_B)%rho, rho_r=rho_r, rho_g=rho_g, error=error)
+             use_data=COMPLEXDATA1D,in_space=RECIPROCALSPACE)
+        CALL qs_rho_set(epr_env%bind_set(idir,i_B)%rho, rho_r=rho_r, rho_g=rho_g)
       END DO
     END DO
 
     ! Nabla_V_ks
-    ALLOCATE(epr_env%nablavks_set(3,dft_control%nspins),STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(epr_env%nablavks_set(3,dft_control%nspins))
     DO idir = 1,3
       DO ispin = 1,nspins
         NULLIFY(epr_env%nablavks_set(idir,ispin)%rho, rho_r, rho_g)
-        CALL qs_rho_create(epr_env%nablavks_set(idir,ispin)%rho, error)
+        CALL qs_rho_create(epr_env%nablavks_set(idir,ispin)%rho)
         ALLOCATE(rho_r(1), rho_g(1))
         CALL pw_pool_create_pw(auxbas_pw_pool, rho_r(1)%pw,&
-             use_data=REALDATA3D,in_space=REALSPACE,error=error)
+             use_data=REALDATA3D,in_space=REALSPACE)
         CALL pw_pool_create_pw(auxbas_pw_pool, rho_g(1)%pw,&
-             use_data=COMPLEXDATA1D,in_space=RECIPROCALSPACE,error=error)
+             use_data=COMPLEXDATA1D,in_space=RECIPROCALSPACE)
         CALL qs_rho_set(epr_env%nablavks_set(idir,ispin)%rho, &
-                       rho_r=rho_r, rho_g=rho_g, error=error)
+                       rho_r=rho_r, rho_g=rho_g)
       END DO
     END DO
 
     ! Initialize the g tensor components
-    ALLOCATE(epr_env%g_total(3,3),STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(epr_env%g_so(3,3),STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE(epr_env%g_soo(3,3),STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(epr_env%g_total(3,3))
+    ALLOCATE(epr_env%g_so(3,3))
+    ALLOCATE(epr_env%g_soo(3,3))
     epr_env%g_total = 0.0_dp
     epr_env%g_zke = 0.0_dp
     epr_env%g_so = 0.0_dp
     epr_env%g_soo = 0.0_dp
 
     CALL cp_print_key_finished_output(output_unit,logger,lr_section,&
-         &                            "PRINT%PROGRAM_RUN_INFO",error=error)
+         &                            "PRINT%PROGRAM_RUN_INFO")
 
     CALL timestop(handle)
 
@@ -250,78 +240,66 @@ CONTAINS
 ! *****************************************************************************
 !> \brief Deallocate the epr environment
 !> \param epr_env ...
-!> \param error ...
 !> \par History
 !>      07.2005 created [MI]
 !> \author MI
 ! *****************************************************************************
-  SUBROUTINE epr_env_cleanup(epr_env,error)
+  SUBROUTINE epr_env_cleanup(epr_env)
 
     TYPE(epr_env_type)                       :: epr_env
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(LEN=*), PARAMETER :: routineN = 'epr_env_cleanup', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i_B, idir, ispin, istat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: i_B, idir, ispin
 
-    failure=.FALSE.
-    IF(.NOT. failure) THEN
-      epr_env%ref_count = epr_env%ref_count - 1
-      IF(epr_env%ref_count == 0 ) THEN
-        ! nablavks_set
-        IF(ASSOCIATED(epr_env%nablavks_set)) THEN
-           DO ispin = 1,SIZE(epr_env%nablavks_set,2)
-           DO idir = 1,SIZE(epr_env%nablavks_set,1)
-              CALL qs_rho_clear(epr_env%nablavks_set(idir,ispin)%rho, error)
-              DEALLOCATE(epr_env%nablavks_set(idir,ispin)%rho)
-           ENDDO
-           ENDDO
-           DEALLOCATE(epr_env%nablavks_set,STAT=istat)
-           CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
-        END IF
-        ! nablavks_atom_set
-        IF(ASSOCIATED(epr_env%nablavks_atom_set)) THEN
-          CALL deallocate_nablavks_atom_set(epr_env%nablavks_atom_set,error=error)
-        END IF
-        ! vks_atom_set
-        IF(ASSOCIATED(epr_env%vks_atom_set)) THEN
-          CALL deallocate_rho_atom_set(epr_env%vks_atom_set)
-        END IF
-        ! bind_set
-        IF(ASSOCIATED(epr_env%bind_set)) THEN
-           DO i_B = 1,SIZE(epr_env%bind_set,2)
-           DO idir = 1,SIZE(epr_env%bind_set,1)
-              CALL qs_rho_clear(epr_env%bind_set(idir,i_B)%rho, error)
-              DEALLOCATE(epr_env%bind_set(idir,i_B)%rho)
-           ENDDO
-           ENDDO
-          DEALLOCATE(epr_env%bind_set,STAT=istat)
-          CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
-        END IF
-        ! bind_atom_set
-        IF(ASSOCIATED(epr_env%bind_atom_set)) THEN
-          DEALLOCATE(epr_env%bind_atom_set,STAT=istat)
-          CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
-        END IF
-        ! g_total
-        IF(ASSOCIATED(epr_env%g_total)) THEN
-          DEALLOCATE(epr_env%g_total,STAT=istat)
-          CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
-        END IF
-        ! g_so
-        IF(ASSOCIATED(epr_env%g_so)) THEN
-          DEALLOCATE(epr_env%g_so,STAT=istat)
-          CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
-        END IF
-        ! g_soo
-        IF(ASSOCIATED(epr_env%g_soo)) THEN
-          DEALLOCATE(epr_env%g_soo,STAT=istat)
-          CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
-        END IF
-      END IF  ! ref count
-    END IF ! failure
+    epr_env%ref_count = epr_env%ref_count - 1
+    IF(epr_env%ref_count == 0 ) THEN
+      ! nablavks_set
+      IF(ASSOCIATED(epr_env%nablavks_set)) THEN
+         DO ispin = 1,SIZE(epr_env%nablavks_set,2)
+         DO idir = 1,SIZE(epr_env%nablavks_set,1)
+            CALL qs_rho_clear(epr_env%nablavks_set(idir,ispin)%rho)
+            DEALLOCATE(epr_env%nablavks_set(idir,ispin)%rho)
+         ENDDO
+         ENDDO
+         DEALLOCATE(epr_env%nablavks_set)
+      END IF
+      ! nablavks_atom_set
+      IF(ASSOCIATED(epr_env%nablavks_atom_set)) THEN
+        CALL deallocate_nablavks_atom_set(epr_env%nablavks_atom_set)
+      END IF
+      ! vks_atom_set
+      IF(ASSOCIATED(epr_env%vks_atom_set)) THEN
+        CALL deallocate_rho_atom_set(epr_env%vks_atom_set)
+      END IF
+      ! bind_set
+      IF(ASSOCIATED(epr_env%bind_set)) THEN
+         DO i_B = 1,SIZE(epr_env%bind_set,2)
+         DO idir = 1,SIZE(epr_env%bind_set,1)
+            CALL qs_rho_clear(epr_env%bind_set(idir,i_B)%rho)
+            DEALLOCATE(epr_env%bind_set(idir,i_B)%rho)
+         ENDDO
+         ENDDO
+        DEALLOCATE(epr_env%bind_set)
+      END IF
+      ! bind_atom_set
+      IF(ASSOCIATED(epr_env%bind_atom_set)) THEN
+        DEALLOCATE(epr_env%bind_atom_set)
+      END IF
+      ! g_total
+      IF(ASSOCIATED(epr_env%g_total)) THEN
+        DEALLOCATE(epr_env%g_total)
+      END IF
+      ! g_so
+      IF(ASSOCIATED(epr_env%g_so)) THEN
+        DEALLOCATE(epr_env%g_so)
+      END IF
+      ! g_soo
+      IF(ASSOCIATED(epr_env%g_soo)) THEN
+        DEALLOCATE(epr_env%g_soo)
+      END IF
+    END IF  ! ref count
 
   END SUBROUTINE epr_env_cleanup
 

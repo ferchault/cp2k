@@ -19,6 +19,7 @@ MODULE qs_integrate_potential_low
                                              ncoset
   USE realspace_grid_types,            ONLY: realspace_grid_type
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -69,7 +70,6 @@ CONTAINS
 !> \param a_hdab ...
 !> \param use_subpatch ...
 !> \param subpatch_pattern ...
-!> \param error ...
 ! *****************************************************************************
     SUBROUTINE integrate_pgf_product_rspace(la_max,zeta,la_min,&
                                             lb_max,zetb,lb_min,&
@@ -79,7 +79,7 @@ CONTAINS
                                             calculate_forces,hdab,hadb,force_a,force_b,&
                                             compute_tau,map_consistent,&
                                             collocate_rho0,rpgf0_s,use_virial,my_virial_a,&
-                                            my_virial_b,a_hdab,use_subpatch,subpatch_pattern,error)
+                                            my_virial_b,a_hdab,use_subpatch,subpatch_pattern)
 
     INTEGER, INTENT(IN)                      :: la_max
     REAL(KIND=dp), INTENT(IN)                :: zeta
@@ -107,7 +107,6 @@ CONTAINS
     LOGICAL, INTENT(IN), OPTIONAL            :: use_virial
     REAL(KIND=dp), DIMENSION(3,3), OPTIONAL  :: my_virial_a, my_virial_b
     REAL(KIND=dp), DIMENSION(:,:,:,:), OPTIONAL, POINTER  :: a_hdab
-    TYPE(cp_error_type), INTENT(inout)       :: error
     LOGICAL, OPTIONAL                        :: use_subpatch
     INTEGER(KIND=int_8), INTENT(IN), OPTIONAL :: subpatch_pattern
 
@@ -144,16 +143,13 @@ CONTAINS
     REAL(kind=dp), ALLOCATABLE, DIMENSION(:,:) :: vab
 
     REAL(KIND=dp) :: t_exp_1,t_exp_2,t_exp_min_1,t_exp_min_2,t_exp_plus_1,t_exp_plus_2
-    LOGICAL  :: failure
 
-
-    failure = .FALSE.
     subpatch_integrate = .FALSE.
 
     IF(PRESENT(use_subpatch)) THEN
        IF(use_subpatch)THEN
          subpatch_integrate = .TRUE.
-         CPPrecondition(PRESENT(subpatch_pattern),cp_failure_level,routineP,error,failure)
+         CPASSERT(PRESENT(subpatch_pattern))
        ENDIF
     ENDIF
 
@@ -393,7 +389,7 @@ CONTAINS
         offset=MODULO(cubecenter(i)+lb_cube(i)+rsgrid%desc%lb(i)-rsgrid%lb_local(i),ng(i))+1-lb_cube(i)
         ! check for out of bounds
         IF (ub_cube(i)+offset>UBOUND(grid,i).OR.lb_cube(i)+offset<LBOUND(grid,i)) THEN
-           CPPostcondition(.FALSE.,cp_failure_level,routineP,error,failure)
+           CPABORT("")
         ENDIF
         DO ig=lb_cube(i),ub_cube(i)
            map(ig,i) = ig+offset
@@ -426,7 +422,7 @@ CONTAINS
 ! *****************************************************************************
 !> \brief ...
 ! *****************************************************************************
-    SUBROUTINE call_integrate
+    SUBROUTINE call_integrate()
 
 
       SELECT CASE(lp)
@@ -705,8 +701,7 @@ CONTAINS
 ! *****************************************************************************
 !> \brief ...
 ! *****************************************************************************
-    SUBROUTINE integrate_general_subpatch
-    INTEGER                                  :: stat
+    SUBROUTINE integrate_general_subpatch()
     INTEGER, DIMENSION(2, 3)                 :: local_b
     INTEGER, DIMENSION(3)                    :: local_s, periodic
     REAL(dp), DIMENSION((&
@@ -731,25 +726,23 @@ CONTAINS
         CALL integrateGaussFull(h=cell%hmat,h_inv=cell%h_inv,&
             grid=grid,poly=poly_d3,alphai=zetp,posi=rp,max_r2=radius*radius,&
             periodic=periodic,gdim=ng,local_bounds=local_b,local_shift=local_s,&
-            error=error,scale=rsgrid%desc%ngpts/ABS(cell%deth))
+            scale=rsgrid%desc%ngpts/ABS(cell%deth))
         ! defaults: local_shift=(/0,0,0/),poly_shift=(/0.0_dp,0.0_dp,0.0_dp/),scale=1.0_dp,
-        ALLOCATE(coef_xyz(((lp+1)*(lp+2)*(lp+3))/6),stat=stat)
-        CPPostconditionNoFail(stat==0,cp_failure_level,routineP,error)
-        CALL poly_d32cp2k(coef_xyz,lp,poly_d3,error)
+        ALLOCATE(coef_xyz(((lp+1)*(lp+2)*(lp+3))/6))
+        CALL poly_d32cp2k(coef_xyz,lp,poly_d3)
         CALL call_to_xyz_to_vab(prefactor, coef_xyz, lp, la_max_local, lb_max_local, &
                                   rp, ra, rab, vab, coset, la_min_local, lb_min_local, &
                                   current_maxl, ncoset(la_max_local), & 
                                   ncoset(lb_max_local))
 
-        DEALLOCATE(coef_xyz,stat=stat)
-        CPPostconditionNoFail(stat==0,cp_failure_level,routineP,error)
+        DEALLOCATE(coef_xyz)
     END SUBROUTINE
 
 ! *****************************************************************************
 !> \brief ...
 ! *****************************************************************************
     SUBROUTINE integrate_general_wings()
-    INTEGER                                  :: periodic(3), stat
+    INTEGER                                  :: periodic(3)
     INTEGER, DIMENSION(2, 3)                 :: local_b
     REAL(dp), DIMENSION((&
       la_max_local+lb_max_local+1)*(&
@@ -775,18 +768,16 @@ CONTAINS
             grid=grid,poly=poly_d3,alphai=zetp,posi=rShifted,&
             max_r2=radius*radius,&
             periodic=periodic,gdim=ng,local_bounds=local_b,&
-            error=error,scale=rsgrid%desc%ngpts/ABS(cell%deth))
+            scale=rsgrid%desc%ngpts/ABS(cell%deth))
         ! defaults: local_shift=(/0,0,0/),poly_shift=(/0.0_dp,0.0_dp,0.0_dp/),scale=1.0_dp,
-        ALLOCATE(coef_xyz(((lp+1)*(lp+2)*(lp+3))/6),stat=stat)
-        CPPostconditionNoFail(stat==0,cp_failure_level,routineP,error)
-        CALL poly_d32cp2k(coef_xyz,lp,poly_d3,error)
+        ALLOCATE(coef_xyz(((lp+1)*(lp+2)*(lp+3))/6))
+        CALL poly_d32cp2k(coef_xyz,lp,poly_d3)
         CALL call_to_xyz_to_vab(prefactor, coef_xyz, lp, la_max_local, lb_max_local, &
                                   rp, ra, rab, vab, coset, la_min_local, lb_min_local, &
                                 current_maxl, ncoset(la_max_local), ncoset(lb_max_local))
 
 
-        DEALLOCATE(coef_xyz,stat=stat)
-        CPPostconditionNoFail(stat==0,cp_failure_level,routineP,error)
+        DEALLOCATE(coef_xyz)
     END SUBROUTINE
 
 ! *****************************************************************************

@@ -25,6 +25,7 @@ MODULE input_val_types
   USE kinds,                           ONLY: default_string_length,&
                                              dp
 #include "../common/cp_common_uses.f90"
+#include "../base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -94,15 +95,13 @@ CONTAINS
 !> \param lc_vals ...
 !> \param lc_vals_ptr ...
 !> \param enum the enumaration type this value is using
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author fawzi
 !> \note
 !>      using an enumeration only i_val/i_vals/i_vals_ptr are accepted
 ! *****************************************************************************
 SUBROUTINE val_create(val,l_val,l_vals,l_vals_ptr,i_val,i_vals,i_vals_ptr,&
      r_val,r_vals,r_vals_ptr,c_val,c_vals,c_vals_ptr,lc_val,lc_vals,&
-     lc_vals_ptr,enum,error)
+     lc_vals_ptr,enum)
     TYPE(val_type), POINTER                  :: val
     LOGICAL, INTENT(in), OPTIONAL            :: l_val
     LOGICAL, DIMENSION(:), INTENT(in), &
@@ -129,214 +128,184 @@ SUBROUTINE val_create(val,l_val,l_vals,l_vals_ptr,i_val,i_vals,i_vals_ptr,&
       DIMENSION(:), OPTIONAL, POINTER        :: lc_vals_ptr
     TYPE(enumeration_type), OPTIONAL, &
       POINTER                                :: enum
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'val_create', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, len_c, narg, nVal, stat
-    LOGICAL                                  :: failure
+    INTEGER                                  :: i, len_c, narg, nVal
 
-  failure=.FALSE.
+  CPASSERT(.NOT.ASSOCIATED(val))
+  ALLOCATE(val)
+  NULLIFY(val%l_val,val%i_val,val%r_val,val%c_val,val%enum)
+  val%type_of_var=no_t
+  last_val_id=last_val_id+1
+  val%id_nr=last_val_id
+  val%ref_count=1
 
-  CPPrecondition(.NOT.ASSOCIATED(val),cp_failure_level,routineP,error,failure)
-  ALLOCATE(val,stat=stat)
-  CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-  IF (.NOT. failure) THEN
-     NULLIFY(val%l_val,val%i_val,val%r_val,val%c_val,val%enum)
-     val%type_of_var=no_t
-     last_val_id=last_val_id+1
-     val%id_nr=last_val_id
-     val%ref_count=1
-
-     narg=0
-     val%type_of_var=no_t
-     IF (PRESENT(l_val)) THEN
-!FM        CPPrecondition(.NOT.PRESENT(l_vals),cp_failure_level,routineP,error,failure)
-!FM        CPPrecondition(.NOT.PRESENT(l_vals_ptr),cp_failure_level,routineP,error,failure)
-        narg=narg+1
-        ALLOCATE(val%l_val(1),stat=stat)
-        CPPostcondition(stat==0,cp_fatal_level,routineP,error,failure)
-        val%l_val(1)=l_val
-        val%type_of_var=logical_t
-     END IF
-     IF (PRESENT(l_vals)) THEN
-!FM        CPPrecondition(.NOT.PRESENT(l_vals_ptr),cp_failure_level,routineP,error,failure)
-        narg=narg+1
-        ALLOCATE(val%l_val(SIZE(l_vals)),stat=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-        val%l_val=l_vals
-        val%type_of_var=logical_t
-     END IF
-     IF (PRESENT(l_vals_ptr)) THEN
-        narg=narg+1
-        val%l_val => l_vals_ptr
-        val%type_of_var=logical_t
-     END IF
-
-     IF (PRESENT(r_val)) THEN
-!FM        CPPrecondition(.NOT.PRESENT(r_vals),cp_failure_level,routineP,error,failure)
-!FM        CPPrecondition(.NOT.PRESENT(r_vals_ptr),cp_failure_level,routineP,error,failure)
-        narg=narg+1
-        ALLOCATE(val%r_val(1),stat=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-        val%r_val(1)=r_val
-        val%type_of_var=real_t
-     END IF
-     IF (PRESENT(r_vals)) THEN
-!FM        CPPrecondition(.NOT.PRESENT(r_vals_ptr),cp_failure_level,routineP,error,failure)
-        narg=narg+1
-        ALLOCATE(val%r_val(SIZE(r_vals)),stat=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-        val%r_val=r_vals
-        val%type_of_var=real_t
-     END IF
-     IF (PRESENT(r_vals_ptr)) THEN
-        narg=narg+1
-        val%r_val => r_vals_ptr
-        val%type_of_var=real_t
-     END IF
-
-     IF (PRESENT(i_val)) THEN
-!FM        CPPrecondition(.NOT.PRESENT(i_vals),cp_failure_level,routineP,error,failure)
-!FM        CPPrecondition(.NOT.PRESENT(i_vals_ptr),cp_failure_level,routineP,error,failure)
-        narg=narg+1
-        ALLOCATE(val%i_val(1),stat=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-        val%i_val(1)=i_val
-        val%type_of_var=integer_t
-     END IF
-     IF (PRESENT(i_vals)) THEN
-!FM        CPPrecondition(.NOT.PRESENT(i_vals_ptr),cp_failure_level,routineP,error,failure)
-        narg=narg+1
-        ALLOCATE(val%i_val(SIZE(i_vals)),stat=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-        val%i_val=i_vals
-        val%type_of_var=integer_t
-     END IF
-     IF (PRESENT(i_vals_ptr)) THEN
-        narg=narg+1
-        val%i_val => i_vals_ptr
-        val%type_of_var=integer_t
-     END IF
-
-     IF (PRESENT(c_val)) THEN
-        CPPrecondition(LEN_TRIM(c_val)<=default_string_length,cp_failure_level,routineP,error,failure)
-!FM        CPPrecondition(.NOT.PRESENT(c_vals),cp_failure_level,routineP,error,failure)
-!FM        CPPrecondition(.NOT.PRESENT(c_vals_ptr),cp_failure_level,routineP,error,failure)
-        narg=narg+1
-        ALLOCATE(val%c_val(1),stat=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-        val%c_val(1)=c_val
-        val%type_of_var=char_t
-     END IF
-     IF (PRESENT(c_vals)) THEN
-!FM        CPPrecondition(.NOT.PRESENT(c_vals_ptr),cp_failure_level,routineP,error,failure)
-        CPPrecondition(ALL(LEN_TRIM(c_vals)<=default_string_length),cp_failure_level,routineP,error,failure)
-        narg=narg+1
-        ALLOCATE(val%c_val(SIZE(c_vals)),stat=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-        val%c_val=c_vals
-        val%type_of_var=char_t
-     END IF
-     IF (PRESENT(c_vals_ptr)) THEN
-        narg=narg+1
-        val%c_val => c_vals_ptr
-        val%type_of_var=char_t
-     END IF
-     IF (PRESENT(lc_val)) THEN
-!FM        CPPrecondition(.NOT.PRESENT(lc_vals),cp_failure_level,routineP,error,failure)
-!FM        CPPrecondition(.NOT.PRESENT(lc_vals_ptr),cp_failure_level,routineP,error,failure)
-        narg=narg+1
-        len_c=LEN_TRIM(lc_val)
-        nVal=MAX(1,CEILING(REAL(len_c,dp)/80._dp))
-        ALLOCATE(val%c_val(nVal),stat=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-
-        IF (len_c == 0) THEN
-           val%c_val(1) = ""
-        ELSE
-           DO i=1,nVal
-              val%c_val(i)=lc_val((i-1)*default_string_length+1:&
-                   MIN(len_c,i*default_string_length))
-           END DO
-        END IF
-        val%type_of_var=lchar_t
-     END IF
-     IF (PRESENT(lc_vals)) THEN
-        CPPrecondition(ALL(LEN_TRIM(lc_vals)<=default_string_length),cp_failure_level,routineP,error,failure)
-        narg=narg+1
-        ALLOCATE(val%c_val(SIZE(lc_vals)),stat=stat)
-        CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
-        val%c_val=lc_vals
-        val%type_of_var=lchar_t
-     END IF
-     IF (PRESENT(lc_vals_ptr)) THEN
-        narg=narg+1
-        val%c_val => lc_vals_ptr
-        val%type_of_var=lchar_t
-     END IF
-     CPPostcondition(narg<=1,cp_failure_level,routineP,error,failure)
-     IF (PRESENT(enum)) THEN
-        IF (ASSOCIATED(enum)) THEN
-           IF (val%type_of_var/=no_t.AND.val%type_of_var/=integer_t.AND.&
-                val%type_of_var/=enum_t) THEN
-              CPAssert(.FALSE.,cp_failure_level,routineP,error,failure)
-           END IF
-           IF (ASSOCIATED(val%i_val)) THEN
-              val%type_of_var=enum_t
-              val%enum=>enum
-              CALL enum_retain(enum,error=error)
-           END IF
-        END IF
-     END IF
-     CPPostcondition(ASSOCIATED(val%enum).eqv.val%type_of_var==enum_t,cp_failure_level,routineP,error,failure)
+  narg=0
+  val%type_of_var=no_t
+  IF (PRESENT(l_val)) THEN
+!FM        CPPrecondition(.NOT.PRESENT(l_vals),cp_failure_level,routineP,failure)
+!FM        CPPrecondition(.NOT.PRESENT(l_vals_ptr),cp_failure_level,routineP,failure)
+     narg=narg+1
+     ALLOCATE(val%l_val(1))
+     val%l_val(1)=l_val
+     val%type_of_var=logical_t
   END IF
+  IF (PRESENT(l_vals)) THEN
+!FM        CPPrecondition(.NOT.PRESENT(l_vals_ptr),cp_failure_level,routineP,failure)
+     narg=narg+1
+     ALLOCATE(val%l_val(SIZE(l_vals)))
+     val%l_val=l_vals
+     val%type_of_var=logical_t
+  END IF
+  IF (PRESENT(l_vals_ptr)) THEN
+     narg=narg+1
+     val%l_val => l_vals_ptr
+     val%type_of_var=logical_t
+  END IF
+
+  IF (PRESENT(r_val)) THEN
+!FM        CPPrecondition(.NOT.PRESENT(r_vals),cp_failure_level,routineP,failure)
+!FM        CPPrecondition(.NOT.PRESENT(r_vals_ptr),cp_failure_level,routineP,failure)
+     narg=narg+1
+     ALLOCATE(val%r_val(1))
+     val%r_val(1)=r_val
+     val%type_of_var=real_t
+  END IF
+  IF (PRESENT(r_vals)) THEN
+!FM        CPPrecondition(.NOT.PRESENT(r_vals_ptr),cp_failure_level,routineP,failure)
+     narg=narg+1
+     ALLOCATE(val%r_val(SIZE(r_vals)))
+     val%r_val=r_vals
+     val%type_of_var=real_t
+  END IF
+  IF (PRESENT(r_vals_ptr)) THEN
+     narg=narg+1
+     val%r_val => r_vals_ptr
+     val%type_of_var=real_t
+  END IF
+
+  IF (PRESENT(i_val)) THEN
+!FM        CPPrecondition(.NOT.PRESENT(i_vals),cp_failure_level,routineP,failure)
+!FM        CPPrecondition(.NOT.PRESENT(i_vals_ptr),cp_failure_level,routineP,failure)
+     narg=narg+1
+     ALLOCATE(val%i_val(1))
+     val%i_val(1)=i_val
+     val%type_of_var=integer_t
+  END IF
+  IF (PRESENT(i_vals)) THEN
+!FM        CPPrecondition(.NOT.PRESENT(i_vals_ptr),cp_failure_level,routineP,failure)
+     narg=narg+1
+     ALLOCATE(val%i_val(SIZE(i_vals)))
+     val%i_val=i_vals
+     val%type_of_var=integer_t
+  END IF
+  IF (PRESENT(i_vals_ptr)) THEN
+     narg=narg+1
+     val%i_val => i_vals_ptr
+     val%type_of_var=integer_t
+  END IF
+
+  IF (PRESENT(c_val)) THEN
+     CPASSERT(LEN_TRIM(c_val)<=default_string_length)
+!FM        CPPrecondition(.NOT.PRESENT(c_vals),cp_failure_level,routineP,failure)
+!FM        CPPrecondition(.NOT.PRESENT(c_vals_ptr),cp_failure_level,routineP,failure)
+     narg=narg+1
+     ALLOCATE(val%c_val(1))
+     val%c_val(1)=c_val
+     val%type_of_var=char_t
+  END IF
+  IF (PRESENT(c_vals)) THEN
+!FM        CPPrecondition(.NOT.PRESENT(c_vals_ptr),cp_failure_level,routineP,failure)
+     CPASSERT(ALL(LEN_TRIM(c_vals)<=default_string_length))
+     narg=narg+1
+     ALLOCATE(val%c_val(SIZE(c_vals)))
+     val%c_val=c_vals
+     val%type_of_var=char_t
+  END IF
+  IF (PRESENT(c_vals_ptr)) THEN
+     narg=narg+1
+     val%c_val => c_vals_ptr
+     val%type_of_var=char_t
+  END IF
+  IF (PRESENT(lc_val)) THEN
+!FM        CPPrecondition(.NOT.PRESENT(lc_vals),cp_failure_level,routineP,failure)
+!FM        CPPrecondition(.NOT.PRESENT(lc_vals_ptr),cp_failure_level,routineP,failure)
+     narg=narg+1
+     len_c=LEN_TRIM(lc_val)
+     nVal=MAX(1,CEILING(REAL(len_c,dp)/80._dp))
+     ALLOCATE(val%c_val(nVal))
+
+     IF (len_c == 0) THEN
+        val%c_val(1) = ""
+     ELSE
+        DO i=1,nVal
+           val%c_val(i)=lc_val((i-1)*default_string_length+1:&
+                MIN(len_c,i*default_string_length))
+        END DO
+     END IF
+     val%type_of_var=lchar_t
+  END IF
+  IF (PRESENT(lc_vals)) THEN
+     CPASSERT(ALL(LEN_TRIM(lc_vals)<=default_string_length))
+     narg=narg+1
+     ALLOCATE(val%c_val(SIZE(lc_vals)))
+     val%c_val=lc_vals
+     val%type_of_var=lchar_t
+  END IF
+  IF (PRESENT(lc_vals_ptr)) THEN
+     narg=narg+1
+     val%c_val => lc_vals_ptr
+     val%type_of_var=lchar_t
+  END IF
+  CPASSERT(narg<=1)
+  IF (PRESENT(enum)) THEN
+     IF (ASSOCIATED(enum)) THEN
+        IF (val%type_of_var/=no_t.AND.val%type_of_var/=integer_t.AND.&
+             val%type_of_var/=enum_t) THEN
+           CPABORT("")
+        END IF
+        IF (ASSOCIATED(val%i_val)) THEN
+           val%type_of_var=enum_t
+           val%enum=>enum
+           CALL enum_retain(enum)
+        END IF
+     END IF
+  END IF
+  CPASSERT(ASSOCIATED(val%enum).eqv.val%type_of_var==enum_t)
 END SUBROUTINE val_create
 
 ! *****************************************************************************
 !> \brief releases the given val
 !> \param val the val to release
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author fawzi
 ! *****************************************************************************
-SUBROUTINE val_release(val,error)
+SUBROUTINE val_release(val)
     TYPE(val_type), POINTER                  :: val
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'val_release', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
-
-  failure=.FALSE.
-
   IF (ASSOCIATED(val)) THEN
-     CPPreconditionNoFail(val%ref_count>0,cp_failure_level,routineP,error)
+     CPASSERT(val%ref_count>0)
      val%ref_count=val%ref_count-1
      IF (val%ref_count==0) THEN
         IF (ASSOCIATED(val%l_val)) THEN
-           DEALLOCATE(val%l_val,stat=stat)
-           CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+           DEALLOCATE(val%l_val)
         END IF
         IF (ASSOCIATED(val%i_val)) THEN
-           DEALLOCATE(val%i_val,stat=stat)
-           CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+           DEALLOCATE(val%i_val)
         END IF
         IF (ASSOCIATED(val%r_val)) THEN
-           DEALLOCATE(val%r_val,stat=stat)
-           CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+           DEALLOCATE(val%r_val)
         END IF
         IF (ASSOCIATED(val%c_val)) THEN
-           DEALLOCATE(val%c_val,stat=stat)
-           CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+           DEALLOCATE(val%c_val)
         END IF
-        CALL enum_release(val%enum,error=error)
+        CALL enum_release(val%enum)
         val%type_of_var=no_t
-        DEALLOCATE(val,stat=stat)
-        CPPostconditionNoFail(stat==0,cp_warning_level,routineP,error)
+        DEALLOCATE(val)
      END IF
   END IF
   NULLIFY(val)
@@ -345,26 +314,17 @@ END SUBROUTINE val_release
 ! *****************************************************************************
 !> \brief retains the given val
 !> \param val the val to retain
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author fawzi
 ! *****************************************************************************
-SUBROUTINE val_retain(val,error)
+SUBROUTINE val_retain(val)
     TYPE(val_type), POINTER                  :: val
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'val_retain', &
       routineP = moduleN//':'//routineN
 
-    LOGICAL                                  :: failure
-
-  failure=.FALSE.
-
-  CPPrecondition(ASSOCIATED(val),cp_failure_level,routineP,error,failure)
-  IF (.NOT. failure) THEN
-     CPPreconditionNoFail(val%ref_count>0,cp_failure_level,routineP,error)
-     val%ref_count=val%ref_count+1
-  END IF
+  CPASSERT(ASSOCIATED(val))
+  CPASSERT(val%ref_count>0)
+  val%ref_count=val%ref_count+1
 END SUBROUTINE val_retain
 
 ! *****************************************************************************
@@ -387,8 +347,6 @@ END SUBROUTINE val_retain
 !>        it might be longet than default_string_length)
 !> \param type_of_var ...
 !> \param enum ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author fawzi
 !> \note
 !>      using an enumeration only i_val/i_vals/i_vals_ptr are accepted
@@ -396,7 +354,7 @@ END SUBROUTINE val_retain
 !>      the c_val is too short to contain the string
 ! *****************************************************************************
 SUBROUTINE val_get(val,has_l,has_i,has_r,has_lc,has_c,l_val,l_vals,i_val,&
-     i_vals,r_val,r_vals,c_val,c_vals,len_c,type_of_var,enum,error)
+     i_vals,r_val,r_vals,c_val,c_vals,len_c,type_of_var,enum)
     TYPE(val_type), POINTER                  :: val
     LOGICAL, INTENT(out), OPTIONAL           :: has_l, has_i, has_r, has_lc, &
                                                 has_c, l_val
@@ -412,15 +370,11 @@ SUBROUTINE val_get(val,has_l,has_i,has_r,has_lc,has_c,l_val,l_vals,i_val,&
     INTEGER, INTENT(out), OPTIONAL           :: len_c, type_of_var
     TYPE(enumeration_type), OPTIONAL, &
       POINTER                                :: enum
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'val_get', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: i, l_in, l_out
-    LOGICAL                                  :: failure
-
-  failure=.FALSE.
 
   IF (PRESENT(has_l)) has_l=ASSOCIATED(val%l_val)
   IF (PRESENT(has_i)) has_i=ASSOCIATED(val%i_val)
@@ -433,10 +387,10 @@ SUBROUTINE val_get(val,has_l,has_i,has_r,has_lc,has_c,l_val,l_vals,i_val,&
         IF (SIZE(val%l_val)>0) THEN
            l_val=val%l_val(1)
         ELSE
-           CPAssert(.FALSE.,cp_failure_level,routineP,error,failure)
+           CPABORT("")
         END IF
      ELSE
-        CPAssert(.FALSE.,cp_failure_level,routineP,error,failure)
+        CPABORT("")
      END IF
   END IF
 
@@ -446,10 +400,10 @@ SUBROUTINE val_get(val,has_l,has_i,has_r,has_lc,has_c,l_val,l_vals,i_val,&
         IF (SIZE(val%i_val)>0) THEN
            i_val=val%i_val(1)
         ELSE
-           CPAssert(.FALSE.,cp_failure_level,routineP,error,failure)
+           CPABORT("")
         END IF
      ELSE
-        CPAssert(.FALSE.,cp_failure_level,routineP,error,failure)
+        CPABORT("")
      END IF
   END IF
 
@@ -459,10 +413,10 @@ SUBROUTINE val_get(val,has_l,has_i,has_r,has_lc,has_c,l_val,l_vals,i_val,&
         IF (SIZE(val%r_val)>0) THEN
            r_val=val%r_val(1)
         ELSE
-           CPAssert(.FALSE.,cp_failure_level,routineP,error,failure)
+           CPABORT("")
         END IF
      ELSE
-        CPAssert(.FALSE.,cp_failure_level,routineP,error,failure)
+        CPABORT("")
      END IF
   END IF
 
@@ -474,9 +428,10 @@ SUBROUTINE val_get(val,has_l,has_i,has_r,has_lc,has_c,l_val,l_vals,i_val,&
            IF (val%type_of_var==lchar_t) THEN
               l_in=default_string_length*(SIZE(val%c_val)-1)+&
                    LEN_TRIM(val%c_val(SIZE(val%c_val)))
-              CALL cp_assert(l_out>=l_in,cp_warning_level,cp_assertion_failed,&
-                   routineP,"val_get will truncate value, value beginning with '"//&
-                   TRIM(val%c_val(1))//"' is too long for variable",error,failure)
+              IF(l_out<l_in)&
+                 CALL cp_warn(__LOCATION__,&
+                      "val_get will truncate value, value beginning with '"//&
+                      TRIM(val%c_val(1))//"' is too long for variable")
               DO i=1,SIZE(val%c_val)
                  c_val((i-1)*default_string_length+1:MIN(l_out,i*default_string_length))=&
                       val%c_val(i)(1:MIN(80,l_out-(i-1)*default_string_length))
@@ -486,22 +441,23 @@ SUBROUTINE val_get(val,has_l,has_i,has_r,has_lc,has_c,l_val,l_vals,i_val,&
                    c_val(SIZE(val%c_val)*default_string_length+1:l_out)=""
            ELSE
               l_in=LEN_TRIM(val%c_val(1))
-              CALL cp_assert(l_out>=l_in,cp_warning_level,cp_assertion_failed,&
-                   routineP,"val_get will truncate value, value '"//&
-                   TRIM(val%c_val(1))//"' is too long for variable",error,failure)
+              IF(l_out<l_in)&
+                 CALL cp_warn(__LOCATION__,&
+                      "val_get will truncate value, value '"//&
+                      TRIM(val%c_val(1))//"' is too long for variable")
               c_val=val%c_val(1)
            END IF
         ELSE
-           CPAssert(.FALSE.,cp_failure_level,routineP,error,failure)
+           CPABORT("")
         END IF
      ELSE IF (ASSOCIATED(val%i_val).AND.ASSOCIATED(val%enum)) THEN
         IF (SIZE(val%i_val)>0) THEN
-           c_val=enum_i2c(val%enum,val%i_val(1),error=error)
+           c_val=enum_i2c(val%enum,val%i_val(1))
         ELSE
-           CPAssert(.FALSE.,cp_failure_level,routineP,error,failure)
+           CPABORT("")
         END IF
      ELSE
-        CPAssert(.FALSE.,cp_failure_level,routineP,error,failure)
+        CPABORT("")
      END IF
   END IF
 
@@ -519,7 +475,7 @@ SUBROUTINE val_get(val,has_l,has_i,has_r,has_lc,has_c,l_val,l_vals,i_val,&
         END IF
      ELSE IF (ASSOCIATED(val%i_val).AND.ASSOCIATED(val%enum)) THEN
         IF (SIZE(val%i_val)>0) THEN
-           len_c=LEN_TRIM(enum_i2c(val%enum,val%i_val(1),error=error))
+           len_c=LEN_TRIM(enum_i2c(val%enum,val%i_val(1)))
         ELSE
            len_c=-HUGE(0)
         END IF
@@ -542,37 +498,31 @@ END SUBROUTINE val_get
 !>        (overrides unit_str)
 !> \param unit_str the unit of mesure in wich the output should be written
 !> \param fmt ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author fawzi
 !> \note
 !>      unit of mesure used only for reals
 ! *****************************************************************************
-SUBROUTINE val_write(val,unit_nr,unit,unit_str,fmt,error)
+SUBROUTINE val_write(val,unit_nr,unit,unit_str,fmt)
     TYPE(val_type), POINTER                  :: val
     INTEGER, INTENT(in)                      :: unit_nr
     TYPE(cp_unit_type), OPTIONAL, POINTER    :: unit
     CHARACTER(len=*), INTENT(in), OPTIONAL   :: unit_str, fmt
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'val_write', &
       routineP = moduleN//':'//routineN
 
     CHARACTER(len=default_string_length)     :: c_string, myfmt, rcval
     INTEGER                                  :: i, iend, item, j, l
-    LOGICAL                                  :: failure
     TYPE(cp_unit_type), POINTER              :: my_unit
-
-  failure=.FALSE.
 
   NULLIFY(my_unit)
   myfmt = ""
   IF (PRESENT(fmt)) myfmt = fmt
   IF (PRESENT(unit)) my_unit => unit
   IF (ASSOCIATED(my_unit)) THEN
-     CALL cp_unit_retain(my_unit,error=error)
+     CALL cp_unit_retain(my_unit)
   ELSE IF (PRESENT(unit_str)) THEN
-     CALL cp_unit_create(my_unit,unit_str,error=error)
+     CALL cp_unit_create(my_unit,unit_str)
   END IF
   IF (ASSOCIATED(val)) THEN
      SELECT CASE(val%type_of_var)
@@ -587,7 +537,7 @@ SUBROUTINE val_write(val,unit_nr,unit,unit_str,fmt,error)
                    val%l_val(i)
            END DO
         ELSE
-           CPAssert(.FALSE.,cp_failure_level,routineP,error,failure)
+           CPABORT("")
         END IF
      CASE (integer_t)
         IF (ASSOCIATED(val%i_val)) THEN
@@ -618,7 +568,7 @@ SUBROUTINE val_write(val,unit_nr,unit,unit_str,fmt,error)
              i = i + 1
            END DO loop_i
         ELSE
-           CPAssert(.FALSE.,cp_failure_level,routineP,error,failure)
+           CPABORT("")
         END IF
      CASE (real_t)
         IF (ASSOCIATED(val%r_val)) THEN
@@ -628,14 +578,14 @@ SUBROUTINE val_write(val,unit_nr,unit,unit_str,fmt,error)
                  WRITE(unit=unit_nr,fmt="("//TRIM(myfmt)//")",advance="NO")
               END IF
               IF (ASSOCIATED(my_unit)) THEN
-                 WRITE(rcval,"(ES25.16)")cp_unit_from_cp2k1(val%r_val(i),my_unit,error=error)
+                 WRITE(rcval,"(ES25.16)")cp_unit_from_cp2k1(val%r_val(i),my_unit)
               ELSE
                  WRITE(rcval,"(ES25.16)")val%r_val(i)
               END IF
               WRITE(unit=unit_nr,fmt="(' ',A)",advance="NO")TRIM(rcval)
            END DO
         ELSE
-           CPAssert(.FALSE.,cp_failure_level,routineP,error,failure)
+           CPABORT("")
         END IF
      CASE (char_t)
         IF (ASSOCIATED(val%c_val)) THEN
@@ -658,7 +608,7 @@ SUBROUTINE val_write(val,unit_nr,unit,unit_str,fmt,error)
               END IF
            END DO
         ELSE
-           CPAssert(.FALSE.,cp_failure_level,routineP,error,failure)
+           CPABORT("")
         END IF
      CASE (lchar_t)
         IF (ASSOCIATED(val%c_val)) THEN
@@ -670,13 +620,13 @@ SUBROUTINE val_write(val,unit_nr,unit,unit_str,fmt,error)
               WRITE(unit=unit_nr,fmt='(a)',advance="NO") TRIM(val%c_val(SIZE(val%c_val)))
            END IF
         ELSE
-           CPAssert(.FALSE.,cp_failure_level,routineP,error,failure)
+           CPABORT("")
         END IF
      CASE (enum_t)
         IF (ASSOCIATED(val%i_val)) THEN
            l=0
            DO i=1,SIZE(val%i_val)
-              c_string=enum_i2c(val%enum,val%i_val(i),error=error)
+              c_string=enum_i2c(val%enum,val%i_val(i))
               IF (l>10.AND.l+LEN_TRIM(c_string)>76)THEN
                  WRITE(unit=unit_nr,fmt="(' ',A)")default_continuation_character
                  WRITE(unit=unit_nr,fmt="("//TRIM(myfmt)//")",advance="NO")
@@ -687,19 +637,18 @@ SUBROUTINE val_write(val,unit_nr,unit,unit_str,fmt,error)
               WRITE(unit=unit_nr,fmt="(' ',a)",advance="NO") TRIM(c_string)
            END DO
         ELSE
-           CPAssert(.FALSE.,cp_failure_level,routineP,error,failure)
+           CPABORT("")
         END IF
 
      CASE(no_t)
         WRITE(unit=unit_nr,fmt="(' *empty*')",advance="NO")
      CASE default
-        CALL cp_assert(.FALSE.,cp_failure_level,cp_assertion_failed,&
-             routineP,"unexpected type_of_var for val ",error,failure)
+        CPABORT("unexpected type_of_var for val ")
      END SELECT
   ELSE
      WRITE(unit=unit_nr,fmt="(' *null*')",advance="NO")
   END IF
-  IF (ASSOCIATED(my_unit)) CALL cp_unit_release(my_unit,error=error)
+  IF (ASSOCIATED(my_unit)) CALL cp_unit_release(my_unit)
   WRITE(unit=unit_nr,fmt="()")
 END SUBROUTINE val_write
 
@@ -708,31 +657,26 @@ END SUBROUTINE val_write
 !> \param val ...
 !> \param string ...
 !> \param unit ...
-!> \param error ...
 !> \date    10.03.2005
 !> \par History
 !>          17.01.2006, MK, Optional argument unit for the conversion to the external unit added
 !> \author  MK
 !> \version 1.0
 ! *****************************************************************************
-  SUBROUTINE val_write_internal(val,string,unit,error)
+  SUBROUTINE val_write_internal(val,string,unit)
 
     TYPE(val_type), POINTER                  :: val
     CHARACTER(LEN=*), INTENT(OUT)            :: string
     TYPE(cp_unit_type), OPTIONAL, POINTER    :: unit
-    TYPE(cp_error_type), INTENT(INOUT)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'val_write_internal', &
       routineP = moduleN//':'//routineN
 
     CHARACTER(LEN=default_string_length)     :: enum_string
     INTEGER                                  :: i, ipos
-    LOGICAL                                  :: failure
     REAL(KIND=dp)                            :: value
 
 ! -------------------------------------------------------------------------
-
-    failure = .FALSE.
 
     string = ""
 
@@ -745,7 +689,7 @@ END SUBROUTINE val_write
             WRITE (UNIT=string(2*i-1:),FMT="(L2)") val%l_val(i)
           END DO
         ELSE
-          CPAssert(.FALSE.,cp_failure_level,routineP,error,failure)
+          CPABORT("")
         END IF
       CASE (integer_t)
         IF (ASSOCIATED(val%i_val)) THEN
@@ -753,25 +697,23 @@ END SUBROUTINE val_write
             WRITE (UNIT=string(12*i-11:),FMT="(I12)") val%i_val(i)
           END DO
         ELSE
-          CPAssert(.FALSE.,cp_failure_level,routineP,error,failure)
+          CPABORT("")
         END IF
       CASE (real_t)
         IF (ASSOCIATED(val%r_val)) THEN
           IF (PRESENT(unit)) THEN
             DO i=1,SIZE(val%r_val)
               value = cp_unit_from_cp2k(value=val%r_val(i),&
-                                        unit_str=cp_unit_desc(unit=unit,&
-                                                              error=error),&
-                                        error=error)
-              WRITE (UNIT=string(16*i-15:),FMT="(ES16.8)") value
+                                        unit_str=cp_unit_desc(unit=unit))
+              WRITE (UNIT=string(16*i-15:),FMT="(ES16.8E3)") value
             END DO
           ELSE
             DO i=1,SIZE(val%r_val)
-              WRITE (UNIT=string(16*i-15:),FMT="(ES16.8)") val%r_val(i)
+              WRITE (UNIT=string(16*i-15:),FMT="(ES16.8E3)") val%r_val(i)
             END DO
           END IF
         ELSE
-          CPAssert(.FALSE.,cp_failure_level,routineP,error,failure)
+          CPABORT("")
         END IF
       CASE (char_t)
         IF (ASSOCIATED(val%c_val)) THEN
@@ -781,27 +723,25 @@ END SUBROUTINE val_write
             ipos = ipos + LEN_TRIM(ADJUSTL(val%c_val(i))) + 1
           END DO
         ELSE
-          CPAssert(.FALSE.,cp_failure_level,routineP,error,failure)
+          CPABORT("")
         END IF
       CASE (lchar_t)
         IF (ASSOCIATED(val%c_val)) THEN
-          CALL val_get(val,c_val=string,error=error)
+          CALL val_get(val,c_val=string)
         ELSE
-          CPAssert(.FALSE.,cp_failure_level,routineP,error,failure)
+          CPABORT("")
         END IF
       CASE (enum_t)
         IF (ASSOCIATED(val%i_val)) THEN
           DO i=1,SIZE(val%i_val)
-            enum_string = enum_i2c(val%enum,val%i_val(i),error)
+            enum_string = enum_i2c(val%enum,val%i_val(i))
             WRITE (UNIT=string,FMT="(A)") TRIM(ADJUSTL(enum_string))
           END DO
         ELSE
-          CPAssert(.FALSE.,cp_failure_level,routineP,error,failure)
+          CPABORT("")
         END IF
       CASE default
-        CALL cp_assert(.FALSE.,cp_failure_level,cp_assertion_failed,&
-                       routineP,"unexpected type_of_var for val ",error,&
-                       failure)
+        CPABORT("unexpected type_of_var for val ")
       END SELECT
 
     END IF
@@ -812,56 +752,40 @@ END SUBROUTINE val_write
 !> \brief creates a copy of the given value
 !> \param val_in the value to copy
 !> \param val_out the value tha will be created
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \author fawzi
 ! *****************************************************************************
-SUBROUTINE val_duplicate(val_in,val_out,error)
+SUBROUTINE val_duplicate(val_in,val_out)
     TYPE(val_type), POINTER                  :: val_in, val_out
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'val_duplicate', &
       routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: stat
-    LOGICAL                                  :: failure
+  CPASSERT(ASSOCIATED(val_in))
+  CPASSERT(.NOT.ASSOCIATED(val_out))
+  ALLOCATE(val_out)
+  last_val_id=last_val_id+1
+  val_out%id_nr=last_val_id
+  val_out%type_of_var=val_in%type_of_var
+  val_out%ref_count=1
+  val_out%enum => val_in%enum
+  IF (ASSOCIATED(val_out%enum)) CALL enum_retain(val_out%enum)
 
-  failure=.FALSE.
-  CPPrecondition(ASSOCIATED(val_in),cp_failure_level,routineP,error,failure)
-  CPPrecondition(.NOT.ASSOCIATED(val_out),cp_failure_level,routineP,error,failure)
-  IF (.NOT. failure) THEN
-     ALLOCATE(val_out,stat=stat)
-     CPPostcondition(stat==0,cp_failure_level,routineP,error,failure)
+  NULLIFY(val_out%l_val,val_out%i_val,val_out%c_val,val_out%r_val)
+  IF (ASSOCIATED(val_in%l_val)) THEN
+     ALLOCATE(val_out%l_val(SIZE(val_in%l_val)))
+     val_out%l_val=val_in%l_val
   END IF
-  IF (.NOT.failure) THEN
-     last_val_id=last_val_id+1
-     val_out%id_nr=last_val_id
-     val_out%type_of_var=val_in%type_of_var
-     val_out%ref_count=1
-     val_out%enum => val_in%enum
-     IF (ASSOCIATED(val_out%enum)) CALL enum_retain(val_out%enum,error=error)
-
-     NULLIFY(val_out%l_val,val_out%i_val,val_out%c_val,val_out%r_val)
-     IF (ASSOCIATED(val_in%l_val)) THEN
-        ALLOCATE(val_out%l_val(SIZE(val_in%l_val)),stat=stat)
-        CPPostcondition(stat==0,cp_fatal_level,routineP,error,failure)
-        val_out%l_val=val_in%l_val
-     END IF
-     IF (ASSOCIATED(val_in%i_val)) THEN
-        ALLOCATE(val_out%i_val(SIZE(val_in%i_val)),stat=stat)
-        CPPostcondition(stat==0,cp_fatal_level,routineP,error,failure)
-        val_out%i_val=val_in%i_val
-     END IF
-     IF (ASSOCIATED(val_in%r_val)) THEN
-        ALLOCATE(val_out%r_val(SIZE(val_in%r_val)),stat=stat)
-        CPPostcondition(stat==0,cp_fatal_level,routineP,error,failure)
-        val_out%r_val=val_in%r_val
-     END IF
-     IF (ASSOCIATED(val_in%c_val)) THEN
-        ALLOCATE(val_out%c_val(SIZE(val_in%c_val)),stat=stat)
-        CPPostcondition(stat==0,cp_fatal_level,routineP,error,failure)
-        val_out%c_val=val_in%c_val
-     END IF
+  IF (ASSOCIATED(val_in%i_val)) THEN
+     ALLOCATE(val_out%i_val(SIZE(val_in%i_val)))
+     val_out%i_val=val_in%i_val
+  END IF
+  IF (ASSOCIATED(val_in%r_val)) THEN
+     ALLOCATE(val_out%r_val(SIZE(val_in%r_val)))
+     val_out%r_val=val_in%r_val
+  END IF
+  IF (ASSOCIATED(val_in%c_val)) THEN
+     ALLOCATE(val_out%c_val(SIZE(val_in%c_val)))
+     val_out%c_val=val_in%c_val
   END IF
 END SUBROUTINE val_duplicate
 

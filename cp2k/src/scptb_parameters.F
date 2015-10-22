@@ -25,6 +25,7 @@ MODULE scptb_parameters
   USE periodic_table,                  ONLY: ptable
   USE scptb_types,                     ONLY: scptb_parameter_type
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
 
@@ -41,23 +42,20 @@ CONTAINS
 ! *****************************************************************************
 !> \brief Default parameter sets for SCPTB method
 !> \param param ...
-!> \param error ...
 ! *****************************************************************************
-  SUBROUTINE scptb_default_parameter ( param, error)
+  SUBROUTINE scptb_default_parameter ( param)
     TYPE(scptb_parameter_type), &
       INTENT(INOUT)                          :: param
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'scptb_default_parameter', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: i, l
-    LOGICAL                                  :: failure
 
     param%parameterization = "UZH.00.00"
     SELECT CASE (TRIM(param%key))
     CASE DEFAULT
-       CPPostcondition(.FALSE.,cp_failure_level,routineP,error,failure)
+       CPABORT("")
     CASE ("XX")
        param%defined          = .TRUE.
     CASE ("H")

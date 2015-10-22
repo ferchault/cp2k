@@ -41,9 +41,8 @@ MODULE qs_operators_ao
                                              neighbor_list_iterator_p_type,&
                                              neighbor_list_iterator_release,&
                                              neighbor_list_set_p_type
-  USE timings,                         ONLY: timeset,&
-                                             timestop
 #include "./common/cp_common_uses.f90"
+#include "./base/base_uses.f90"
 
   IMPLICIT NONE
   PRIVATE
@@ -62,29 +61,27 @@ CONTAINS
 !>          Cartesian Gaussian functions.
 !> \param qs_env ...
 !> \param matrix ...
-!> \param error ...
 !> \date    27.02.2009
 !> \author  VW
 !> \version 1.0
 ! *****************************************************************************
-  SUBROUTINE build_lin_mom_matrix(qs_env,matrix,error)
+  SUBROUTINE build_lin_mom_matrix(qs_env,matrix)
 
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(cp_dbcsr_p_type), DIMENSION(:), &
       POINTER                                :: matrix
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'build_lin_mom_matrix', &
       routineP = moduleN//':'//routineN
 
-    INTEGER :: handle, i, iatom, icol, ikind, inode, irow, iset, istat, &
-      jatom, jkind, jset, last_jatom, ldai, maxco, maxlgto, maxsgf, natom, &
-      ncoa, ncob, neighbor_list_id, nkind, nseta, nsetb, sgfa, sgfb
+    INTEGER :: handle, i, iatom, icol, ikind, inode, irow, iset, jatom, &
+      jkind, jset, last_jatom, ldai, maxco, maxlgto, maxsgf, natom, ncoa, &
+      ncob, neighbor_list_id, nkind, nseta, nsetb, sgfa, sgfb
     INTEGER, DIMENSION(:), POINTER           :: la_max, la_min, lb_max, &
                                                 lb_min, npgfa, npgfb, nsgfa, &
                                                 nsgfb
     INTEGER, DIMENSION(:, :), POINTER        :: first_sgfa, first_sgfb
-    LOGICAL                                  :: failure, found, new_atom_b
+    LOGICAL                                  :: found, new_atom_b
     REAL(KIND=dp)                            :: dab, rab2
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :)                        :: work
@@ -114,12 +111,11 @@ CONTAINS
 
     CALL timeset(routineN,handle)
 
-    failure = .FALSE.
 
     NULLIFY(cell,sab_orb,qs_kind_set,particle_set,para_env)
     NULLIFY(logger)
 
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
 
     CALL get_qs_env(qs_env=qs_env,&
                     qs_kind_set=qs_kind_set,&
@@ -127,8 +123,7 @@ CONTAINS
                     neighbor_list_id=neighbor_list_id,&
                     para_env=para_env,&
                     sab_orb=sab_orb,&
-                    cell=cell,&
-                    error=error)
+                    cell=cell)
 
     nkind = SIZE(qs_kind_set)
     natom = SIZE(particle_set)
@@ -143,17 +138,15 @@ CONTAINS
     ldai = ncoset(maxlgto+1)
     CALL init_orbital_pointers(ldai)
 
-    ALLOCATE(rr_work(ldai,ldai,3),intab(maxco,maxco,3),work(maxco,maxsgf),integral(3),STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(rr_work(ldai,ldai,3),intab(maxco,maxco,3),work(maxco,maxsgf),integral(3))
     rr_work(:,:,:) = 0.0_dp
     intab(:,:,:) = 0.0_dp
     work(:,:) = 0.0_dp
 
-    ALLOCATE (basis_set_list(nkind),STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (basis_set_list(nkind))
     DO ikind=1,nkind
       qs_kind => qs_kind_set(ikind)
-      CALL get_qs_kind(qs_kind=qs_kind,orb_basis_set=basis_set_a)
+      CALL get_qs_kind(qs_kind=qs_kind,basis_set=basis_set_a)
       IF (ASSOCIATED(basis_set_a)) THEN
         basis_set_list(ikind)%gto_basis_set => basis_set_a
       ELSE
@@ -212,7 +205,7 @@ CONTAINS
              NULLIFY(integral(i)%block)
              CALL cp_dbcsr_get_block_p(matrix=matrix(i)%matrix,&
                   row=irow,col=icol,BLOCK=integral(i)%block,found=found)
-             CPPostcondition(ASSOCIATED(INTEGRAL(i)%block),cp_failure_level,routineP,error,failure)
+             CPASSERT(ASSOCIATED(INTEGRAL(i)%block))
           ENDDO
        END IF
 
@@ -237,7 +230,7 @@ CONTAINS
                           rpgfa(:,iset),zeta(:,iset),&
                           lb_max(jset),lb_min(jset),npgfb(jset),&
                           rpgfb(:,jset),zetb(:,jset),&
-                          rab,intab,SIZE(rr_work,1),rr_work,error)
+                          rab,intab,SIZE(rr_work,1),rr_work)
 
              ! *** Contraction step ***
 
@@ -277,20 +270,19 @@ CONTAINS
 
     ! *** Release work storage ***
 
-    DEALLOCATE(intab,work,integral,basis_set_list,STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(intab,work,integral,basis_set_list)
 
 !   *** Print the spin orbit matrix, if requested ***
 
     !IF (BTEST(cp_print_key_should_output(logger%iter_info,&
-    !     qs_env%input,"DFT%PRINT%AO_MATRICES/LINEAR_MOMENTUM",error=error),cp_p_file)) THEN
+    !     qs_env%input,"DFT%PRINT%AO_MATRICES/LINEAR_MOMENTUM"),cp_p_file)) THEN
     !   iw = cp_print_key_unit_nr(logger,qs_env%input,"DFT%PRINT%AO_MATRICES/LINEA_MOMENTUM",&
-    !        extension=".Log",error=error)
-    !   CALL cp_dbcsr_write_sparse_matrix(matrix(1)%matrix,4,6,qs_env,para_env,output_unit=iw,error=error)
-    !   CALL cp_dbcsr_write_sparse_matrix(matrix(2)%matrix,4,6,qs_env,para_env,output_unit=iw,error=error)
-    !   CALL cp_dbcsr_write_sparse_matrix(matrix(3)%matrix,4,6,qs_env,para_env,output_unit=iw,error=error)
+    !        extension=".Log")
+    !   CALL cp_dbcsr_write_sparse_matrix(matrix(1)%matrix,4,6,qs_env,para_env,output_unit=iw)
+    !   CALL cp_dbcsr_write_sparse_matrix(matrix(2)%matrix,4,6,qs_env,para_env,output_unit=iw)
+    !   CALL cp_dbcsr_write_sparse_matrix(matrix(3)%matrix,4,6,qs_env,para_env,output_unit=iw)
     !   CALL cp_print_key_finished_output(iw,logger,qs_env%input,&
-    !        "DFT%PRINT%AO_MATRICES/LINEAR_MOMENTUM", error=error)
+    !        "DFT%PRINT%AO_MATRICES/LINEAR_MOMENTUM")
     !END IF
 
     CALL timestop(handle)
@@ -315,13 +307,12 @@ CONTAINS
 !> \param intab ...
 !> \param ldrr ...
 !> \param rr ...
-!> \param error ...
 !> \date    02.03.2009
 !> \author  VW
 !> \version 1.0
 ! *****************************************************************************
   SUBROUTINE lin_mom(la_max,la_min,npgfa,rpgfa,zeta,lb_max,lb_min,npgfb,rpgfb,zetb,&
-                     rab,intab,ldrr,rr,error)
+                     rab,intab,ldrr,rr)
     INTEGER, INTENT(IN)                      :: la_max, la_min, npgfa
     REAL(KIND=dp), DIMENSION(:), INTENT(IN)  :: rpgfa, zeta
     INTEGER, INTENT(IN)                      :: lb_max, lb_min, npgfb
@@ -333,7 +324,6 @@ CONTAINS
     REAL(dp), &
       DIMENSION(0:ldrr-1, 0:ldrr-1, 3), &
       INTENT(INOUT)                          :: rr
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'lin_mom', &
       routineP = moduleN//':'//routineN
@@ -440,31 +430,29 @@ CONTAINS
 !> \param qs_env ...
 !> \param matrix ...
 !> \param rc ...
-!> \param error ...
 !> \date    27.02.2009
 !> \author  VW
 !> \version 1.0
 ! *****************************************************************************
 
-  SUBROUTINE build_ang_mom_matrix(qs_env,matrix,rc,error)
+  SUBROUTINE build_ang_mom_matrix(qs_env,matrix,rc)
 
     TYPE(qs_environment_type), POINTER       :: qs_env
     TYPE(cp_dbcsr_p_type), DIMENSION(:), &
       POINTER                                :: matrix
     REAL(dp), DIMENSION(:), INTENT(IN)       :: rc
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'build_ang_mom_matrix', &
       routineP = moduleN//':'//routineN
 
-    INTEGER :: handle, i, iatom, icol, ikind, inode, irow, iset, istat, &
-      jatom, jkind, jset, last_jatom, ldai, maxco, maxlgto, maxsgf, natom, &
-      ncoa, ncob, neighbor_list_id, nkind, nseta, nsetb, sgfa, sgfb
+    INTEGER :: handle, i, iatom, icol, ikind, inode, irow, iset, jatom, &
+      jkind, jset, last_jatom, ldai, maxco, maxlgto, maxsgf, natom, ncoa, &
+      ncob, neighbor_list_id, nkind, nseta, nsetb, sgfa, sgfb
     INTEGER, DIMENSION(:), POINTER           :: la_max, la_min, lb_max, &
                                                 lb_min, npgfa, npgfb, nsgfa, &
                                                 nsgfb
     INTEGER, DIMENSION(:, :), POINTER        :: first_sgfa, first_sgfb
-    LOGICAL                                  :: failure, found, new_atom_b
+    LOGICAL                                  :: found, new_atom_b
     REAL(KIND=dp)                            :: dab, rab2
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :)                        :: work
@@ -494,12 +482,11 @@ CONTAINS
 
     CALL timeset(routineN,handle)
 
-    failure = .FALSE.
 
     NULLIFY(cell,sab_all,qs_kind_set,particle_set,para_env)
     NULLIFY(logger)
 
-    logger => cp_error_get_logger(error)
+    logger => cp_get_default_logger()
 
     CALL get_qs_env(qs_env=qs_env,&
                     qs_kind_set=qs_kind_set,&
@@ -507,8 +494,7 @@ CONTAINS
                     neighbor_list_id=neighbor_list_id,&
                     para_env=para_env,&
                     sab_all=sab_all,&
-                    cell=cell,&
-                    error=error)
+                    cell=cell)
 
     nkind = SIZE(qs_kind_set)
     natom = SIZE(particle_set)
@@ -523,17 +509,15 @@ CONTAINS
     ldai = ncoset(maxlgto+1)
     CALL init_orbital_pointers(ldai)
 
-    ALLOCATE(rr_work(ldai,ldai,3),intab(maxco,maxco,3),work(maxco,maxsgf),integral(3),STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(rr_work(ldai,ldai,3),intab(maxco,maxco,3),work(maxco,maxsgf),integral(3))
     rr_work(:,:,:) = 0.0_dp
     intab(:,:,:) = 0.0_dp
     work(:,:) = 0.0_dp
 
-    ALLOCATE (basis_set_list(nkind),STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (basis_set_list(nkind))
     DO ikind=1,nkind
       qs_kind => qs_kind_set(ikind)
-      CALL get_qs_kind(qs_kind=qs_kind,orb_basis_set=basis_set_a)
+      CALL get_qs_kind(qs_kind=qs_kind,basis_set=basis_set_a)
       IF (ASSOCIATED(basis_set_a)) THEN
         basis_set_list(ikind)%gto_basis_set => basis_set_a
       ELSE
@@ -594,7 +578,7 @@ CONTAINS
              NULLIFY(INTEGRAL(i)%block)
              CALL cp_dbcsr_get_block_p(matrix=matrix(i)%matrix,&
                   row=irow,col=icol,BLOCK=INTEGRAL(i)%block,found=found)
-             CPPostcondition(ASSOCIATED(INTEGRAL(i)%block),cp_failure_level,routineP,error,failure)
+             CPASSERT(ASSOCIATED(INTEGRAL(i)%block))
           ENDDO
        END IF
 
@@ -629,7 +613,7 @@ CONTAINS
                           rpgfa(:,iset),zeta(:,iset),&
                           lb_max(jset),lb_min(jset),npgfb(jset),&
                           rpgfb(:,jset),zetb(:,jset),&
-                          rab,rac,intab,SIZE(rr_work,1),rr_work,error)
+                          rab,rac,intab,SIZE(rr_work,1),rr_work)
 
              ! *** Contraction step ***
 
@@ -670,20 +654,19 @@ CONTAINS
 
     ! *** Release work storage ***
 
-    DEALLOCATE(intab,work,integral,basis_set_list,STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(intab,work,integral,basis_set_list)
 
 !   *** Print the spin orbit matrix, if requested ***
 
     !IF (BTEST(cp_print_key_should_output(logger%iter_info,&
-    !     qs_env%input,"DFT%PRINT%AO_MATRICES/ANGULAR_MOMENTUM",error=error),cp_p_file)) THEN
+    !     qs_env%input,"DFT%PRINT%AO_MATRICES/ANGULAR_MOMENTUM"),cp_p_file)) THEN
     !   iw = cp_print_key_unit_nr(logger,qs_env%input,"DFT%PRINT%AO_MATRICES/ANGULAR_MOMENTUM",&
-    !        extension=".Log",error=error)
-    !   CALL cp_dbcsr_write_sparse_matrix(matrix(1)%matrix,4,6,qs_env,para_env,output_unit=iw,error=error)
-    !   CALL cp_dbcsr_write_sparse_matrix(matrix(2)%matrix,4,6,qs_env,para_env,output_unit=iw,error=error)
-    !   CALL cp_dbcsr_write_sparse_matrix(matrix(3)%matrix,4,6,qs_env,para_env,output_unit=iw,error=error)
+    !        extension=".Log")
+    !   CALL cp_dbcsr_write_sparse_matrix(matrix(1)%matrix,4,6,qs_env,para_env,output_unit=iw)
+    !   CALL cp_dbcsr_write_sparse_matrix(matrix(2)%matrix,4,6,qs_env,para_env,output_unit=iw)
+    !   CALL cp_dbcsr_write_sparse_matrix(matrix(3)%matrix,4,6,qs_env,para_env,output_unit=iw)
     !   CALL cp_print_key_finished_output(iw,logger,qs_env%input,&
-    !        "DFT%PRINT%AO_MATRICES/ANGULAR_MOMENTUM", error=error)
+    !        "DFT%PRINT%AO_MATRICES/ANGULAR_MOMENTUM")
     !END IF
 
     CALL timestop(handle)
@@ -708,13 +691,12 @@ CONTAINS
 !> \param intab ...
 !> \param ldrr ...
 !> \param rr ...
-!> \param error ...
 !> \date    02.03.2009
 !> \author  VW
 !> \version 1.0
 ! *****************************************************************************
   SUBROUTINE ang_mom(la_max,la_min,npgfa,rpgfa,zeta,lb_max,lb_min,npgfb,rpgfb,zetb,&
-                     rab,rac,intab,ldrr,rr,error)
+                     rab,rac,intab,ldrr,rr)
     INTEGER, INTENT(IN)                      :: la_max, la_min, npgfa
     REAL(KIND=dp), DIMENSION(:), INTENT(IN)  :: rpgfa, zeta
     INTEGER, INTENT(IN)                      :: lb_max, lb_min, npgfb
@@ -726,7 +708,6 @@ CONTAINS
     REAL(dp), &
       DIMENSION(0:ldrr-1, 0:ldrr-1, 3), &
       INTENT(INOUT)                          :: rr
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'ang_mom', &
       routineP = moduleN//':'//routineN
@@ -843,33 +824,30 @@ CONTAINS
 !>               calculated in terms of the contracted basis functions
 !> \param qs_env enviroment for the lists and the basis sets
 !> \param minimum_image take into account only the first neighbors in the lists
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      06.2005 created [MI]
 !> \author MI
 ! *****************************************************************************
 
-  SUBROUTINE p_xyz_ao(op,qs_env,minimum_image,error)
+  SUBROUTINE p_xyz_ao(op,qs_env,minimum_image)
 
     TYPE(cp_dbcsr_p_type), DIMENSION(:), &
       POINTER                                :: op
     TYPE(qs_environment_type), POINTER       :: qs_env
     LOGICAL, INTENT(IN), OPTIONAL            :: minimum_image
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'p_xyz_ao', &
       routineP = moduleN//':'//routineN
 
-    INTEGER :: handle, i, iatom, icol, ikind, inode, irow, iset, istat, &
-      jatom, jkind, jset, last_jatom, ldab, ldsa, ldsb, ldwork, maxl, ncoa, &
-      ncob, nkind, nseta, nsetb, sgfa, sgfb
+    INTEGER :: handle, i, iatom, icol, ikind, inode, irow, iset, jatom, &
+      jkind, jset, last_jatom, ldab, ldsa, ldsb, ldwork, maxl, ncoa, ncob, &
+      nkind, nseta, nsetb, sgfa, sgfb
     INTEGER, DIMENSION(:), POINTER           :: la_max, la_min, lb_max, &
                                                 lb_min, npgfa, npgfb, nsgfa, &
                                                 nsgfb
     INTEGER, DIMENSION(:, :), POINTER        :: first_sgfa, first_sgfb
-    LOGICAL                                  :: failure, found, &
-                                                my_minimum_image, new_atom_b
+    LOGICAL                                  :: found, my_minimum_image, &
+                                                new_atom_b
     REAL(KIND=dp)                            :: alpha, dab, Lxo2, Lyo2, Lzo2, &
                                                 rab2
     REAL(KIND=dp), DIMENSION(3)              :: ra, rab
@@ -896,7 +874,6 @@ CONTAINS
 
     CALL timeset(routineN,handle)
 
-    failure = .FALSE.
     NULLIFY (qs_kind, qs_kind_set)
     NULLIFY (cell, particle_set)
     NULLIFY (sab_orb)
@@ -906,12 +883,12 @@ CONTAINS
 
     CALL get_qs_env(qs_env=qs_env, qs_kind_set=qs_kind_set,&
          cell=cell,particle_set=particle_set,&
-         sab_orb=sab_orb,error=error)
+         sab_orb=sab_orb)
 
     nkind = SIZE(qs_kind_set)
 
     CALL get_qs_kind_set(qs_kind_set=qs_kind_set,&
-                             maxco=ldwork, maxlgto=maxl )
+                             maxco=ldwork, maxlgto=maxl)
 
     my_minimum_image = .FALSE.
     IF(PRESENT(minimum_image)) THEN
@@ -923,24 +900,20 @@ CONTAINS
 
     ldab = ldwork
 
-    ALLOCATE(difab(ldab,ldab,3),STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(difab(ldab,ldab,3))
     difab(1:ldab,1:ldab,1:3) = 0.0_dp
-    ALLOCATE(work(ldwork,ldwork),STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(work(ldwork,ldwork))
     work(1:ldwork,1:ldwork) = 0.0_dp
-    ALLOCATE (op_dip(3),STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (op_dip(3))
 
     DO i = 1, 3
        NULLIFY (op_dip(i)%block)
     END DO
 
-    ALLOCATE (basis_set_list(nkind),STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (basis_set_list(nkind))
     DO ikind=1,nkind
       qs_kind => qs_kind_set(ikind)
-      CALL get_qs_kind(qs_kind=qs_kind,orb_basis_set=basis_set_a)
+      CALL get_qs_kind(qs_kind=qs_kind,basis_set=basis_set_a)
       IF (ASSOCIATED(basis_set_a)) THEN
         basis_set_list(ikind)%gto_basis_set => basis_set_a
       ELSE
@@ -1016,7 +989,7 @@ CONTAINS
             NULLIFY(op_dip(i)%block)
             CALL cp_dbcsr_get_block_p(matrix=op(i)%matrix,&
                  row=irow,col=icol,block=op_dip(i)%block,found=found)
-            CPPostcondition(ASSOCIATED(op_dip(i)%block),cp_failure_level,routineP,error,failure)
+            CPASSERT(ASSOCIATED(op_dip(i)%block))
          END DO
        END IF  ! new_atom_b
        rab2 = rab(1)*rab(1) + rab(2)*rab(2) + rab(3)*rab(3)
@@ -1106,11 +1079,9 @@ CONTAINS
     DO i = 1,3
        NULLIFY(op_dip(i)%block)
     END DO
-    DEALLOCATE(op_dip, STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(op_dip)
 
-    DEALLOCATE(difab,work,basis_set_list,STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(difab,work,basis_set_list)
 
     CALL timestop(handle)
 
@@ -1130,14 +1101,12 @@ CONTAINS
 !> \param order maximum order of the momentum, for the doipole order = 1
 !> \param minimum_image take into account only the first neighbors in the lists
 !> \param soft ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      03.2006 created [MI]
 !> \author MI
 ! *****************************************************************************
 
-  SUBROUTINE rRc_xyz_ao(op,qs_env,rc,order,minimum_image,soft,error)
+  SUBROUTINE rRc_xyz_ao(op,qs_env,rc,order,minimum_image,soft)
 
     TYPE(cp_dbcsr_p_type), DIMENSION(:), &
       POINTER                                :: op
@@ -1145,20 +1114,18 @@ CONTAINS
     REAL(dp)                                 :: Rc(3)
     INTEGER, INTENT(IN)                      :: order
     LOGICAL, INTENT(IN), OPTIONAL            :: minimum_image, soft
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'rRc_xyz_ao', &
       routineP = moduleN//':'//routineN
 
-    INTEGER :: handle, i, iatom, icol, ikind, imom, inode, irow, iset, istat, &
-      jatom, jkind, jset, last_jatom, ldab, ldsa, ldsb, ldwork, M_dim, maxl, &
-      ncoa, ncob, nkind, nrow, nseta, nsetb, sgfa, sgfb
+    INTEGER :: handle, i, iatom, icol, ikind, imom, inode, irow, iset, jatom, &
+      jkind, jset, last_jatom, ldab, ldsa, ldsb, ldwork, M_dim, maxl, ncoa, &
+      ncob, nkind, nrow, nseta, nsetb, sgfa, sgfb
     INTEGER, DIMENSION(:), POINTER           :: la_max, la_min, lb_max, &
                                                 npgfa, npgfb, nsgfa, nsgfb
     INTEGER, DIMENSION(:, :), POINTER        :: first_sgfa, first_sgfb
-    LOGICAL                                  :: failure, found, &
-                                                my_minimum_image, my_soft, &
-                                                new_atom_b
+    LOGICAL                                  :: found, my_minimum_image, &
+                                                my_soft, new_atom_b
     REAL(KIND=dp)                            :: dab, Lxo2, Lyo2, Lzo2, rab2
     REAL(KIND=dp), DIMENSION(3)              :: ra, rab, rac, rb, rbc
     REAL(KIND=dp), DIMENSION(:), POINTER     :: set_radius_a, set_radius_b
@@ -1184,7 +1151,6 @@ CONTAINS
 
     CALL timeset(routineN,handle)
 
-    failure = .FALSE.
     NULLIFY (qs_kind, qs_kind_set)
     NULLIFY (cell, particle_set)
     NULLIFY (sab_orb)
@@ -1193,13 +1159,12 @@ CONTAINS
     NULLIFY (set_radius_a,set_radius_b,rpgfa, rpgfb, sphi_a,sphi_b,zeta, zetb )
 
     CALL get_qs_env(qs_env=qs_env, qs_kind_set=qs_kind_set,&
-         cell=cell,particle_set=particle_set,sab_orb=sab_orb,&
-         error=error)
+         cell=cell,particle_set=particle_set,sab_orb=sab_orb)
 
     nkind = SIZE(qs_kind_set)
 
     CALL get_qs_kind_set(qs_kind_set=qs_kind_set,&
-                             maxco=ldwork, maxlgto=maxl )
+                             maxco=ldwork, maxlgto=maxl)
 
     my_minimum_image = .FALSE.
     IF(PRESENT(minimum_image)) THEN
@@ -1216,26 +1181,22 @@ CONTAINS
     ldab = ldwork
 
     M_dim = ncoset(order)-1
-    CPPostcondition(M_dim<=SIZE(op,1),cp_failure_level,routineP,error,failure)
+    CPASSERT(M_dim<=SIZE(op,1))
 
-    ALLOCATE(mab(ldab,ldab,M_dim),STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(mab(ldab,ldab,M_dim))
     mab(1:ldab,1:ldab,1:M_dim) = 0.0_dp
-    ALLOCATE(work(ldwork,ldwork),STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(work(ldwork,ldwork))
     work(1:ldwork,1:ldwork) = 0.0_dp
-    ALLOCATE (op_dip(M_dim),STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (op_dip(M_dim))
 
     DO imom = 1, M_dim
       NULLIFY (op_dip(imom)%block)
     END DO
 
-    ALLOCATE (basis_set_list(nkind),STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (basis_set_list(nkind))
     DO ikind=1,nkind
       qs_kind => qs_kind_set(ikind)
-      CALL get_qs_kind(qs_kind=qs_kind,softb=my_soft,orb_basis_set=basis_set_a)
+      CALL get_qs_kind(qs_kind=qs_kind,softb=my_soft,basis_set=basis_set_a)
       IF (ASSOCIATED(basis_set_a)) THEN
         basis_set_list(ikind)%gto_basis_set => basis_set_a
       ELSE
@@ -1303,7 +1264,7 @@ CONTAINS
             NULLIFY(op_dip(imom)%block)
             CALL cp_dbcsr_get_block_p(matrix=op(imom)%matrix,&
                  row=irow,col=icol,block=op_dip(imom)%block,found=found)
-            CPPostcondition(ASSOCIATED(op_dip(imom)%block),cp_failure_level,routineP,error,failure)
+            CPASSERT(ASSOCIATED(op_dip(imom)%block))
          END DO   ! imom
        END IF  ! new_atom_b
 
@@ -1366,11 +1327,9 @@ CONTAINS
     DO i = 1,3
        NULLIFY(op_dip(i)%block)
     END DO
-    DEALLOCATE(op_dip, STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(op_dip)
 
-    DEALLOCATE(mab,work,basis_set_list,STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(mab,work,basis_set_list)
 
     CALL timestop(handle)
 
@@ -1407,8 +1366,6 @@ CONTAINS
 !> \param order maximum order of the momentum, for the dipole order = 1
 !> \param minimum_image take into account only the first neighbors in the lists
 !> \param soft ...
-!> \param error variable to control error logging, stopping,...
-!>        see module cp_error_handling
 !> \par History
 !>      03.2006 created [MI]
 !> \author MI
@@ -1418,7 +1375,7 @@ CONTAINS
 !>      The elements of the  sparse matrices are the integrals in the
 !>      basis functions
 ! *****************************************************************************
-  SUBROUTINE rRc_xyz_der_ao(op,op_der,qs_env,rc,order,minimum_image,soft,error)
+  SUBROUTINE rRc_xyz_der_ao(op,op_der,qs_env,rc,order,minimum_image,soft)
 
     TYPE(cp_dbcsr_p_type), DIMENSION(:), &
       POINTER                                :: op
@@ -1428,22 +1385,21 @@ CONTAINS
     REAL(dp)                                 :: Rc(3)
     INTEGER, INTENT(IN)                      :: order
     LOGICAL, INTENT(IN), OPTIONAL            :: minimum_image, soft
-    TYPE(cp_error_type), INTENT(inout)       :: error
 
     CHARACTER(len=*), PARAMETER :: routineN = 'rRc_xyz_der_ao', &
       routineP = moduleN//':'//routineN
 
     INTEGER :: handle, i, iatom, icol, idir, ikind, imom, inode, ipgf, irow, &
-      iset, istat, j, jatom, jkind, jpgf, jset, last_jatom, lda_min, ldab, &
-      ldb_min, ldsa, ldsb, ldwork, M_dim, maxl, na, nb, ncoa, ncob, nda, ndb, &
-      nkind, nseta, nsetb, sgfa, sgfb
+      iset, j, jatom, jkind, jpgf, jset, last_jatom, lda_min, ldab, ldb_min, &
+      ldsa, ldsb, ldwork, M_dim, maxl, na, nb, ncoa, ncob, nda, ndb, nkind, &
+      nseta, nsetb, sgfa, sgfb
     INTEGER, DIMENSION(:), POINTER           :: la_max, la_min, lb_max, &
                                                 lb_min, npgfa, npgfb, nsgfa, &
                                                 nsgfb
     INTEGER, DIMENSION(:, :), POINTER        :: first_sgfa, first_sgfb
-    LOGICAL                                  :: failure, my_minimum_image, &
-                                                my_soft, new_atom_b, &
-                                                op_der_found, op_found
+    LOGICAL                                  :: my_minimum_image, my_soft, &
+                                                new_atom_b, op_der_found, &
+                                                op_found
     REAL(KIND=dp)                            :: alpha, alpha_der, dab, Lxo2, &
                                                 Lyo2, Lzo2, rab2
     REAL(KIND=dp), DIMENSION(3)              :: ra, rab, rac, rb, rbc
@@ -1461,8 +1417,7 @@ CONTAINS
     TYPE(cell_type), POINTER                 :: cell
     TYPE(gto_basis_set_p_type), &
       DIMENSION(:), POINTER                  :: basis_set_list
-    TYPE(gto_basis_set_type), POINTER        :: basis_set_a, basis_set_b, &
-                                                orb_basis_set
+    TYPE(gto_basis_set_type), POINTER        :: basis_set_a, basis_set_b
     TYPE(neighbor_list_iterator_p_type), &
       DIMENSION(:), POINTER                  :: nl_iterator
     TYPE(neighbor_list_set_p_type), &
@@ -1475,16 +1430,15 @@ CONTAINS
 
     CALL timeset(routineN,handle)
 
-    failure = .FALSE.
-    CPPostcondition(ASSOCIATED(op),cp_failure_level,routineP,error,failure)
-    CPPostcondition(ASSOCIATED(op_der),cp_failure_level,routineP,error,failure)
+    CPASSERT(ASSOCIATED(op))
+    CPASSERT(ASSOCIATED(op_der))
     !IF(.NOT.op_sm_der(1,1)%matrix%symmetry=="none") THEN
     IF(.NOT.cp_dbcsr_get_matrix_type(op_der(1,1)%matrix).EQ.dbcsr_type_no_symmetry) THEN
-       CPPostcondition(.FALSE.,cp_failure_level,routineP,error,failure)
+       CPABORT("")
     END IF
 
     NULLIFY (qs_kind, qs_kind_set)
-    NULLIFY (cell, particle_set, orb_basis_set)
+    NULLIFY (cell, particle_set)
     NULLIFY (sab_all)
     NULLIFY (difmab, mab, mab_tmp)
     NULLIFY (op_dip, op_dip_der, work)
@@ -1493,12 +1447,12 @@ CONTAINS
 
     CALL get_qs_env(qs_env=qs_env, qs_kind_set=qs_kind_set,&
          cell=cell,particle_set=particle_set,&
-         sab_all=sab_all,error=error)
+         sab_all=sab_all)
 
     nkind = SIZE(qs_kind_set)
 
     CALL get_qs_kind_set(qs_kind_set=qs_kind_set,&
-                             maxco=ldwork, maxlgto=maxl )
+                             maxco=ldwork, maxlgto=maxl)
 
     my_minimum_image = .FALSE.
     IF(PRESENT(minimum_image)) THEN
@@ -1515,22 +1469,17 @@ CONTAINS
     ldab = ldwork
 
     M_dim = ncoset(order)-1
-    CPPostcondition(M_dim<=SIZE(op,1),cp_failure_level,routineP,error,failure)
+    CPASSERT(M_dim<=SIZE(op,1))
 
-    ALLOCATE(mab(ldab,ldab,M_dim),STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(mab(ldab,ldab,M_dim))
     mab(1:ldab,1:ldab,1:M_dim) = 0.0_dp
-    ALLOCATE(difmab(ldab,ldab,M_dim,3),STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(difmab(ldab,ldab,M_dim,3))
     difmab(1:ldab,1:ldab,1:M_dim,1:3) = 0.0_dp
 
-    ALLOCATE(work(ldwork,ldwork),STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE(work(ldwork,ldwork))
     work(1:ldwork,1:ldwork) = 0.0_dp
-    ALLOCATE (op_dip(M_dim),STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
-    ALLOCATE (op_dip_der(M_dim,3),STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (op_dip(M_dim))
+    ALLOCATE (op_dip_der(M_dim,3))
 
     DO imom = 1, M_dim
        NULLIFY (op_dip(imom)%block)
@@ -1539,11 +1488,10 @@ CONTAINS
        END DO
     END DO
 
-    ALLOCATE (basis_set_list(nkind),STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    ALLOCATE (basis_set_list(nkind))
     DO ikind=1,nkind
       qs_kind => qs_kind_set(ikind)
-      CALL get_qs_kind(qs_kind=qs_kind,softb=my_soft,orb_basis_set=basis_set_a)
+      CALL get_qs_kind(qs_kind=qs_kind,softb=my_soft,basis_set=basis_set_a)
       IF (ASSOCIATED(basis_set_a)) THEN
         basis_set_list(ikind)%gto_basis_set => basis_set_a
       ELSE
@@ -1612,14 +1560,14 @@ CONTAINS
                                     row=irow, col=icol,&
                                     block=op_dip(imom)%block,&
                                     found=op_found)
-CPPostcondition(op_found.and.ASSOCIATED(op_dip(imom)%block),cp_failure_level,routineP,error,failure)
+CPASSERT(op_found.and.ASSOCIATED(op_dip(imom)%block))
             DO idir = 1,3
               NULLIFY(op_dip_der(imom,idir)%block)
               CALL cp_dbcsr_get_block_p (matrix=op_der(imom,idir)%matrix,&
                                       row=irow, col=icol,&
                                       block=op_dip_der(imom,idir)%block,&
                                       found=op_der_found)
-CPPostcondition(op_der_found.and.ASSOCIATED(op_dip_der(imom,idir)%block),cp_failure_level,routineP,error,failure)
+CPASSERT(op_der_found.and.ASSOCIATED(op_dip_der(imom,idir)%block))
            END DO  ! idir
          END DO   ! imom
        END IF  ! new_atom_b
@@ -1645,8 +1593,7 @@ CPPostcondition(op_der_found.and.ASSOCIATED(op_dip_der(imom,idir)%block),cp_fail
 !                  rbc = pbc(rc,rb,cell)
 
              ALLOCATE(mab_tmp(npgfa(iset)*ncoset(la_max(iset)+1),&
-                      npgfb(jset)*ncoset(lb_max(jset)+1),ncoset(order)-1),STAT=istat)
-             CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+                      npgfb(jset)*ncoset(lb_max(jset)+1),ncoset(order)-1))
 
              lda_min = MAX ( 0, la_min(iset)-1)
              ldb_min = MAX ( 0, lb_min(jset)-1)
@@ -1708,8 +1655,7 @@ CPPostcondition(op_der_found.and.ASSOCIATED(op_dip_der(imom,idir)%block),cp_fail
 
              END DO  ! imom
 
-             DEALLOCATE(mab_tmp,STAT=istat)
-             CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+             DEALLOCATE(mab_tmp)
            END IF  !  >= dab
 
          END DO ! jset
@@ -1722,11 +1668,9 @@ CPPostcondition(op_der_found.and.ASSOCIATED(op_dip_der(imom,idir)%block),cp_fail
     DO i = 1,3
        NULLIFY(op_dip(i)%block)
     END DO
-    DEALLOCATE(op_dip,op_dip_der, STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(op_dip,op_dip_der)
 
-    DEALLOCATE(mab,difmab,work,basis_set_list,STAT=istat)
-    CPPostcondition(istat==0,cp_failure_level,routineP,error,failure)
+    DEALLOCATE(mab,difmab,work,basis_set_list)
 
     CALL timestop(handle)
 
