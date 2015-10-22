@@ -500,6 +500,7 @@ CONTAINS
     TYPE(pw_pool_type), POINTER              :: auxbas_pw_pool
     TYPE(qs_energy_type), POINTER            :: energy
     TYPE(section_vals_type), POINTER         :: input, rest_b_section
+    REAL(KIND = dp)                          :: strength
 
     NULLIFY(atprop, energy, pw_env)
     CALL timeset(routineN,handle)
@@ -541,14 +542,18 @@ CONTAINS
        CALL qs_ks_update_qs_env(qs_env, calculate_forces=.FALSE., just_energy=.TRUE.)
        qs_env%et_coupling%first_run=.FALSE.
        IF(dft_control%qs_control%ddapc_restraint)THEN
+          strength = dft_control%qs_control%ddapc_restraint_control(1)%ddapc_restraint_control%strength
           rest_b_section =>  section_vals_get_subs_vals(input,"PROPERTIES%ET_COUPLING%DDAPC_RESTRAINT_B")
           CALL read_ddapc_section(qs_control=dft_control%qs_control,&
                                   ddapc_restraint_section=rest_b_section)
+          dft_control%qs_control%ddapc_restraint_control(1)%ddapc_restraint_control%strength = -strength
        END IF
        IF(dft_control%qs_control%becke_restraint)THEN
+          strength = dft_control%qs_control%becke_control%strength
           rest_b_section => section_vals_get_subs_vals(input,"PROPERTIES%ET_COUPLING%BECKE_RESTRAINT_B")
           CALL read_becke_section(qs_control=dft_control%qs_control,&
                                      becke_section=rest_b_section)
+          dft_control%qs_control%becke_control%strength = -strength
        END IF
        CALL scf(qs_env=qs_env)
        qs_env%et_coupling%keep_matrix=.TRUE.
