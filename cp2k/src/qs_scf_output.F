@@ -483,7 +483,7 @@ CONTAINS
        END IF
       IF (qmmm) THEN
           IF(qs_env%qmmm_env_qm%image_charge) THEN
-            CALL print_image_coefficients(qs_env%image_coeff,qs_env,error)
+            CALL print_image_coefficients(qs_env%image_coeff,qs_env)
           ENDIF
        ENDIF
        CALL m_flush(output_unit)
