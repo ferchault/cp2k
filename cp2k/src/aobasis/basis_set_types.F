@@ -1869,6 +1869,7 @@ CONTAINS
                      orb_basis_set%norm_cgf(icgf)*&
                      orb_basis_set%gcc(ipgf,ishell,iset),&
                      ipgf=1,orb_basis_set%npgf(iset))
+               PRINT * , "info ", orb_basis_set%name, iset, ishell, orb_basis_set%cgf_symbol(icgf)
              END DO
           END DO
        END DO

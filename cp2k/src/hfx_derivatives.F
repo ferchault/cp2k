@@ -298,7 +298,6 @@ MODULE hfx_derivatives
 
     !! get force array
     CALL get_qs_env(qs_env=qs_env, force=force, virial=virial)
-
     my_adiabatic_rescale_factor = 1.0_dp
     IF(PRESENT(adiabatic_rescale_factor)) THEN
       my_adiabatic_rescale_factor = adiabatic_rescale_factor
@@ -424,7 +423,6 @@ MODULE hfx_derivatives
     max_set = basis_info%max_set
     max_am = basis_info%max_am
     natom = SIZE(particle_set,1)
-
     treat_forces_in_core = memory_parameter%treat_forces_in_core
 
     hf_fraction = general_parameter%fraction
@@ -1330,8 +1328,8 @@ MODULE hfx_derivatives
                                ede_work,ede_work2,ede_work_forces, &
                                ede_buffer1,ede_buffer2,ede_primitives_tmp, &
                                nimages,do_periodic,use_virial, ede_work_virial, ede_work2_virial, &
-                               ede_primitives_tmp_virial, primitive_forces_virial, cartesian_estimate_virial)
-
+                               ede_primitives_tmp_virial, primitive_forces_virial, cartesian_estimate_virial)                 
+                  
                   nints = nsgfa(iset)*nsgfb(jset)*nsgfc(kset)*nsgfd(lset)*12
                   neris_total = neris_total + nints
                   nprim_ints = nprim_ints + neris_tmp
@@ -1454,35 +1452,42 @@ MODULE hfx_derivatives
                                                   atomic_offset_ad, atomic_offset_ac,is_anti_symmetric)
                   ENDIF
                 END IF
+                
+                
                 IF( spherical_estimate*pmax_entry >= eps_schwarz ) THEN
                   DO coord = 1,12
                     T2 => primitive_forces((coord-1)*nsgfa(iset)*nsgfb(jset)*nsgfc(kset)*nsgfd(lset)+1:&
                                             coord*nsgfa(iset)*nsgfb(jset)*nsgfc(kset)*nsgfd(lset))
-
+                  
                     IF(with_mp2_density) THEN
+
                       CALL update_forces(nsgfa(iset), nsgfb(jset), nsgfc(kset), nsgfd(lset), &
                                          pbd_buf, pbc_buf, pad_buf, pac_buf, fac, &
                                          T2, force, forces_map, coord,&
-                                         pbd_buf_mp2, pbc_buf_mp2, pad_buf_mp2, pac_buf_mp2)
+                                         pbd_mp2=pbd_buf_mp2, pbc_mp2=pbc_buf_mp2, pad_mp2=pad_buf_mp2, pac_mp2=pac_buf_mp2)
                     ELSE
                       CALL update_forces(nsgfa(iset), nsgfb(jset), nsgfc(kset), nsgfd(lset), &
                                          pbd_buf, pbc_buf, pad_buf, pac_buf, fac, &
-                                         T2, force, forces_map, coord)
+                                         T2, force, forces_map, coord,&
+                                         aatom=iatom, batom=jatom, catom=katom, datom=latom,&
+                                         aset=iset, bset=jset, cset=kset, dset=lset, spin_channel=nspins)
                     END IF
                     IF( nspins == 2 ) THEN
                       IF(with_mp2_density) THEN
                          CALL update_forces(nsgfa(iset), nsgfb(jset), nsgfc(kset), nsgfd(lset), &
                                             pbd_buf_beta, pbc_buf_beta, pad_buf_beta, pac_buf_beta, &
                                             fac, T2, force, forces_map, coord,&
-                                            pbd_buf_mp2_beta, pbc_buf_mp2_beta,&
-                                            pad_buf_mp2_beta, pac_buf_mp2_beta)
+                                            pbd_mp2=pbd_buf_mp2_beta, pbc_mp2=pbc_buf_mp2_beta,&
+                                            pad_mp2=pad_buf_mp2_beta, pac_mp2=pac_buf_mp2_beta)
                       ELSE
                          CALL update_forces(nsgfa(iset), nsgfb(jset), nsgfc(kset), nsgfd(lset), &
                                             pbd_buf_beta, pbc_buf_beta, pad_buf_beta, pac_buf_beta, fac, &
-                                            T2, force, forces_map, coord)
+                                            T2, force, forces_map, coord,&
+                                            aatom=iatom, batom=jatom, catom=katom, datom=latom,&
+                                            aset=iset, bset=jset, cset=kset, dset=lset, spin_channel=nspins)
                       ENDIF
                     END IF
-                  END DO !coord
+                  END DO !coord            
                 END IF
                 IF (use_virial .AND. spherical_estimate_virial*pmax_entry >=eps_schwarz ) THEN
                   DO coord = 1,12
@@ -1759,6 +1764,10 @@ MODULE hfx_derivatives
 !$OMP END PARALLEL
 
     CALL timestop(handle)
+    
+    DO i = 1, nkind
+     PRINT *, "total_force " , i, force(i)%fock_4c(:,:)
+    END DO
 
   END SUBROUTINE derivatives_four_center
 
@@ -2220,7 +2229,9 @@ MODULE hfx_derivatives
   SUBROUTINE update_forces(ma_max, mb_max, mc_max, md_max, &
                            pbd, pbc, pad, pac, fac, &
                            prim, force, forces_map, coord, &
-                           pbd_mp2, pbc_mp2, pad_mp2, pac_mp2)
+                           pbd_mp2, pbc_mp2, pad_mp2, pac_mp2, &
+                           aatom, batom, catom, datom, &
+                           aset, bset, cset, dset, spin_channel)
 
     INTEGER, INTENT(IN)                      :: ma_max, mb_max, mc_max, md_max
     REAL(dp), DIMENSION(*), INTENT(IN)       :: pbd, pbc, pad, pac
@@ -2238,6 +2249,21 @@ MODULE hfx_derivatives
     LOGICAL                                  :: with_mp2_density
     REAL(dp)                                 :: temp1, temp1_mp2, temp2, &
                                                 temp3, temp3_mp2, temp4
+        
+    INTEGER , INTENT(IN), OPTIONAL           :: spin_channel, aset, bset, cset,&
+                                                dset, aatom, batom, catom,&
+                                                datom
+    LOGICAL                                  :: do_print
+    do_print = .FALSE.
+    IF (PRESENT(spin_channel) .AND.&
+        PRESENT(aset) .AND.&
+        PRESENT(bset) .AND.&
+        PRESENT(cset) .AND.&
+        PRESENT(dset) .AND.&
+        PRESENT(aatom) .AND.&
+        PRESENT(batom) .AND.&
+       PRESENT(catom) .AND.&
+        PRESENT(datom)) do_print=.TRUE.
 
     with_mp2_density=.FALSE.
     IF(PRESENT(pbd_mp2).AND.&
@@ -2283,7 +2309,19 @@ MODULE hfx_derivatives
               p_index = p_index + 1
               temp2 = temp1 * pad((md-1)*ma_max+ma) + &
                       temp3 * pac((mc-1)*ma_max+ma)
-              temp4 = temp4 + temp2 * prim(p_index)
+              temp2 = temp2 * prim(p_index) !just to save calculating this twice
+              temp4 = temp4 + temp2
+              
+              !START OF PRINTING OF FORCES
+              !Atom number, set, coord, m_max , m  spin_channel,
+              !temp2 (the force)
+              IF (do_print) THEN
+                PRINT * , "forces ", aatom, batom, catom, datom, &
+                          aset, bset, cset, dset, &
+                          ma_max, mb_max, mc_max, md_max, &
+                          ma, mb, mc, md, &
+                          coord, spin_channel, temp2
+              END IF
             END DO !ma
           END DO !mb
         END DO !mc
@@ -2294,7 +2332,7 @@ MODULE hfx_derivatives
     force(forces_map((coord-1)/3 + 1,1))%fock_4c(MOD(coord-1,3) + 1, &
           forces_map((coord-1)/3 + 1,2)) = &
     force(forces_map((coord-1)/3 + 1,1))%fock_4c(MOD(coord-1,3) + 1, &
-          forces_map((coord-1)/3 + 1,2)) - &
+          forces_map((coord-2)/3 + 1,2)) - &
           temp4
 
   END SUBROUTINE update_forces
