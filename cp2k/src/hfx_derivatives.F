@@ -25,6 +25,9 @@ MODULE hfx_derivatives
                                              cp_print_key_finished_output,&
                                              cp_print_key_should_output,&
                                              cp_print_key_unit_nr
+  USE cp_log_handling,                 ONLY: cp_get_default_logger,&
+                                             cp_logger_get_default_unit_nr,&
+                                             cp_logger_type
   USE cp_para_types,                   ONLY: cp_para_env_type
   USE gamma,                           ONLY: init_md_ftable
   USE hfx_communication,               ONLY: get_full_density
@@ -1470,7 +1473,7 @@ MODULE hfx_derivatives
                                          pbd_buf, pbc_buf, pad_buf, pac_buf, fac, &
                                          T2, force, forces_map, coord,&
                                          aatom=iatom, batom=jatom, catom=katom, datom=latom,&
-                                         aset=iset, bset=jset, cset=kset, dset=lset, spin_channel=nspins)
+                                         aset=iset, bset=jset, cset=kset, dset=lset, spin_channel=1,ilogger=logger)
                     END IF
                     IF( nspins == 2 ) THEN
                       IF(with_mp2_density) THEN
@@ -1484,7 +1487,7 @@ MODULE hfx_derivatives
                                             pbd_buf_beta, pbc_buf_beta, pad_buf_beta, pac_buf_beta, fac, &
                                             T2, force, forces_map, coord,&
                                             aatom=iatom, batom=jatom, catom=katom, datom=latom,&
-                                            aset=iset, bset=jset, cset=kset, dset=lset, spin_channel=nspins)
+                                            aset=iset, bset=jset, cset=kset, dset=lset, spin_channel=2, ilogger=logger)
                       ENDIF
                     END IF
                   END DO !coord            
@@ -2231,7 +2234,7 @@ MODULE hfx_derivatives
                            prim, force, forces_map, coord, &
                            pbd_mp2, pbc_mp2, pad_mp2, pac_mp2, &
                            aatom, batom, catom, datom, &
-                           aset, bset, cset, dset, spin_channel)
+                           aset, bset, cset, dset, spin_channel,ilogger)
 
     INTEGER, INTENT(IN)                      :: ma_max, mb_max, mc_max, md_max
     REAL(dp), DIMENSION(*), INTENT(IN)       :: pbd, pbc, pad, pac
@@ -2254,6 +2257,8 @@ MODULE hfx_derivatives
                                                 dset, aatom, batom, catom,&
                                                 datom
     LOGICAL                                  :: do_print
+    TYPE(cp_logger_type) ,OPTIONAL, POINTER :: ilogger
+
     do_print = .FALSE.
     IF (PRESENT(spin_channel) .AND.&
         PRESENT(aset) .AND.&
@@ -2316,23 +2321,22 @@ MODULE hfx_derivatives
               !Atom number, set, coord, m_max , m  spin_channel,
               !temp2 (the force)
               IF (do_print) THEN
-                PRINT * , "forces ", aatom, batom, catom, datom, &
+               WRITE(unit=cp_logger_get_default_unit_nr(ilogger,local=.TRUE.))&
+                           "forces ", aatom, batom, catom, datom, &
                           aset, bset, cset, dset, &
-                          ma_max, mb_max, mc_max, md_max, &
                           ma, mb, mc, md, &
-                          coord, spin_channel, temp2
+                          spin_channel, coord, temp2
               END IF
             END DO !ma
           END DO !mb
         END DO !mc
       END DO !md
     END IF
-
 !$OMP ATOMIC
     force(forces_map((coord-1)/3 + 1,1))%fock_4c(MOD(coord-1,3) + 1, &
           forces_map((coord-1)/3 + 1,2)) = &
     force(forces_map((coord-1)/3 + 1,1))%fock_4c(MOD(coord-1,3) + 1, &
-          forces_map((coord-2)/3 + 1,2)) - &
+          forces_map((coord-1)/3 + 1,2)) - &
           temp4
 
   END SUBROUTINE update_forces
