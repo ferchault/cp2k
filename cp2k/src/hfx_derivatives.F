@@ -1769,7 +1769,8 @@ MODULE hfx_derivatives
     CALL timestop(handle)
     
     DO i = 1, nkind
-      WRITE(unit=cp_logger_get_default_unit_nr(local=.TRUE.),fmt=*) "total_force " , i, force(i)%fock_4c(:,:)
+      WRITE(unit=cp_logger_get_default_unit_nr(local=.TRUE.),fmt='(A,i0,*(ES20.12,1X))') &
+           "total_force " , i, force(i)%fock_4c(:,:)
     END DO
 
   END SUBROUTINE derivatives_four_center
@@ -2321,8 +2322,9 @@ MODULE hfx_derivatives
               !Atom number, set, coord, m_max , m  spin_channel,
               !temp2 (the force)
               IF (do_print) THEN
-               WRITE(unit=cp_logger_get_default_unit_nr(local=.TRUE.),fmt=*)&
-                           "forces ", aatom, batom, catom, datom, &
+               WRITE(unit=cp_logger_get_default_unit_nr(local=.TRUE.),&
+                          FMT='(A,14(1X,i0),ES20.12)')&
+                           "forces", aatom, batom, catom, datom, &
                           aset, bset, cset, dset, &
                           ma, mb, mc, md, &
                           spin_channel, coord, temp2
@@ -2444,3 +2446,9 @@ MODULE hfx_derivatives
 #include "hfx_get_pmax_val.f90"
 
 END MODULE hfx_derivatives
+
+
+
+
+
+
