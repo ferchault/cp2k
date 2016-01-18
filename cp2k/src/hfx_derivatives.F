@@ -2324,11 +2324,11 @@ MODULE hfx_derivatives
               IF (do_print) THEN
                 IF (abs(temp2) >= 10.0**(-9.0) ) THEN
                 WRITE(unit=cp_logger_get_default_unit_nr(local=.TRUE.),&
-                            FMT='(A,14(1X,i0))')&
+                            FMT='(A,14(1X,i0),ES20.12)')&
                            "F", aatom, batom, catom, datom, &
                             aset, bset, cset, dset, &
                             ma, mb, mc, md, &
-                            spin_channel, coord
+                            spin_channel, coord, temp2 
                 END IF
               END IF
             END DO !ma
