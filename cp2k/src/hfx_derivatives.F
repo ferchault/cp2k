@@ -2322,7 +2322,7 @@ MODULE hfx_derivatives
               !Atom number, set, coord, m_max , m  spin_channel,
               !temp2 (the force)
               IF (do_print) THEN
-                IF (temp2 <= 10.0**(-10.0) ) THEN
+                IF (abs(temp2) >= 10.0**(-9.0) ) THEN
                 WRITE(unit=cp_logger_get_default_unit_nr(local=.TRUE.),&
                             FMT='(A,14(1X,i0))')&
                            "F", aatom, batom, catom, datom, &
